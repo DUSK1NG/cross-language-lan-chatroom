@@ -1,21 +1,28 @@
 package main
 
 import (
-	"fmt"
+	"errors"
+	"io"
 	"log"
 	"net"
 )
 
-func handleConnection(conn net.Conn, registry *ClientRegistry) {
+func handleConnection(conn net.Conn, hub *Hub) {
 	remoteAddress := conn.RemoteAddr().String()
-	log.Printf("Client connected: %s", remoteAddress)
+	log.Printf("client connected: %s", remoteAddress)
 
+	var client *Client
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			log.Printf("client handler panic for %s: %v", remoteAddress, recovered)
 		}
-		_ = conn.Close()
-		log.Printf("Client disconnected: %s", remoteAddress)
+
+		if client != nil {
+			client.closeConnection()
+		} else {
+			_ = conn.Close()
+		}
+		log.Printf("client disconnected: %s", remoteAddress)
 	}()
 
 	loginMessage, err := receiveMessage(conn)
@@ -43,15 +50,7 @@ func handleConnection(conn net.Conn, registry *ClientRegistry) {
 		return
 	}
 
-	username := loginMessage.Username
-	registry.Add(conn, username)
-	defer func() {
-		registry.Remove(conn)
-		log.Printf("Active clients: %d", registry.Count())
-	}()
-
-	fmt.Printf("Login username: %s\n", username)
-	log.Printf("Active clients: %d", registry.Count())
+	client = newClient(conn, loginMessage.Username)
 	if err := sendMessage(conn, Message{
 		Type:    "login_ok",
 		Content: "Login successful",
@@ -60,37 +59,70 @@ func handleConnection(conn net.Conn, registry *ClientRegistry) {
 		return
 	}
 
-	chatMessage, err := receiveMessage(conn)
-	if err != nil {
-		log.Printf("failed to receive chat message from %s: %v", remoteAddress, err)
-		_ = sendMessage(conn, Message{
-			Type:    "error",
-			Content: "Invalid JSON message",
-		})
-		return
-	}
-	if chatMessage.Type != "chat" {
-		_ = sendMessage(conn, Message{
-			Type:    "error",
-			Content: "Expected chat message",
-		})
-		return
-	}
-	if err := validateMessage(chatMessage); err != nil {
-		log.Printf("invalid chat message from %s: %v", remoteAddress, err)
-		_ = sendMessage(conn, Message{
-			Type:    "error",
-			Content: "Invalid chat content",
-		})
-		return
-	}
+	go client.writePump()
+	hub.Register <- client
+	log.Printf("user logged in: %s", client.Username)
 
-	fmt.Printf("Chat from %s: %s\n", username, chatMessage.Content)
-	if err := sendMessage(conn, Message{
-		Type:     "chat",
-		Username: username,
-		Content:  chatMessage.Content,
-	}); err != nil {
-		log.Printf("failed to send chat response to %s: %v", remoteAddress, err)
+	client.readPump(hub)
+}
+
+func (c *Client) readPump(hub *Hub) {
+	defer func() {
+		hub.Unregister <- c
+	}()
+
+	for {
+		message, err := receiveMessage(c.Conn)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				log.Printf("failed to receive message from %s: %v", c.Username, err)
+			}
+			return
+		}
+
+		if message.Type != "chat" {
+			if !c.enqueue(Message{
+				Type:    "error",
+				Content: "Expected chat message",
+			}) {
+				return
+			}
+			continue
+		}
+		if err := validateMessage(message); err != nil {
+			log.Printf("invalid chat message from %s: %v", c.Username, err)
+			if !c.enqueue(Message{
+				Type:    "error",
+				Content: "Invalid chat content",
+			}) {
+				return
+			}
+			continue
+		}
+
+		// 用户名始终取自当前连接，忽略客户端在 chat 消息中携带的值。
+		message.Username = c.Username
+		hub.Broadcast <- message
+	}
+}
+
+func (c *Client) writePump() {
+	for message := range c.Send {
+		if err := sendMessage(c.Conn, message); err != nil {
+			log.Printf("failed to send message to %s: %v", c.Username, err)
+			c.closeConnection()
+			return
+		}
+	}
+}
+
+func (c *Client) enqueue(message Message) bool {
+	select {
+	case c.Send <- message:
+		return true
+	default:
+		log.Printf("send buffer is full for %s", c.Username)
+		c.closeConnection()
+		return false
 	}
 }

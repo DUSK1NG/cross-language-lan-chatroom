@@ -15,7 +15,8 @@ func main() {
 	defer listener.Close()
 
 	log.Printf("listening on %s", listenAddress)
-	registry := NewClientRegistry()
+	hub := NewHub()
+	go hub.Run()
 
 	for {
 		conn, err := listener.Accept()
@@ -24,6 +25,6 @@ func main() {
 			continue
 		}
 
-		go handleConnection(conn, registry)
+		go handleConnection(conn, hub)
 	}
 }
