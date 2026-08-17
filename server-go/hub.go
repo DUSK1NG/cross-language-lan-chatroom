@@ -10,6 +10,7 @@ import (
 const clientSendBufferSize = 16
 
 var ErrUserCodeAlreadyUsed = errors.New("user code already exists")
+var errRegisterRequestMissingIdentity = errors.New("register request requires user code identity")
 
 type RegisterRequest struct {
 	Client *Client
@@ -60,7 +61,7 @@ func (c *Client) closeSend() {
 // Clients、ActiveCodes 和 UsedCodes 只能由 Run goroutine 访问。
 type Hub struct {
 	Clients     map[*Client]bool
-	Register    chan any
+	Register    chan RegisterRequest
 	Unregister  chan *Client
 	Broadcast   chan Message
 	ActiveCodes map[string]*Client
@@ -70,7 +71,7 @@ type Hub struct {
 func NewHub() *Hub {
 	return &Hub{
 		Clients:     make(map[*Client]bool),
-		Register:    make(chan any),
+		Register:    make(chan RegisterRequest),
 		Unregister:  make(chan *Client),
 		Broadcast:   make(chan Message),
 		ActiveCodes: make(map[string]*Client),
@@ -82,17 +83,8 @@ func NewHub() *Hub {
 func (h *Hub) Run() {
 	for {
 		select {
-		case event := <-h.Register:
-			switch request := event.(type) {
-			case RegisterRequest:
-				h.handleRegisterRequest(request)
-			case *Client:
-				h.handleRegisterRequest(RegisterRequest{Client: request})
-			case nil:
-				continue
-			default:
-				log.Printf("unsupported register event type: %T", event)
-			}
+		case request := <-h.Register:
+			h.handleRegisterRequest(request)
 
 		case client := <-h.Unregister:
 			h.unregisterClient(client, true)
@@ -116,20 +108,22 @@ func (h *Hub) Run() {
 func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 	client := request.Client
 	if client == nil {
-		h.respondRegister(request.Result, nil)
+		h.respondRegister(request.Result, errRegisterRequestMissingIdentity)
 		return
 	}
 
-	if client.NormalizedCode != "" {
-		if _, used := h.UsedCodes[client.NormalizedCode]; used {
-			h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
-			return
-		}
-
-		h.UsedCodes[client.NormalizedCode] = struct{}{}
-		h.ActiveCodes[client.NormalizedCode] = client
+	if client.UserCode == "" || client.NormalizedCode == "" {
+		h.respondRegister(request.Result, errRegisterRequestMissingIdentity)
+		return
 	}
 
+	if _, used := h.UsedCodes[client.NormalizedCode]; used {
+		h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
+		return
+	}
+
+	h.UsedCodes[client.NormalizedCode] = struct{}{}
+	h.ActiveCodes[client.NormalizedCode] = client
 	h.Clients[client] = true
 	h.broadcastSystemMessage(presenceMessage(client, "joined the chat"))
 	log.Printf("client registered: %s", client.Username)
@@ -197,9 +191,6 @@ func (h *Hub) respondRegister(result chan error, err error) {
 func presenceMessage(client *Client, suffix string) string {
 	if client == nil {
 		return ""
-	}
-	if client.UserCode == "" {
-		return client.Username + " " + suffix
 	}
 	return client.Username + "#" + client.UserCode + " " + suffix
 }

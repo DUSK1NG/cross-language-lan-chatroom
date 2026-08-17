@@ -85,3 +85,78 @@ ok  	_/C_/Users/jking1/Desktop/my-project/chat_X/server-go	1.283s
 ## Commit
 
 - `35f7c8e` — `feat: reserve user codes in hub`
+
+---
+
+## Fix round 1 (2026-08-17)
+
+### Additional modified files
+
+- `server-go/client.go`
+
+### Summary
+
+Tightened `Hub.Register` to the required `chan RegisterRequest`, removed the legacy `*Client` bypass and `chan any` type switch, required user-code identity on registration, removed the no-code presence-message fallback, and minimally adapted `client.go` to send `RegisterRequest` and wait for the registration result.
+
+### TDD evidence for fix round 1
+
+Command:
+
+```powershell
+$env:Path = 'C:\Users\jking1\go-sdk\go\bin;' + $env:Path
+$env:GO111MODULE = 'off'
+$env:GOCACHE = 'C:\Users\jking1\Desktop\my-project\chat_X\server-go\.go-build-cache'
+go test ./...
+```
+
+Output:
+
+```text
+2026/08/17 17:13:55 client registered: Alice
+2026/08/17 17:13:55 client registered: Alice
+2026/08/17 17:13:55 client unregistered: Alice
+2026/08/17 17:13:55 client registered: Alice
+2026/08/17 17:13:55 client registered: Alice
+--- FAIL: TestHubRejectsRegistrationWithoutNormalizedCode (0.00s)
+    hub_test.go:75: expected registration without normalized code to fail
+2026/08/17 17:13:55 client registered: Alice
+2026/08/17 17:13:55 client registered: Bob
+2026/08/17 17:13:55 client unregistered: Alice
+2026/08/17 17:13:55 client registered: Alice
+2026/08/17 17:13:55 client registered: Bob
+2026/08/17 17:13:55 client registered: Alice
+2026/08/17 17:13:55 client unregistered: Alice
+FAIL
+FAIL	_/C_/Users/jking1/Desktop/my-project/chat_X/server-go	0.286s
+FAIL
+```
+
+### Verification for fix round 1
+
+Command:
+
+```powershell
+$env:Path = 'C:\Users\jking1\go-sdk\go\bin;' + $env:Path
+$env:GO111MODULE = 'off'
+$env:GOCACHE = 'C:\Users\jking1\Desktop\my-project\chat_X\server-go\.go-build-cache'
+gofmt -w hub.go hub_test.go client.go
+go test ./...
+go test -race ./...
+go vet ./...
+```
+
+Output:
+
+```text
+ok  	_/C_/Users/jking1/Desktop/my-project/chat_X/server-go	0.259s
+ok  	_/C_/Users/jking1/Desktop/my-project/chat_X/server-go	1.291s
+```
+
+### Notes / concerns for fix round 1
+
+- `client.go` is now only minimally adapted to the strict registration request flow. Full wiring of login `UserCode` / `NormalizedCode` into `newClient` remains intentionally deferred to Task 3.
+- Until Task 3 lands, live login attempts through `handleConnection` will fail hub registration because the client created by `newClient(conn, username)` still lacks user-code identity. This round keeps the package correct against the tightened Hub contract without broadening scope beyond the allowed minimal adaptation.
+
+### Commit for fix round 1
+
+- `420e837` — `fix: tighten hub register contract`

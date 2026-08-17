@@ -60,7 +60,16 @@ func handleConnection(conn net.Conn, hub *Hub) {
 	}
 
 	go client.writePump()
-	hub.Register <- client
+	registerResult := make(chan error, 1)
+	hub.Register <- RegisterRequest{Client: client, Result: registerResult}
+	if err := <-registerResult; err != nil {
+		log.Printf("failed to register client %s: %v", client.Username, err)
+		_ = sendMessage(conn, Message{
+			Type:    "login_error",
+			Content: "Login failed",
+		})
+		return
+	}
 	log.Printf("user logged in: %s", client.Username)
 
 	client.readPump(hub)

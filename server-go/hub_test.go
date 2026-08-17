@@ -60,6 +60,22 @@ func TestHubBroadcastsJoinMessageOnFirstRegistration(t *testing.T) {
 	})
 }
 
+func TestHubRejectsRegistrationWithoutNormalizedCode(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	client := &Client{
+		Username: "Alice",
+		UserCode: "Alex2026",
+		Send:     make(chan Message, 8),
+	}
+
+	err := registerForTest(t, hub, client)
+	if err == nil {
+		t.Fatal("expected registration without normalized code to fail")
+	}
+}
+
 func TestHubBroadcastsLeaveMessageToRemainingClients(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
