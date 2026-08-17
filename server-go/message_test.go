@@ -293,3 +293,17 @@ func TestReceiveMessageRejectsWrongFieldType(t *testing.T) {
 		t.Fatal("expected wrong JSON field type to be rejected")
 	}
 }
+
+func TestReceiveMessageRejectsInvalidUTF8Payload(t *testing.T) {
+	var stream bytes.Buffer
+	payload := []byte(`{"type":"users_response","users":["`)
+	payload = append(payload, 0xff)
+	payload = append(payload, []byte(`"]}`)...)
+	if err := writeFrame(&stream, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := receiveMessage(&stream); err == nil {
+		t.Fatal("expected invalid UTF-8 payload to be rejected")
+	}
+}

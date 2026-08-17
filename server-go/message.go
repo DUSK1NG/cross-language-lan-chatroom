@@ -59,6 +59,9 @@ func receiveMessage(reader io.Reader) (Message, error) {
 	if err != nil {
 		return Message{}, fmt.Errorf("read message frame: %w", err)
 	}
+	if !utf8.Valid(payload) {
+		return Message{}, fmt.Errorf("message payload must be valid UTF-8")
+	}
 
 	var message Message
 	if err := json.Unmarshal(payload, &message); err != nil {
