@@ -264,7 +264,9 @@ git commit -m "feat: reserve user codes in hub"
 
 **Files:**
 - Modify: `server-go/client.go`
-- Test: `server-go/client_test.go`（如需新增连接流程测试）
+- Modify: `server-go/hub.go`（更新 `newClient` 构造函数签名）
+- Modify: `server-go/hub_test.go`（更新 Task 2 连接测试的 `login_ok` 期望字段）
+- Test: `server-go/client_test.go`
 
 **Interfaces:**
 - `handleConnection(conn net.Conn, hub *Hub)` 继续作为连接入口；
