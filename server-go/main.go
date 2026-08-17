@@ -2,10 +2,8 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
 )
 
 const listenAddress = "0.0.0.0:8888"
@@ -25,22 +23,22 @@ func main() {
 	}
 	defer conn.Close()
 
-	var buffer [1024]byte
-	n, err := conn.Read(buffer[:])
-	if err != nil {
-		if err == io.EOF {
-			log.Println("client disconnected before sending a message")
+	for frameNumber := 1; frameNumber <= 2; frameNumber++ {
+		payload, err := readFrame(conn)
+		if err != nil {
+			log.Printf("failed to read frame %d: %v", frameNumber, err)
 			return
 		}
-		log.Fatalf("failed to read from client: %v", err)
+
+		message := string(payload)
+		fmt.Printf("Client sent frame %d: %s\n", frameNumber, message)
+
+		response := []byte("Received: " + message)
+		if err := writeFrame(conn, response); err != nil {
+			log.Printf("failed to write response for frame %d: %v", frameNumber, err)
+			return
+		}
+
+		log.Printf("sent response for frame %d: %s", frameNumber, response)
 	}
-
-	message := strings.TrimSpace(string(buffer[:n]))
-	fmt.Printf("Client sent: %s\n", message)
-
-	if _, err := conn.Write([]byte("Received")); err != nil {
-		log.Fatalf("failed to write response: %v", err)
-	}
-
-	log.Println("sent response: Received")
 }

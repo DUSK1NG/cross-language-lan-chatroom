@@ -1,6 +1,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include "protocol.hpp"
+
 #include <iostream>
 #include <string>
 
@@ -62,32 +64,24 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Connected to " << server_ip << ':' << server_port << '\n';
 
-    constexpr char message[] = "Hello";
-    const int sent = send(socket_handle, message, sizeof(message) - 1, 0);
-    if (sent == SOCKET_ERROR) {
-        print_winsock_error("send");
+    if (!protocol::send_frame(socket_handle, "Hello") ||
+        !protocol::send_frame(socket_handle, "World")) {
+        std::cerr << "Failed to send framed message.\n";
         closesocket(socket_handle);
         WSACleanup();
         return 1;
     }
 
-    char response[1024]{};
-    const int received = recv(socket_handle, response, sizeof(response) - 1, 0);
-    if (received == SOCKET_ERROR) {
-        print_winsock_error("recv");
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
+    for (int i = 0; i < 2; ++i) {
+        std::string response;
+        if (!protocol::recv_frame(socket_handle, response)) {
+            std::cerr << "Failed to receive framed response.\n";
+            closesocket(socket_handle);
+            WSACleanup();
+            return 1;
+        }
+        std::cout << "Server replied: " << response << '\n';
     }
-
-    if (received == 0) {
-        std::cerr << "Server closed the connection before replying.\n";
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-
-    std::cout << "Server replied: " << std::string(response, received) << '\n';
 
     closesocket(socket_handle);
     WSACleanup();
