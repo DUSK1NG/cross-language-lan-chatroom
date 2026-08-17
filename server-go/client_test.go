@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"reflect"
 	"testing"
@@ -122,6 +123,105 @@ func TestHandleConnectionReturnsDuplicateCodeError(t *testing.T) {
 	}
 }
 
+func TestHandleConnectionUsersRequest(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	firstServer, firstClient := net.Pipe()
+	firstDone := make(chan struct{})
+	go func() {
+		handleConnection(firstServer, hub)
+		close(firstDone)
+	}()
+
+	secondServer, secondClient := net.Pipe()
+	secondDone := make(chan struct{})
+	go func() {
+		handleConnection(secondServer, hub)
+		close(secondDone)
+	}()
+
+	loginAndDrainJoinMessage(t, firstClient, "Zoe", "Z001")
+	loginAndDrainJoinMessage(t, secondClient, "Alex", "A001")
+	drainExpectedSystemMessage(t, firstClient, "Alex#A001 joined the chat")
+
+	if err := sendMessage(firstClient, Message{Type: "users_request"}); err != nil {
+		t.Fatal(err)
+	}
+
+	usersResponse := receiveClientTestMessage(t, firstClient)
+	want := Message{
+		Type:  "users_response",
+		Users: []string{"Alex#A001", "Zoe#Z001"},
+	}
+	if !reflect.DeepEqual(usersResponse, want) {
+		t.Fatalf("users response = %+v, want %+v", usersResponse, want)
+	}
+
+	assertNoMessageWithin(t, secondClient, 200*time.Millisecond)
+
+	_ = firstClient.Close()
+	_ = secondClient.Close()
+
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first connection handler did not stop")
+	}
+
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("second connection handler did not stop")
+	}
+}
+
+func TestHandleConnectionQuit(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	firstServer, firstClient := net.Pipe()
+	firstDone := make(chan struct{})
+	go func() {
+		handleConnection(firstServer, hub)
+		close(firstDone)
+	}()
+
+	secondServer, secondClient := net.Pipe()
+	secondDone := make(chan struct{})
+	go func() {
+		handleConnection(secondServer, hub)
+		close(secondDone)
+	}()
+
+	loginAndDrainJoinMessage(t, firstClient, "Zoe", "Z001")
+	loginAndDrainJoinJoinerView(t, secondClient, "Alex", "A001")
+	drainExpectedSystemMessage(t, firstClient, "Alex#A001 joined the chat")
+
+	if err := sendMessage(firstClient, Message{Type: "quit"}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first connection handler did not stop after quit")
+	}
+
+	leftMessage := receiveClientTestMessage(t, secondClient)
+	if leftMessage.Type != "system" || leftMessage.Content != "Zoe#Z001 left the chat" {
+		t.Fatalf("leave message = %+v", leftMessage)
+	}
+
+	_ = secondClient.Close()
+
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("second connection handler did not stop")
+	}
+}
+
 func receiveClientTestMessage(t *testing.T, conn net.Conn) Message {
 	t.Helper()
 
@@ -135,4 +235,76 @@ func receiveClientTestMessage(t *testing.T, conn net.Conn) Message {
 	}
 
 	return message
+}
+
+func loginAndDrainJoinMessage(t *testing.T, conn net.Conn, username, userCode string) {
+	t.Helper()
+
+	if err := sendMessage(conn, Message{
+		Type:     "login",
+		Username: username,
+		UserCode: userCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	loginOK := receiveClientTestMessage(t, conn)
+	if loginOK.Type != "login_ok" || loginOK.Username != username || loginOK.UserCode != userCode {
+		t.Fatalf("login response = %+v", loginOK)
+	}
+
+	joinMessage := receiveClientTestMessage(t, conn)
+	if joinMessage.Type != "system" || joinMessage.Content != username+"#"+userCode+" joined the chat" {
+		t.Fatalf("join message = %+v", joinMessage)
+	}
+}
+
+func loginAndDrainJoinJoinerView(t *testing.T, conn net.Conn, username, userCode string) {
+	t.Helper()
+
+	if err := sendMessage(conn, Message{
+		Type:     "login",
+		Username: username,
+		UserCode: userCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	loginOK := receiveClientTestMessage(t, conn)
+	if loginOK.Type != "login_ok" || loginOK.Username != username || loginOK.UserCode != userCode {
+		t.Fatalf("login response = %+v", loginOK)
+	}
+
+	selfJoin := receiveClientTestMessage(t, conn)
+	if selfJoin.Type != "system" || selfJoin.Content != username+"#"+userCode+" joined the chat" {
+		t.Fatalf("self join message = %+v", selfJoin)
+	}
+}
+
+func assertNoMessageWithin(t *testing.T, conn net.Conn, timeout time.Duration) {
+	t.Helper()
+
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+
+	_, err := receiveMessage(conn)
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return
+	}
+	if err != nil {
+		t.Fatalf("expected timeout, got %v", err)
+	}
+
+	t.Fatal("expected no message, but received one")
+}
+
+func drainExpectedSystemMessage(t *testing.T, conn net.Conn, content string) {
+	t.Helper()
+
+	message := receiveClientTestMessage(t, conn)
+	if message.Type != "system" || message.Content != content {
+		t.Fatalf("system message = %+v", message)
+	}
 }

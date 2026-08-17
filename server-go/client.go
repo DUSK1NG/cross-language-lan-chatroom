@@ -113,29 +113,38 @@ func (c *Client) readPump(hub *Hub) {
 			return
 		}
 
-		if message.Type != "chat" {
+		switch message.Type {
+		case "chat":
+			if err := validateMessage(message); err != nil {
+				log.Printf("invalid chat message from %s: %v", c.Username, err)
+				if !c.enqueue(Message{
+					Type:    "error",
+					Content: "Invalid chat content",
+				}) {
+					return
+				}
+				continue
+			}
+
+			message.Username = c.Username
+			message.UserCode = c.UserCode
+			hub.Broadcast <- message
+
+		case "users_request":
+			hub.RequestUsers <- c
+
+		case "quit":
+			hub.Unregister <- c
+			return
+
+		default:
 			if !c.enqueue(Message{
 				Type:    "error",
 				Content: "Expected chat message",
 			}) {
 				return
 			}
-			continue
 		}
-		if err := validateMessage(message); err != nil {
-			log.Printf("invalid chat message from %s: %v", c.Username, err)
-			if !c.enqueue(Message{
-				Type:    "error",
-				Content: "Invalid chat content",
-			}) {
-				return
-			}
-			continue
-		}
-
-		message.Username = c.Username
-		message.UserCode = c.UserCode
-		hub.Broadcast <- message
 	}
 }
 
