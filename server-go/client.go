@@ -12,9 +12,14 @@ func handleConnection(conn net.Conn, hub *Hub) {
 	log.Printf("client connected: %s", remoteAddress)
 
 	var client *Client
+	shouldUnregister := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			log.Printf("client handler panic for %s: %v", remoteAddress, recovered)
+		}
+
+		if shouldUnregister && client != nil {
+			hub.Unregister <- client
 		}
 
 		if client != nil {
@@ -67,24 +72,32 @@ func handleConnection(conn net.Conn, hub *Hub) {
 	hub.Register <- RegisterRequest{Client: client, Result: registerResult}
 	if err := <-registerResult; err != nil {
 		log.Printf("failed to register client %s: %v", client.Username, err)
+		content := "Login failed"
+		if errors.Is(err, ErrUserCodeAlreadyUsed) {
+			content = "User code already exists"
+		}
 		_ = sendMessage(conn, Message{
 			Type:    "login_error",
-			Content: "Login failed",
+			Content: content,
 		})
 		return
 	}
+	shouldUnregister = true
 
 	if err := sendMessage(conn, Message{
-		Type:    "login_ok",
-		Content: "Login successful",
+		Type:     "login_ok",
+		Username: client.Username,
+		UserCode: client.UserCode,
+		Content:  "Login successful",
 	}); err != nil {
 		log.Printf("failed to send login response to %s: %v", remoteAddress, err)
 		return
 	}
 
-	go client.writePump()
+	go client.writePump(hub)
 	log.Printf("user logged in: %s", client.Username)
 
+	shouldUnregister = false
 	client.readPump(hub)
 }
 
@@ -122,16 +135,19 @@ func (c *Client) readPump(hub *Hub) {
 			continue
 		}
 
-		// 用户名始终取自当前连接，忽略客户端在 chat 消息中携带的值。
 		message.Username = c.Username
+		message.UserCode = c.UserCode
 		hub.Broadcast <- message
 	}
 }
 
-func (c *Client) writePump() {
+func (c *Client) writePump(hub *Hub) {
 	for message := range c.Send {
 		if err := sendMessage(c.Conn, message); err != nil {
 			log.Printf("failed to send message to %s: %v", c.Username, err)
+			if hub != nil {
+				hub.Unregister <- c
+			}
 			c.closeConnection()
 			return
 		}
