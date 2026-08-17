@@ -7,6 +7,38 @@ import (
 	"testing"
 )
 
+func TestValidateUserCode(t *testing.T) {
+	tests := []struct {
+		name    string
+		code    string
+		wantErr bool
+	}{
+		{name: "too short", code: "A1", wantErr: true},
+		{name: "valid", code: "Alex2026"},
+		{name: "too long", code: strings.Repeat("a", 17), wantErr: true},
+		{name: "special character", code: "Alex-01", wantErr: true},
+		{name: "non ASCII", code: "小明01", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateUserCode(test.code)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("validateUserCode(%q) error = %v, wantErr = %v", test.code, err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestNormalizeUserCodeIsCaseInsensitive(t *testing.T) {
+	got, err := normalizeUserCode("AlEx2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "alex2026" {
+		t.Fatalf("normalized code = %q, want alex2026", got)
+	}
+}
+
 func TestMessageRoundTrip(t *testing.T) {
 	want := Message{
 		Type:     "login",
@@ -52,6 +84,7 @@ func TestMessageJSONContainsExpectedFields(t *testing.T) {
 	if err := sendMessage(&stream, Message{
 		Type:     "login",
 		Username: "Alice",
+		UserCode: "A001",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +98,7 @@ func TestMessageJSONContainsExpectedFields(t *testing.T) {
 	if err := json.Unmarshal(payload, &fields); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"type", "username"} {
+	for _, field := range []string{"type", "username", "user_code"} {
 		if _, ok := fields[field]; !ok {
 			t.Fatalf("JSON field %q is missing from %s", field, payload)
 		}
@@ -92,8 +125,18 @@ func TestValidateMessage(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "long login username",
-			message: Message{Type: "login", Username: strings.Repeat("a", 33)},
+			name:    "empty login user code",
+			message: Message{Type: "login", Username: "Alice"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid login user code",
+			message: Message{Type: "login", Username: "Alice", UserCode: "A-01"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid login username utf8",
+			message: Message{Type: "login", Username: string([]byte{0xff}), UserCode: "A001"},
 			wantErr: true,
 		},
 		{
@@ -103,7 +146,7 @@ func TestValidateMessage(t *testing.T) {
 		},
 		{
 			name:    "valid login",
-			message: Message{Type: "login", Username: "Alice"},
+			message: Message{Type: "login", Username: "Alice", UserCode: "A001"},
 		},
 		{
 			name:    "valid chat",
