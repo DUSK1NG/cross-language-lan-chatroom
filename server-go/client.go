@@ -55,8 +55,6 @@ func handleConnection(conn net.Conn, hub *Hub) {
 		return
 	}
 
-	client = newClient(conn, loginMessage.Username)
-	client.UserCode = loginMessage.UserCode
 	normalizedCode, err := normalizeUserCode(loginMessage.UserCode)
 	if err != nil {
 		log.Printf("failed to normalize user code for %s: %v", remoteAddress, err)
@@ -66,7 +64,7 @@ func handleConnection(conn net.Conn, hub *Hub) {
 		})
 		return
 	}
-	client.NormalizedCode = normalizedCode
+	client = newClient(conn, loginMessage.Username, loginMessage.UserCode, normalizedCode)
 
 	registerResult := make(chan error, 1)
 	hub.Register <- RegisterRequest{Client: client, Result: registerResult}

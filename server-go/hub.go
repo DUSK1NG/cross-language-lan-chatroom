@@ -29,11 +29,13 @@ type Client struct {
 	closeSendOnce sync.Once
 }
 
-func newClient(conn net.Conn, username string) *Client {
+func newClient(conn net.Conn, username, userCode, normalizedCode string) *Client {
 	return &Client{
-		Conn:     conn,
-		Username: username,
-		Send:     make(chan Message, clientSendBufferSize),
+		Conn:           conn,
+		Username:       username,
+		UserCode:       userCode,
+		NormalizedCode: normalizedCode,
+		Send:           make(chan Message, clientSendBufferSize),
 	}
 }
 

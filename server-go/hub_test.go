@@ -188,8 +188,10 @@ func TestHandleConnectionRegistersLoginUserCodeAndBroadcastsJoin(t *testing.T) {
 	}
 
 	assertMessageFromConn(t, clientConn, Message{
-		Type:    "login_ok",
-		Content: "Login successful",
+		Type:     "login_ok",
+		Username: "Alice",
+		UserCode: "Alex2026",
+		Content:  "Login successful",
 	})
 	assertMessageFromConn(t, clientConn, Message{
 		Type:    "system",
@@ -224,8 +226,10 @@ func TestHandleConnectionRejectsDuplicateCodeBeforeLoginOK(t *testing.T) {
 	}
 
 	assertMessageFromConn(t, firstClient, Message{
-		Type:    "login_ok",
-		Content: "Login successful",
+		Type:     "login_ok",
+		Username: "Alice",
+		UserCode: "Alex2026",
+		Content:  "Login successful",
 	})
 	assertMessageFromConn(t, firstClient, Message{
 		Type:    "system",
@@ -251,7 +255,7 @@ func TestHandleConnectionRejectsDuplicateCodeBeforeLoginOK(t *testing.T) {
 
 	assertMessageFromConn(t, secondClient, Message{
 		Type:    "login_error",
-		Content: "Login failed",
+		Content: "User code already exists",
 	})
 
 	_ = firstClient.Close()
