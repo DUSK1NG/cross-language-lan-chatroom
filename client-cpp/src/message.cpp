@@ -17,6 +17,9 @@ bool send_message(SOCKET socket_handle, const Message& message) {
     if (!message.content.empty()) {
         object["content"] = message.content;
     }
+    if (!message.users.empty()) {
+        object["users"] = message.users;
+    }
 
     return protocol::send_frame(socket_handle, object.dump());
 }
@@ -55,6 +58,18 @@ bool receive_message(SOCKET socket_handle, Message& message) {
                 return false;
             }
             parsed.content = object.at("content").get<std::string>();
+        }
+
+        if (object.contains("users")) {
+            if (!object.at("users").is_array()) {
+                return false;
+            }
+            for (const auto& user_value : object.at("users")) {
+                if (!user_value.is_string()) {
+                    return false;
+                }
+                parsed.users.push_back(user_value.get<std::string>());
+            }
         }
 
         message = std::move(parsed);
