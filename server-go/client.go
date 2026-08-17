@@ -117,7 +117,7 @@ func (c *Client) readPump(hub *Hub) {
 		case "chat":
 			if err := validateMessage(message); err != nil {
 				log.Printf("invalid chat message from %s: %v", c.Username, err)
-				if !c.enqueue(Message{
+				if !c.enqueue(hub, Message{
 					Type:    "error",
 					Content: "Invalid chat content",
 				}) {
@@ -138,7 +138,7 @@ func (c *Client) readPump(hub *Hub) {
 			return
 
 		default:
-			if !c.enqueue(Message{
+			if !c.enqueue(hub, Message{
 				Type:    "error",
 				Content: "Expected chat message",
 			}) {
@@ -161,13 +161,15 @@ func (c *Client) writePump(hub *Hub) {
 	}
 }
 
-func (c *Client) enqueue(message Message) bool {
-	select {
-	case c.Send <- message:
-		return true
-	default:
-		log.Printf("send buffer is full for %s", c.Username)
-		c.closeConnection()
+func (c *Client) enqueue(hub *Hub, message Message) bool {
+	if hub == nil {
+		log.Printf("cannot enqueue message for %s without hub", c.Username)
 		return false
 	}
+
+	hub.Outbound <- OutboundMessage{
+		Client:  c,
+		Message: message,
+	}
+	return true
 }

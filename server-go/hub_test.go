@@ -202,6 +202,40 @@ func TestHubUnregisterClosesClientSendChannel(t *testing.T) {
 	assertChannelClosed(t, client.Send)
 }
 
+func TestHubIgnoresOutboundMessageForUnregisteredClient(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	client := newTestClient(t, "Alice", "Alice01")
+	if err := registerForTest(t, hub, client); err != nil {
+		t.Fatalf("register client: %v", err)
+	}
+	assertMessageReceived(t, client.Send, Message{
+		Type:    "system",
+		Content: "Alice#Alice01 joined the chat",
+	})
+
+	hub.Unregister <- client
+	assertChannelClosed(t, client.Send)
+
+	hub.Outbound <- OutboundMessage{
+		Client: client,
+		Message: Message{
+			Type:    "error",
+			Content: "Expected chat message",
+		},
+	}
+
+	next := newTestClient(t, "Bob", "Bob01")
+	if err := registerForTest(t, hub, next); err != nil {
+		t.Fatalf("register next client after ignored outbound: %v", err)
+	}
+	assertMessageReceived(t, next.Send, Message{
+		Type:    "system",
+		Content: "Bob#Bob01 joined the chat",
+	})
+}
+
 func TestHandleConnectionRegistersLoginUserCodeAndBroadcastsJoin(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()

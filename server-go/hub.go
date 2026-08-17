@@ -18,6 +18,11 @@ type RegisterRequest struct {
 	Result chan error
 }
 
+type OutboundMessage struct {
+	Client  *Client
+	Message Message
+}
+
 // Client 表示一个已经完成登录的客户端连接。
 type Client struct {
 	Conn           net.Conn
@@ -67,6 +72,7 @@ type Hub struct {
 	Register     chan RegisterRequest
 	Unregister   chan *Client
 	Broadcast    chan Message
+	Outbound     chan OutboundMessage
 	RequestUsers chan *Client
 	ActiveCodes  map[string]*Client
 	UsedCodes    map[string]struct{}
@@ -78,6 +84,7 @@ func NewHub() *Hub {
 		Register:     make(chan RegisterRequest),
 		Unregister:   make(chan *Client),
 		Broadcast:    make(chan Message),
+		Outbound:     make(chan OutboundMessage),
 		RequestUsers: make(chan *Client),
 		ActiveCodes:  make(map[string]*Client),
 		UsedCodes:    make(map[string]struct{}),
@@ -95,17 +102,10 @@ func (h *Hub) Run() {
 			h.unregisterClient(client, true)
 
 		case message := <-h.Broadcast:
-			for client := range h.Clients {
-				select {
-				case client.Send <- message:
-				default:
-					// 慢客户端不能阻塞整个 Hub；移除它并关闭连接。
-					h.removeClient(client)
-					client.closeSend()
-					client.closeConnection()
-					log.Printf("client removed because send buffer is full: %s", client.Username)
-				}
-			}
+			h.broadcastMessage(message)
+
+		case outbound := <-h.Outbound:
+			h.deliver(outbound.Client, outbound.Message)
 
 		case client := <-h.RequestUsers:
 			h.handleRequestUsers(client)
@@ -155,6 +155,36 @@ func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {
 	log.Printf("client unregistered: %s", client.Username)
 }
 
+func (h *Hub) broadcastMessage(message Message) {
+	for client := range h.Clients {
+		h.deliver(client, message)
+	}
+}
+
+func (h *Hub) deliver(client *Client, message Message) bool {
+	if client == nil {
+		return false
+	}
+	if _, ok := h.Clients[client]; !ok {
+		return false
+	}
+
+	select {
+	case client.Send <- message:
+		return true
+	default:
+		h.removeSlowClient(client)
+		return false
+	}
+}
+
+func (h *Hub) removeSlowClient(client *Client) {
+	h.removeClient(client)
+	client.closeSend()
+	client.closeConnection()
+	log.Printf("client removed because send buffer is full: %s", client.Username)
+}
+
 func (h *Hub) removeClient(client *Client) {
 	delete(h.Clients, client)
 
@@ -177,16 +207,7 @@ func (h *Hub) broadcastSystemMessage(content string) {
 		Content: content,
 	}
 
-	for client := range h.Clients {
-		select {
-		case client.Send <- message:
-		default:
-			h.removeClient(client)
-			client.closeSend()
-			client.closeConnection()
-			log.Printf("client removed because send buffer is full: %s", client.Username)
-		}
-	}
+	h.broadcastMessage(message)
 }
 
 func (h *Hub) handleRequestUsers(requester *Client) {
@@ -203,17 +224,10 @@ func (h *Hub) handleRequestUsers(requester *Client) {
 	}
 	sort.Strings(users)
 
-	select {
-	case requester.Send <- Message{
+	h.deliver(requester, Message{
 		Type:  "users_response",
 		Users: users,
-	}:
-	default:
-		h.removeClient(requester)
-		requester.closeSend()
-		requester.closeConnection()
-		log.Printf("client removed because send buffer is full: %s", requester.Username)
-	}
+	})
 }
 
 func (h *Hub) respondRegister(result chan error, err error) {

@@ -176,6 +176,36 @@ func TestHandleConnectionUsersRequest(t *testing.T) {
 	}
 }
 
+func TestHandleConnectionReturnsErrorForUnknownCommand(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	hub := NewHub()
+	go hub.Run()
+
+	done := make(chan struct{})
+	go func() {
+		handleConnection(serverConn, hub)
+		close(done)
+	}()
+
+	loginAndDrainJoinMessage(t, clientConn, "Alex", "A001")
+
+	if err := sendMessage(clientConn, Message{Type: "unknown"}); err != nil {
+		t.Fatal(err)
+	}
+
+	errorMessage := receiveClientTestMessage(t, clientConn)
+	if !reflect.DeepEqual(errorMessage, Message{Type: "error", Content: "Expected chat message"}) {
+		t.Fatalf("unknown command response = %+v", errorMessage)
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("connection handler did not stop")
+	}
+}
+
 func TestHandleConnectionQuit(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
