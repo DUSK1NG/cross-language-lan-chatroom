@@ -139,13 +139,14 @@ git commit -m "feat: validate custom user codes"
 **Files:**
 - Modify: `server-go/hub.go`
 - Test: `server-go/hub_test.go`
+- Modify: `server-go/client.go`（仅把旧注册发送改为 `RegisterRequest`，完整登录身份接线留给 Task 3）
 
 **Interfaces:**
 - Produces `ErrUserCodeAlreadyUsed`；
 - Produces `RegisterRequest{Client *Client, Result chan error}`；
 - `Hub.Register` 类型改为 `chan RegisterRequest`；
 - `Hub` 增加 `ActiveCodes map[string]*Client` 和 `UsedCodes map[string]struct{}`；
-- `Client` 增加 `UserCode` 和 `NormalizedCode`；保留现有 `newClient` 签名，避免 Task 2 单独提交时破坏当前连接流程，构造函数签名在 Task 3 与登录流程一起更新。
+- `Client` 增加 `UserCode` 和 `NormalizedCode`；保留现有 `newClient` 签名，构造函数签名在 Task 3 与登录流程一起更新；Task 2 允许修改 `client.go` 的注册发送方式以保持类型安全和可构建。
 
 - [ ] **Step 1: 添加失败测试，验证大小写不敏感和退出后不可复用**
 
@@ -238,7 +239,7 @@ type RegisterRequest struct {
 
 `NewHub` 初始化两个 map；`Run` 收到注册请求时只在 Hub goroutine 内检查和写入 `UsedCodes`、`ActiveCodes`。注册成功后向 `Result` 发送 `nil`，然后广播包含 `username`、`user_code` 和 `username#user_code joined the chat` 的 `system` 消息。
 
-注销时删除 `ActiveCodes`，保留 `UsedCodes`，关闭 `Send` channel，并向剩余客户端广播离线消息。重复注销必须安全，不得重复关闭 channel。
+注销时删除 `ActiveCodes`，保留 `UsedCodes`，关闭 `Send` channel，并向剩余客户端广播离线消息。重复注销必须安全，不得重复关闭 channel。删除兼容旧注册事件和空代码身份的旁路，所有注册都必须经过 `RegisterRequest`。
 
 - [ ] **Step 4: 运行 Hub 测试、竞态检测并提交**
 
