@@ -84,7 +84,7 @@ func TestUsersMessageRoundTrip(t *testing.T) {
 func TestChineseChatMessageRoundTrip(t *testing.T) {
 	want := Message{
 		Type:    "chat",
-		Content: "Hello, Go and C++",
+		Content: "你好，这是 Go 和 C++ 跨语言聊天室。",
 	}
 	var stream bytes.Buffer
 
@@ -278,8 +278,12 @@ func TestReceiveMessageRejectsMalformedJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := receiveMessage(&stream); err == nil {
+	message, err := receiveMessage(&stream)
+	if err == nil {
 		t.Fatal("expected malformed JSON to be rejected")
+	}
+	if !reflect.DeepEqual(message, Message{}) {
+		t.Fatalf("malformed JSON returned partial message: %+v", message)
 	}
 }
 
@@ -289,8 +293,12 @@ func TestReceiveMessageRejectsWrongFieldType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := receiveMessage(&stream); err == nil {
+	message, err := receiveMessage(&stream)
+	if err == nil {
 		t.Fatal("expected wrong JSON field type to be rejected")
+	}
+	if !reflect.DeepEqual(message, Message{}) {
+		t.Fatalf("wrong field type returned partial message: %+v", message)
 	}
 }
 
@@ -303,7 +311,64 @@ func TestReceiveMessageRejectsInvalidUTF8Payload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := receiveMessage(&stream); err == nil {
+	message, err := receiveMessage(&stream)
+	if err == nil {
 		t.Fatal("expected invalid UTF-8 payload to be rejected")
+	}
+	if !reflect.DeepEqual(message, Message{}) {
+		t.Fatalf("invalid UTF-8 returned partial message: %+v", message)
+	}
+}
+
+func TestReceiveMessageRejectsMissingType(t *testing.T) {
+	var stream bytes.Buffer
+	if err := writeFrame(&stream, []byte(`{"content":"hello"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := receiveMessage(&stream)
+	if err == nil {
+		t.Fatal("expected missing type to be rejected")
+	}
+	if !reflect.DeepEqual(message, Message{}) {
+		t.Fatalf("missing type returned partial message: %+v", message)
+	}
+}
+
+func TestReceiveMessageRejectsUsersNonArray(t *testing.T) {
+	var stream bytes.Buffer
+	if err := writeFrame(&stream, []byte(`{"type":"users_response","users":"Alice#A001"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := receiveMessage(&stream)
+	if err == nil {
+		t.Fatal("expected users field with non-array type to be rejected")
+	}
+	if !reflect.DeepEqual(message, Message{}) {
+		t.Fatalf("non-array users field returned partial message: %+v", message)
+	}
+}
+
+func TestReceiveMessageRejectsUsersNonStringElement(t *testing.T) {
+	var stream bytes.Buffer
+	if err := writeFrame(&stream, []byte(`{"type":"users_response","users":["Alice#A001",123]}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := receiveMessage(&stream)
+	if err == nil {
+		t.Fatal("expected users array with non-string element to be rejected")
+	}
+	if !reflect.DeepEqual(message, Message{}) {
+		t.Fatalf("non-string users element returned partial message: %+v", message)
+	}
+}
+
+func TestValidateMessageRejectsUnsupportedType(t *testing.T) {
+	message := Message{Type: "unsupported"}
+
+	if err := validateMessage(message); err == nil {
+		t.Fatal("expected unsupported message type to be rejected")
 	}
 }
