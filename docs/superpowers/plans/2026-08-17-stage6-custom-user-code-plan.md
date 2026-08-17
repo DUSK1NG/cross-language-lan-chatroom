@@ -145,7 +145,7 @@ git commit -m "feat: validate custom user codes"
 - Produces `RegisterRequest{Client *Client, Result chan error}`；
 - `Hub.Register` 类型改为 `chan RegisterRequest`；
 - `Hub` 增加 `ActiveCodes map[string]*Client` 和 `UsedCodes map[string]struct{}`；
-- `Client` 增加 `UserCode` 和 `NormalizedCode`。
+- `Client` 增加 `UserCode` 和 `NormalizedCode`；保留现有 `newClient` 签名，避免 Task 2 单独提交时破坏当前连接流程，构造函数签名在 Task 3 与登录流程一起更新。
 
 - [ ] **Step 1: 添加失败测试，验证大小写不敏感和退出后不可复用**
 
@@ -240,12 +240,6 @@ type RegisterRequest struct {
 
 注销时删除 `ActiveCodes`，保留 `UsedCodes`，关闭 `Send` channel，并向剩余客户端广播离线消息。重复注销必须安全，不得重复关闭 channel。
 
-更新 `newClient` 签名：
-
-```go
-func newClient(conn net.Conn, username, userCode, normalizedCode string) *Client
-```
-
 - [ ] **Step 4: 运行 Hub 测试、竞态检测并提交**
 
 运行：
@@ -299,6 +293,12 @@ git commit -m "feat: reserve user codes in hub"
 6. 注册成功后由连接处理 goroutine 发送带身份字段的 `login_ok`；
 7. 启动唯一的 `writePump`；
 8. 进入 `readPump`。
+
+同时更新构造函数：
+
+```go
+func newClient(conn net.Conn, username, userCode, normalizedCode string) *Client
+```
 
 如果 `login_ok` 发送失败，必须向 Hub 发送注销请求，避免代码进入在线索引但没有可用连接。`readPump` 退出时继续使用 Hub 注销流程。
 
