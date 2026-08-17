@@ -1,0 +1,6 @@
+# Local Go build cache
+.go-build-cache/
+
+# Stage build outputs
+server-go/chat-server.exe
+client-cpp/chat-client.exe
