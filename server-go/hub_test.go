@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"net"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -300,7 +301,7 @@ func assertMessageReceived(t *testing.T, messages <-chan Message, want Message) 
 
 	select {
 	case got := <-messages:
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("received message %+v, want %+v", got, want)
 		}
 	case <-time.After(time.Second):
@@ -331,7 +332,7 @@ func assertMessageFromConn(t *testing.T, conn net.Conn, want Message) {
 	if err != nil {
 		t.Fatalf("receive message: %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("received message %+v, want %+v", got, want)
 	}
 }

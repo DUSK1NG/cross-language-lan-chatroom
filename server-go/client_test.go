@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -101,7 +102,7 @@ func TestHandleConnectionReturnsDuplicateCodeError(t *testing.T) {
 	}
 
 	loginError := receiveClientTestMessage(t, secondClient)
-	if loginError != (Message{Type: "login_error", Content: "User code already exists"}) {
+	if !reflect.DeepEqual(loginError, Message{Type: "login_error", Content: "User code already exists"}) {
 		t.Fatalf("duplicate login response = %+v", loginError)
 	}
 

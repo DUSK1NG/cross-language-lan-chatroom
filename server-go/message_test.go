@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -55,7 +56,27 @@ func TestMessageRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("message = %+v, want %+v", got, want)
+	}
+}
+
+func TestUsersMessageRoundTrip(t *testing.T) {
+	want := Message{
+		Type:  "users_response",
+		Users: []string{"Alex#A001", "Alex#B002"},
+	}
+	var stream bytes.Buffer
+
+	if err := sendMessage(&stream, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := receiveMessage(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("message = %+v, want %+v", got, want)
 	}
 }
@@ -75,38 +96,75 @@ func TestChineseChatMessageRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("message = %+v, want %+v", got, want)
 	}
 }
 
 func TestMessageJSONContainsExpectedFields(t *testing.T) {
-	var stream bytes.Buffer
-	if err := sendMessage(&stream, Message{
-		Type:     "login",
-		Username: "Alice",
-		UserCode: "A001",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	payload, err := readFrame(&stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &fields); err != nil {
-		t.Fatal(err)
-	}
-	for _, field := range []string{"type", "username", "user_code"} {
-		if _, ok := fields[field]; !ok {
-			t.Fatalf("JSON field %q is missing from %s", field, payload)
+	t.Run("login", func(t *testing.T) {
+		var stream bytes.Buffer
+		if err := sendMessage(&stream, Message{
+			Type:     "login",
+			Username: "Alice",
+			UserCode: "A001",
+		}); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if _, ok := fields["content"]; ok {
-		t.Fatalf("empty optional content should be omitted: %s", payload)
-	}
+
+		payload, err := readFrame(&stream)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"type", "username", "user_code"} {
+			if _, ok := fields[field]; !ok {
+				t.Fatalf("JSON field %q is missing from %s", field, payload)
+			}
+		}
+		if _, ok := fields["content"]; ok {
+			t.Fatalf("empty optional content should be omitted: %s", payload)
+		}
+	})
+
+	t.Run("users_response", func(t *testing.T) {
+		var stream bytes.Buffer
+		if err := sendMessage(&stream, Message{
+			Type:  "users_response",
+			Users: []string{"Alex#A001", "Alex#B002"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		payload, err := readFrame(&stream)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatal(err)
+		}
+		usersJSON, ok := fields["users"]
+		if !ok {
+			t.Fatalf("JSON field %q is missing from %s", "users", payload)
+		}
+
+		var users []string
+		if err := json.Unmarshal(usersJSON, &users); err != nil {
+			t.Fatalf("users field is not a JSON array: %v", err)
+		}
+		if !reflect.DeepEqual(users, []string{"Alex#A001", "Alex#B002"}) {
+			t.Fatalf("users array = %+v, want %+v", users, []string{"Alex#A001", "Alex#B002"})
+		}
+		if _, ok := fields["content"]; ok {
+			t.Fatalf("empty optional content should be omitted: %s", payload)
+		}
+	})
 }
 
 func TestValidateMessage(t *testing.T) {
@@ -151,6 +209,18 @@ func TestValidateMessage(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "valid users request",
+			message: Message{Type: "users_request"},
+		},
+		{
+			name:    "valid quit",
+			message: Message{Type: "quit"},
+		},
+		{
+			name:    "valid users response",
+			message: Message{Type: "users_response", Users: []string{}},
+		},
+		{
 			name:    "valid system",
 			message: Message{Type: "system", Content: "Maintenance"},
 		},
@@ -169,6 +239,34 @@ func TestValidateMessage(t *testing.T) {
 			err := validateMessage(test.message)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("validateMessage(%+v) error = %v, wantErr = %v", test.message, err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateCommandMessages(t *testing.T) {
+	tests := []struct {
+		name    string
+		message Message
+	}{
+		{
+			name:    "users request",
+			message: Message{Type: "users_request"},
+		},
+		{
+			name:    "quit",
+			message: Message{Type: "quit"},
+		},
+		{
+			name:    "empty users response",
+			message: Message{Type: "users_response", Users: []string{}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateMessage(test.message); err != nil {
+				t.Fatalf("validateMessage(%+v) returned error: %v", test.message, err)
 			}
 		})
 	}

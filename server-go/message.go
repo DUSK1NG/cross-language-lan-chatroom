@@ -11,10 +11,11 @@ import (
 const maxUsernameSize = 32
 
 type Message struct {
-	Type     string `json:"type"`
-	Username string `json:"username,omitempty"`
-	UserCode string `json:"user_code,omitempty"`
-	Content  string `json:"content,omitempty"`
+	Type     string   `json:"type"`
+	Username string   `json:"username,omitempty"`
+	UserCode string   `json:"user_code,omitempty"`
+	Users    []string `json:"users,omitempty"`
+	Content  string   `json:"content,omitempty"`
 }
 
 func validateUserCode(code string) error {
@@ -100,6 +101,14 @@ func validateMessage(message Message) error {
 		}
 		if len([]byte(message.Content)) > maxMessageSize {
 			return fmt.Errorf("chat content is too long")
+		}
+	case "users_request", "quit":
+		return nil
+	case "users_response":
+		for _, user := range message.Users {
+			if !utf8.ValidString(user) {
+				return fmt.Errorf("users list must contain valid UTF-8 strings")
+			}
 		}
 	case "login_ok", "login_error", "system", "error":
 		if message.Content == "" {
