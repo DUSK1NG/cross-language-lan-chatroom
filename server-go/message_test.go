@@ -18,6 +18,7 @@ func TestValidateUserCode(t *testing.T) {
 		{name: "too long", code: strings.Repeat("a", 17), wantErr: true},
 		{name: "special character", code: "Alex-01", wantErr: true},
 		{name: "non ASCII", code: "小明01", wantErr: true},
+		{name: "invalid utf8", code: string([]byte{0xff, 0xfe, 0xfd}), wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -62,7 +63,7 @@ func TestMessageRoundTrip(t *testing.T) {
 func TestChineseChatMessageRoundTrip(t *testing.T) {
 	want := Message{
 		Type:    "chat",
-		Content: "你好，这是 Go 和 C++。",
+		Content: "Hello, Go and C++",
 	}
 	var stream bytes.Buffer
 
@@ -140,9 +141,18 @@ func TestValidateMessage(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "long login username",
+			message: Message{Type: "login", Username: strings.Repeat("a", 33), UserCode: "A001"},
+			wantErr: true,
+		},
+		{
 			name:    "empty chat content",
 			message: Message{Type: "chat"},
 			wantErr: true,
+		},
+		{
+			name:    "valid system",
+			message: Message{Type: "system", Content: "Maintenance"},
 		},
 		{
 			name:    "valid login",

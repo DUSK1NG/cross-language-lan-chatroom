@@ -8,6 +8,8 @@ import (
 	"unicode/utf8"
 )
 
+const maxUsernameSize = 32
+
 type Message struct {
 	Type     string `json:"type"`
 	Username string `json:"username,omitempty"`
@@ -80,6 +82,9 @@ func validateMessage(message Message) error {
 		if !utf8.ValidString(message.Username) {
 			return fmt.Errorf("username must be valid UTF-8")
 		}
+		if len([]byte(message.Username)) > maxUsernameSize {
+			return fmt.Errorf("username is too long")
+		}
 		if message.UserCode == "" {
 			return fmt.Errorf("user code must not be empty")
 		}
@@ -96,7 +101,7 @@ func validateMessage(message Message) error {
 		if len([]byte(message.Content)) > maxMessageSize {
 			return fmt.Errorf("chat content is too long")
 		}
-	case "login_ok", "login_error", "error":
+	case "login_ok", "login_error", "system", "error":
 		if message.Content == "" {
 			return fmt.Errorf("message content must not be empty")
 		}
