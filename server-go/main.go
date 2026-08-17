@@ -23,22 +23,72 @@ func main() {
 	}
 	defer conn.Close()
 
-	for frameNumber := 1; frameNumber <= 2; frameNumber++ {
-		payload, err := readFrame(conn)
-		if err != nil {
-			log.Printf("failed to read frame %d: %v", frameNumber, err)
-			return
-		}
+	loginMessage, err := receiveMessage(conn)
+	if err != nil {
+		log.Printf("failed to receive login message: %v", err)
+		_ = sendMessage(conn, Message{
+			Type:    "error",
+			Content: "Invalid JSON message",
+		})
+		return
+	}
+	if loginMessage.Type != "login" {
+		_ = sendMessage(conn, Message{
+			Type:    "login_error",
+			Content: "Expected login message",
+		})
+		return
+	}
+	if err := validateMessage(loginMessage); err != nil {
+		log.Printf("invalid login message: %v", err)
+		_ = sendMessage(conn, Message{
+			Type:    "login_error",
+			Content: "Invalid username",
+		})
+		return
+	}
 
-		message := string(payload)
-		fmt.Printf("Client sent frame %d: %s\n", frameNumber, message)
+	username := loginMessage.Username
+	fmt.Printf("Login username: %s\n", username)
+	if err := sendMessage(conn, Message{
+		Type:    "login_ok",
+		Content: "Login successful",
+	}); err != nil {
+		log.Printf("failed to send login response: %v", err)
+		return
+	}
 
-		response := []byte("Received: " + message)
-		if err := writeFrame(conn, response); err != nil {
-			log.Printf("failed to write response for frame %d: %v", frameNumber, err)
-			return
-		}
+	chatMessage, err := receiveMessage(conn)
+	if err != nil {
+		log.Printf("failed to receive chat message: %v", err)
+		_ = sendMessage(conn, Message{
+			Type:    "error",
+			Content: "Invalid JSON message",
+		})
+		return
+	}
+	if chatMessage.Type != "chat" {
+		_ = sendMessage(conn, Message{
+			Type:    "error",
+			Content: "Expected chat message",
+		})
+		return
+	}
+	if err := validateMessage(chatMessage); err != nil {
+		log.Printf("invalid chat message: %v", err)
+		_ = sendMessage(conn, Message{
+			Type:    "error",
+			Content: "Invalid chat content",
+		})
+		return
+	}
 
-		log.Printf("sent response for frame %d: %s", frameNumber, response)
+	fmt.Printf("Chat from %s: %s\n", username, chatMessage.Content)
+	if err := sendMessage(conn, Message{
+		Type:     "chat",
+		Username: username,
+		Content:  chatMessage.Content,
+	}); err != nil {
+		log.Printf("failed to send chat response: %v", err)
 	}
 }

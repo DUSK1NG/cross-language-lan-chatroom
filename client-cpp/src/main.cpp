@@ -1,7 +1,10 @@
+#define WIN32_LEAN_AND_MEAN
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 
-#include "protocol.hpp"
+#include "message.hpp"
 
 #include <iostream>
 #include <string>
@@ -10,16 +13,56 @@ namespace {
 
 constexpr const char* kDefaultServerIp = "127.0.0.1";
 constexpr int kDefaultServerPort = 8888;
+constexpr const char* kDefaultUsername = "Alice";
+constexpr const char* kDefaultChatContent = "Hello from C++";
 
 void print_winsock_error(const char* operation) {
     std::cerr << operation << " failed. WSA error: " << WSAGetLastError() << '\n';
 }
 
+std::string utf8_from_wide(const wchar_t* value) {
+    const int required_size = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value,
+        -1,
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    if (required_size <= 0) {
+        return {};
+    }
+
+    std::string result(static_cast<std::size_t>(required_size), '\0');
+    if (WideCharToMultiByte(
+            CP_UTF8,
+            WC_ERR_INVALID_CHARS,
+            value,
+            -1,
+            result.data(),
+            required_size,
+            nullptr,
+            nullptr) == 0) {
+        return {};
+    }
+    result.resize(static_cast<std::size_t>(required_size - 1));
+    return result;
+}
+
 }  // namespace
 
-int main(int argc, char* argv[]) {
-    const std::string server_ip = argc >= 2 ? argv[1] : kDefaultServerIp;
-    const int server_port = argc >= 3 ? std::stoi(argv[2]) : kDefaultServerPort;
+int wmain(int argc, wchar_t* argv[]) {
+    const std::string server_ip = argc >= 2 ? utf8_from_wide(argv[1]) : kDefaultServerIp;
+    const int server_port = argc >= 3
+        ? std::stoi(utf8_from_wide(argv[2]))
+        : kDefaultServerPort;
+    const std::string username = argc >= 4
+        ? utf8_from_wide(argv[3])
+        : kDefaultUsername;
+    const std::string chat_content = argc >= 5
+        ? utf8_from_wide(argv[4])
+        : kDefaultChatContent;
 
     WSADATA wsa_data{};
     const int startup_result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
@@ -64,24 +107,53 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Connected to " << server_ip << ':' << server_port << '\n';
 
-    if (!protocol::send_frame(socket_handle, "Hello") ||
-        !protocol::send_frame(socket_handle, "World")) {
-        std::cerr << "Failed to send framed message.\n";
+    const message::Message login{"login", username, ""};
+    if (!message::send_message(socket_handle, login)) {
+        std::cerr << "Failed to send login message.\n";
         closesocket(socket_handle);
         WSACleanup();
         return 1;
     }
 
-    for (int i = 0; i < 2; ++i) {
-        std::string response;
-        if (!protocol::recv_frame(socket_handle, response)) {
-            std::cerr << "Failed to receive framed response.\n";
-            closesocket(socket_handle);
-            WSACleanup();
-            return 1;
-        }
-        std::cout << "Server replied: " << response << '\n';
+    message::Message login_response;
+    if (!message::receive_message(socket_handle, login_response)) {
+        std::cerr << "Failed to receive login response.\n";
+        closesocket(socket_handle);
+        WSACleanup();
+        return 1;
     }
+    if (login_response.type != "login_ok") {
+        std::cerr << "Login failed: " << login_response.content << '\n';
+        closesocket(socket_handle);
+        WSACleanup();
+        return 1;
+    }
+
+    std::cout << "Logged in as " << username << '\n';
+
+    const message::Message chat{"chat", "", chat_content};
+    if (!message::send_message(socket_handle, chat)) {
+        std::cerr << "Failed to send chat message.\n";
+        closesocket(socket_handle);
+        WSACleanup();
+        return 1;
+    }
+
+    message::Message chat_response;
+    if (!message::receive_message(socket_handle, chat_response)) {
+        std::cerr << "Failed to receive chat response.\n";
+        closesocket(socket_handle);
+        WSACleanup();
+        return 1;
+    }
+    if (chat_response.type != "chat") {
+        std::cerr << "Unexpected chat response: " << chat_response.content << '\n';
+        closesocket(socket_handle);
+        WSACleanup();
+        return 1;
+    }
+
+    std::cout << "Server echoed: " << chat_response.content << '\n';
 
     closesocket(socket_handle);
     WSACleanup();
