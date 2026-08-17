@@ -12,7 +12,7 @@ struct Message {
     std::string username;
     std::string user_code;
     std::string content;
-    std::vector<std::string> users;
+    std::vector<std::string> users{};
 };
 
 bool send_message(SOCKET socket_handle, const Message& message);
