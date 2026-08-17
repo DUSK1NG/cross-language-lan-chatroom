@@ -21,6 +21,7 @@ constexpr const char* kDefaultUsername = "Alice";
 constexpr const char* kDefaultUserCode = "ALICE001";
 constexpr DWORD kConsolePollIntervalMs = 100;
 constexpr DWORD kInputBufferSize = 256;
+constexpr DWORD kConsoleEventBufferSize = 32;
 
 enum class InputReadResult {
     kLineReady,
@@ -69,6 +70,39 @@ std::string utf8_from_wide(const wchar_t* value) {
     return result;
 }
 
+std::wstring wide_from_utf8(const std::string& value, bool& valid) {
+    valid = true;
+    if (value.empty()) {
+        return {};
+    }
+
+    const int value_size = static_cast<int>(value.size());
+    const int required_size = MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        value.data(),
+        value_size,
+        nullptr,
+        0);
+    if (required_size <= 0) {
+        valid = false;
+        return {};
+    }
+
+    std::wstring result(static_cast<std::size_t>(required_size), L'\0');
+    if (MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            value.data(),
+            value_size,
+            result.data(),
+            required_size) != required_size) {
+        valid = false;
+        return {};
+    }
+    return result;
+}
+
 std::string format_identity(const message::Message& incoming_message) {
     if (incoming_message.username.empty()) {
         return {};
@@ -88,22 +122,172 @@ bool is_console_input(HANDLE input_handle) {
     return GetConsoleMode(input_handle, &mode) != 0;
 }
 
+class ConsoleInputModeGuard {
+public:
+    bool activate(HANDLE input_handle) {
+        if (active_) {
+            return true;
+        }
+
+        DWORD original_mode = 0;
+        if (GetConsoleMode(input_handle, &original_mode) == 0) {
+            return false;
+        }
+
+        const DWORD event_mode = original_mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+        if (SetConsoleMode(input_handle, event_mode) == 0) {
+            return false;
+        }
+
+        input_handle_ = input_handle;
+        original_mode_ = original_mode;
+        active_ = true;
+        return true;
+    }
+
+    void restore() {
+        if (!active_) {
+            return;
+        }
+        SetConsoleMode(input_handle_, original_mode_);
+        active_ = false;
+    }
+
+    ~ConsoleInputModeGuard() {
+        restore();
+    }
+
+private:
+    HANDLE input_handle_ = INVALID_HANDLE_VALUE;
+    DWORD original_mode_ = 0;
+    bool active_ = false;
+};
+
+void write_console_locked(
+    HANDLE output_handle,
+    std::mutex& output_mutex,
+    const wchar_t* text,
+    std::size_t text_length) {
+    if (output_handle == INVALID_HANDLE_VALUE || output_handle == nullptr || text_length == 0) {
+        return;
+    }
+
+    DWORD output_mode = 0;
+    if (GetConsoleMode(output_handle, &output_mode) == 0) {
+        return;
+    }
+
+    const std::lock_guard<std::mutex> lock(output_mutex);
+    DWORD chars_written = 0;
+    WriteConsoleW(
+        output_handle,
+        text,
+        static_cast<DWORD>(text_length),
+        &chars_written,
+        nullptr);
+}
+
+bool is_high_surrogate(wchar_t value) {
+    return value >= 0xD800 && value <= 0xDBFF;
+}
+
+std::size_t erase_last_utf16_code_point(std::wstring& input) {
+    if (input.empty()) {
+        return 0;
+    }
+
+    input.pop_back();
+    std::size_t removed_count = 1;
+    if (!input.empty() && is_high_surrogate(input.back())) {
+        input.pop_back();
+        removed_count = 2;
+    }
+    return removed_count;
+}
+
 InputReadResult read_console_line(
     HANDLE input_handle,
+    HANDLE output_handle,
     std::atomic<bool>& running,
-    std::wstring& pending_input,
+    std::mutex& output_mutex,
+    std::wstring& current_input,
     std::wstring& line) {
     line.clear();
 
     while (running.load()) {
-        const std::size_t newline_position = pending_input.find(L'\n');
-        if (newline_position != std::wstring::npos) {
-            line = pending_input.substr(0, newline_position);
-            pending_input.erase(0, newline_position + 1);
-            if (!line.empty() && line.back() == L'\r') {
-                line.pop_back();
+        const DWORD wait_result = WaitForSingleObject(input_handle, kConsolePollIntervalMs);
+        if (wait_result == WAIT_TIMEOUT) {
+            continue;
+        }
+        if (wait_result != WAIT_OBJECT_0) {
+            return InputReadResult::kError;
+        }
+
+        INPUT_RECORD records[kConsoleEventBufferSize]{};
+        DWORD records_read = 0;
+        if (!ReadConsoleInputW(
+                input_handle,
+                records,
+                kConsoleEventBufferSize,
+                &records_read)) {
+            return InputReadResult::kError;
+        }
+
+        for (DWORD index = 0; index < records_read; ++index) {
+            if (running.load() == false || records[index].EventType != KEY_EVENT) {
+                continue;
             }
-            return InputReadResult::kLineReady;
+
+            const KEY_EVENT_RECORD& key_event = records[index].Event.KeyEvent;
+            if (key_event.bKeyDown == FALSE) {
+                continue;
+            }
+
+            if (key_event.wVirtualKeyCode == VK_RETURN) {
+                write_console_locked(output_handle, output_mutex, L"\r\n", 2);
+                line = current_input;
+                current_input.clear();
+                return InputReadResult::kLineReady;
+            }
+
+            if (key_event.wVirtualKeyCode == VK_BACK) {
+                const std::size_t removed_count = erase_last_utf16_code_point(current_input);
+                for (std::size_t removed = 0; removed < removed_count; ++removed) {
+                    write_console_locked(output_handle, output_mutex, L"\b \b", 3);
+                }
+                continue;
+            }
+
+            const wchar_t unicode_character = key_event.uChar.UnicodeChar;
+            if (unicode_character >= L' ' && unicode_character != 0x7F) {
+                current_input.push_back(unicode_character);
+                write_console_locked(output_handle, output_mutex, &unicode_character, 1);
+            }
+        }
+    }
+
+    return InputReadResult::kInterrupted;
+}
+
+InputReadResult read_redirected_pipe_line(
+    HANDLE input_handle,
+    std::atomic<bool>& running,
+    std::string& pending_input,
+    std::wstring& line) {
+    line.clear();
+
+    while (running.load()) {
+        const std::size_t newline_position = pending_input.find('\n');
+        if (newline_position != std::string::npos) {
+            std::string utf8_line = pending_input.substr(0, newline_position);
+            pending_input.erase(0, newline_position + 1);
+            if (!utf8_line.empty() && utf8_line.back() == '\r') {
+                utf8_line.pop_back();
+            }
+
+            bool valid_utf8 = false;
+            line = wide_from_utf8(utf8_line, valid_utf8);
+            return valid_utf8 ? InputReadResult::kLineReady : InputReadResult::kError;
         }
 
         const DWORD wait_result = WaitForSingleObject(input_handle, kConsolePollIntervalMs);
@@ -114,22 +298,17 @@ InputReadResult read_console_line(
             return InputReadResult::kError;
         }
 
-        wchar_t buffer[kInputBufferSize]{};
-        DWORD chars_read = 0;
-        if (!ReadConsoleW(
-                input_handle,
-                buffer,
-                kInputBufferSize - 1,
-                &chars_read,
-                nullptr)) {
-            return InputReadResult::kError;
+        char buffer[kInputBufferSize]{};
+        DWORD bytes_read = 0;
+        if (!ReadFile(input_handle, buffer, kInputBufferSize, &bytes_read, nullptr)) {
+            return GetLastError() == ERROR_BROKEN_PIPE
+                ? InputReadResult::kEndOfInput
+                : InputReadResult::kError;
         }
-
-        if (chars_read == 0) {
+        if (bytes_read == 0) {
             return InputReadResult::kEndOfInput;
         }
-
-        pending_input.append(buffer, buffer + chars_read);
+        pending_input.append(buffer, buffer + bytes_read);
     }
 
     return InputReadResult::kInterrupted;
@@ -139,10 +318,23 @@ InputReadResult read_next_input_line(
     HANDLE input_handle,
     bool use_console_input,
     std::atomic<bool>& running,
-    std::wstring& pending_input,
+    HANDLE output_handle,
+    std::mutex& output_mutex,
+    std::wstring& console_input,
+    std::string& redirected_input,
     std::wstring& line) {
     if (use_console_input) {
-        return read_console_line(input_handle, running, pending_input, line);
+        return read_console_line(
+            input_handle,
+            output_handle,
+            running,
+            output_mutex,
+            console_input,
+            line);
+    }
+
+    if (input_handle != INVALID_HANDLE_VALUE && GetFileType(input_handle) == FILE_TYPE_PIPE) {
+        return read_redirected_pipe_line(input_handle, running, redirected_input, line);
     }
 
     if (!std::getline(std::wcin, line)) {
@@ -339,17 +531,31 @@ int wmain(int argc, wchar_t* argv[]) {
         std::ref(output_mutex));
 
     const HANDLE input_handle = GetStdHandle(STD_INPUT_HANDLE);
+    const HANDLE output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
     const bool use_console_input = is_console_input(input_handle);
-    std::wstring pending_input;
+    ConsoleInputModeGuard console_input_mode;
+    const bool console_input_ready = !use_console_input || console_input_mode.activate(input_handle);
+    std::wstring console_input;
+    std::string redirected_input;
     bool shutdown_requested = false;
 
-    while (running.load()) {
+    if (!console_input_ready) {
+        print_locked(output_mutex, "Failed to configure console input.\n", std::cerr);
+        running.store(false);
+        shutdown_socket(socket_handle);
+        shutdown_requested = true;
+    }
+
+    while (console_input_ready && running.load()) {
         std::wstring input_line_wide;
         const InputReadResult read_result = read_next_input_line(
             input_handle,
             use_console_input,
             running,
-            pending_input,
+            output_handle,
+            output_mutex,
+            console_input,
+            redirected_input,
             input_line_wide);
 
         if (read_result == InputReadResult::kInterrupted) {
@@ -422,6 +628,7 @@ int wmain(int argc, wchar_t* argv[]) {
         }
     }
 
+    console_input_mode.restore();
     running.store(false);
     if (!shutdown_requested) {
         shutdown_socket(socket_handle);
