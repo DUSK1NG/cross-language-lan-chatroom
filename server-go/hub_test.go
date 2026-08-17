@@ -150,6 +150,41 @@ func TestHubBroadcastsToAllRegisteredClients(t *testing.T) {
 	assertMessageReceived(t, second.Send, want)
 }
 
+func TestHubRespondsWithSortedOnlineUsers(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	first := newTestClient(t, "Zoe", "Z001")
+	second := newTestClient(t, "Alex", "A001")
+	if err := registerForTest(t, hub, first); err != nil {
+		t.Fatalf("register first client: %v", err)
+	}
+	if err := registerForTest(t, hub, second); err != nil {
+		t.Fatalf("register second client: %v", err)
+	}
+
+	assertMessageReceived(t, first.Send, Message{
+		Type:    "system",
+		Content: "Zoe#Z001 joined the chat",
+	})
+	assertMessageReceived(t, first.Send, Message{
+		Type:    "system",
+		Content: "Alex#A001 joined the chat",
+	})
+	assertMessageReceived(t, second.Send, Message{
+		Type:    "system",
+		Content: "Alex#A001 joined the chat",
+	})
+
+	hub.RequestUsers <- first
+
+	assertMessageReceived(t, first.Send, Message{
+		Type:  "users_response",
+		Users: []string{"Alex#A001", "Zoe#Z001"},
+	})
+	assertNoMessageReceived(t, second.Send)
+}
+
 func TestHubUnregisterClosesClientSendChannel(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
@@ -319,6 +354,16 @@ func assertChannelClosed(t *testing.T, messages <-chan Message) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for channel to close")
+	}
+}
+
+func assertNoMessageReceived(t *testing.T, messages <-chan Message) {
+	t.Helper()
+
+	select {
+	case got := <-messages:
+		t.Fatalf("received unexpected message %+v", got)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"sort"
 	"sync"
 )
 
@@ -62,22 +63,24 @@ func (c *Client) closeSend() {
 // Hub 是聊天室中客户端集合和广播消息的唯一管理者。
 // Clients、ActiveCodes 和 UsedCodes 只能由 Run goroutine 访问。
 type Hub struct {
-	Clients     map[*Client]bool
-	Register    chan RegisterRequest
-	Unregister  chan *Client
-	Broadcast   chan Message
-	ActiveCodes map[string]*Client
-	UsedCodes   map[string]struct{}
+	Clients      map[*Client]bool
+	Register     chan RegisterRequest
+	Unregister   chan *Client
+	Broadcast    chan Message
+	RequestUsers chan *Client
+	ActiveCodes  map[string]*Client
+	UsedCodes    map[string]struct{}
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		Clients:     make(map[*Client]bool),
-		Register:    make(chan RegisterRequest),
-		Unregister:  make(chan *Client),
-		Broadcast:   make(chan Message),
-		ActiveCodes: make(map[string]*Client),
-		UsedCodes:   make(map[string]struct{}),
+		Clients:      make(map[*Client]bool),
+		Register:     make(chan RegisterRequest),
+		Unregister:   make(chan *Client),
+		Broadcast:    make(chan Message),
+		RequestUsers: make(chan *Client),
+		ActiveCodes:  make(map[string]*Client),
+		UsedCodes:    make(map[string]struct{}),
 	}
 }
 
@@ -103,6 +106,9 @@ func (h *Hub) Run() {
 					log.Printf("client removed because send buffer is full: %s", client.Username)
 				}
 			}
+
+		case client := <-h.RequestUsers:
+			h.handleRequestUsers(client)
 		}
 	}
 }
@@ -180,6 +186,33 @@ func (h *Hub) broadcastSystemMessage(content string) {
 			client.closeConnection()
 			log.Printf("client removed because send buffer is full: %s", client.Username)
 		}
+	}
+}
+
+func (h *Hub) handleRequestUsers(requester *Client) {
+	if requester == nil {
+		return
+	}
+	if _, ok := h.Clients[requester]; !ok {
+		return
+	}
+
+	users := make([]string, 0, len(h.Clients))
+	for client := range h.Clients {
+		users = append(users, client.Username+"#"+client.UserCode)
+	}
+	sort.Strings(users)
+
+	select {
+	case requester.Send <- Message{
+		Type:  "users_response",
+		Users: users,
+	}:
+	default:
+		h.removeClient(requester)
+		requester.closeSend()
+		requester.closeConnection()
+		log.Printf("client removed because send buffer is full: %s", requester.Username)
 	}
 }
 
