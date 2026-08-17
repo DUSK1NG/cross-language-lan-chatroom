@@ -160,3 +160,86 @@ ok  	_/C_/Users/jking1/Desktop/my-project/chat_X/server-go	1.291s
 ### Commit for fix round 1
 
 - `420e837` — `fix: tighten hub register contract`
+
+---
+
+## Fix round 2 (2026-08-17)
+
+### Summary
+
+Wired `loginMessage.UserCode` and its normalized form into `Client` before hub registration, moved registration ahead of writer startup, and kept `login_ok` behind successful registration so real protocol clients with `user_code` can complete login without leaving a blocked writer goroutine on registration failure.
+
+### TDD evidence for fix round 2
+
+Added real login-flow regression coverage in `server-go/hub_test.go`:
+
+- `TestHandleConnectionRegistersLoginUserCodeAndBroadcastsJoin`
+- `TestHandleConnectionRejectsDuplicateCodeBeforeLoginOK`
+
+Command:
+
+```powershell
+$env:Path = 'C:\Users\jking1\go-sdk\go\bin;' + $env:Path
+$env:GO111MODULE = 'off'
+$env:GOCACHE = 'C:\Users\jking1\Desktop\my-project\chat_X\server-go\.go-build-cache'
+go test ./...
+```
+
+Output:
+
+```text
+2026/08/17 17:26:29 client registered: Alice
+2026/08/17 17:26:29 client registered: Alice
+2026/08/17 17:26:29 client unregistered: Alice
+2026/08/17 17:26:29 client registered: Alice
+2026/08/17 17:26:29 client registered: Alice
+2026/08/17 17:26:29 client registered: Bob
+2026/08/17 17:26:29 client unregistered: Alice
+2026/08/17 17:26:29 client registered: Alice
+2026/08/17 17:26:29 client registered: Bob
+2026/08/17 17:26:29 client registered: Alice
+2026/08/17 17:26:29 client unregistered: Alice
+2026/08/17 17:26:29 client connected: pipe
+2026/08/17 17:26:29 failed to register client Alice: register request requires user code identity
+2026/08/17 17:26:29 client disconnected: pipe
+--- FAIL: TestHandleConnectionRegistersLoginUserCodeAndBroadcastsJoin (0.00s)
+    hub_test.go:194: received message {Type:login_error Username: UserCode: Content:Login failed}, want {Type:system Username: UserCode: Content:Alice#Alex2026 joined the chat}
+2026/08/17 17:26:29 client connected: pipe
+2026/08/17 17:26:29 failed to register client Alice: register request requires user code identity
+2026/08/17 17:26:29 client disconnected: pipe
+--- FAIL: TestHandleConnectionRejectsDuplicateCodeBeforeLoginOK (0.00s)
+    hub_test.go:230: received message {Type:login_error Username: UserCode: Content:Login failed}, want {Type:system Username: UserCode: Content:Alice#Alex2026 joined the chat}
+FAIL
+FAIL	_/C_/Users/jking1/Desktop/my-project/chat_X/server-go	0.274s
+FAIL
+```
+
+### Verification for fix round 2
+
+Command:
+
+```powershell
+$env:Path = 'C:\Users\jking1\go-sdk\go\bin;' + $env:Path
+$env:GO111MODULE = 'off'
+$env:GOCACHE = 'C:\Users\jking1\Desktop\my-project\chat_X\server-go\.go-build-cache'
+gofmt -w hub.go hub_test.go client.go
+go test ./...
+go test -race ./...
+go vet ./...
+```
+
+Output:
+
+```text
+ok  	_/C_/Users/jking1/Desktop/my-project/chat_X/server-go	0.272s
+ok  	_/C_/Users/jking1/Desktop/my-project/chat_X/server-go	1.275s
+```
+
+### Notes / concerns for fix round 2
+
+- `newClient(conn, username)` remains unchanged as required; identity wiring now happens immediately after construction in `handleConnection`.
+- This round fixes the real Go protocol login path for valid `user_code` clients and prevents the pre-registration writer goroutine leak by only starting `writePump` after registration succeeds.
+
+### Commit for fix round 2
+
+- `22b45b4` — `fix: wire login user codes before hub register`

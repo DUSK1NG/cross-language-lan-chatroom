@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net"
 	"testing"
 	"time"
 )
@@ -165,6 +166,108 @@ func TestHubUnregisterClosesClientSendChannel(t *testing.T) {
 	assertChannelClosed(t, client.Send)
 }
 
+func TestHandleConnectionRegistersLoginUserCodeAndBroadcastsJoin(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	go func() {
+		handleConnection(serverConn, hub)
+		close(done)
+	}()
+
+	if err := sendMessage(clientConn, Message{
+		Type:     "login",
+		Username: "Alice",
+		UserCode: "Alex2026",
+	}); err != nil {
+		t.Fatalf("send login message: %v", err)
+	}
+
+	assertMessageFromConn(t, clientConn, Message{
+		Type:    "login_ok",
+		Content: "Login successful",
+	})
+	assertMessageFromConn(t, clientConn, Message{
+		Type:    "system",
+		Content: "Alice#Alex2026 joined the chat",
+	})
+
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for handleConnection to exit")
+	}
+}
+
+func TestHandleConnectionRejectsDuplicateCodeBeforeLoginOK(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	firstServer, firstClient := net.Pipe()
+	firstDone := make(chan struct{})
+	go func() {
+		handleConnection(firstServer, hub)
+		close(firstDone)
+	}()
+
+	if err := sendMessage(firstClient, Message{
+		Type:     "login",
+		Username: "Alice",
+		UserCode: "Alex2026",
+	}); err != nil {
+		t.Fatalf("send first login message: %v", err)
+	}
+
+	assertMessageFromConn(t, firstClient, Message{
+		Type:    "login_ok",
+		Content: "Login successful",
+	})
+	assertMessageFromConn(t, firstClient, Message{
+		Type:    "system",
+		Content: "Alice#Alex2026 joined the chat",
+	})
+
+	secondServer, secondClient := net.Pipe()
+	defer secondClient.Close()
+
+	secondDone := make(chan struct{})
+	go func() {
+		handleConnection(secondServer, hub)
+		close(secondDone)
+	}()
+
+	if err := sendMessage(secondClient, Message{
+		Type:     "login",
+		Username: "Bob",
+		UserCode: "alex2026",
+	}); err != nil {
+		t.Fatalf("send second login message: %v", err)
+	}
+
+	assertMessageFromConn(t, secondClient, Message{
+		Type:    "login_error",
+		Content: "Login failed",
+	})
+
+	_ = firstClient.Close()
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first handleConnection to exit")
+	}
+
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for second handleConnection to exit")
+	}
+}
+
 func registerForTest(t *testing.T, hub *Hub, client *Client) error {
 	t.Helper()
 	request := RegisterRequest{Client: client, Result: make(chan error, 1)}
@@ -211,5 +314,20 @@ func assertChannelClosed(t *testing.T, messages <-chan Message) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for channel to close")
+	}
+}
+
+func assertMessageFromConn(t *testing.T, conn net.Conn, want Message) {
+	t.Helper()
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	got, err := receiveMessage(conn)
+	if err != nil {
+		t.Fatalf("receive message: %v", err)
+	}
+	if got != want {
+		t.Fatalf("received message %+v, want %+v", got, want)
 	}
 }

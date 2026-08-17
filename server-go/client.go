@@ -51,15 +51,18 @@ func handleConnection(conn net.Conn, hub *Hub) {
 	}
 
 	client = newClient(conn, loginMessage.Username)
-	if err := sendMessage(conn, Message{
-		Type:    "login_ok",
-		Content: "Login successful",
-	}); err != nil {
-		log.Printf("failed to send login response to %s: %v", remoteAddress, err)
+	client.UserCode = loginMessage.UserCode
+	normalizedCode, err := normalizeUserCode(loginMessage.UserCode)
+	if err != nil {
+		log.Printf("failed to normalize user code for %s: %v", remoteAddress, err)
+		_ = sendMessage(conn, Message{
+			Type:    "login_error",
+			Content: "Invalid username",
+		})
 		return
 	}
+	client.NormalizedCode = normalizedCode
 
-	go client.writePump()
 	registerResult := make(chan error, 1)
 	hub.Register <- RegisterRequest{Client: client, Result: registerResult}
 	if err := <-registerResult; err != nil {
@@ -70,6 +73,16 @@ func handleConnection(conn net.Conn, hub *Hub) {
 		})
 		return
 	}
+
+	if err := sendMessage(conn, Message{
+		Type:    "login_ok",
+		Content: "Login successful",
+	}); err != nil {
+		log.Printf("failed to send login response to %s: %v", remoteAddress, err)
+		return
+	}
+
+	go client.writePump()
 	log.Printf("user logged in: %s", client.Username)
 
 	client.readPump(hub)
