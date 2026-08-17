@@ -146,6 +146,9 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "Logged in as "
               << format_identity(login_response) << '\n';
 
+    const std::string expected_username = login_response.username;
+    const std::string expected_user_code = login_response.user_code;
+
     const message::Message chat{"chat", "", "", chat_content};
     if (!message::send_message(socket_handle, chat)) {
         std::cerr << "Failed to send chat message.\n";
@@ -166,7 +169,7 @@ int wmain(int argc, wchar_t* argv[]) {
         if (incoming_message.type == "system") {
             const std::string identity = format_identity(incoming_message);
             if (!identity.empty()) {
-                std::cout << "[System] " << identity << ": " << incoming_message.content << '\n';
+                std::cout << "[System] " << identity << ' ' << incoming_message.content << '\n';
             } else {
                 std::cout << "[System] " << incoming_message.content << '\n';
             }
@@ -180,7 +183,13 @@ int wmain(int argc, wchar_t* argv[]) {
             } else {
                 std::cout << incoming_message.content << '\n';
             }
-            break;
+
+            if (incoming_message.username == expected_username &&
+                incoming_message.user_code == expected_user_code &&
+                incoming_message.content == chat_content) {
+                break;
+            }
+            continue;
         }
 
         if (incoming_message.type == "error" || incoming_message.type == "login_error") {
