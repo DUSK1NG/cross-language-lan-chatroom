@@ -11,6 +11,9 @@ bool send_message(SOCKET socket_handle, const Message& message) {
     if (!message.username.empty()) {
         object["username"] = message.username;
     }
+    if (!message.user_code.empty()) {
+        object["user_code"] = message.user_code;
+    }
     if (!message.content.empty()) {
         object["content"] = message.content;
     }
@@ -38,6 +41,13 @@ bool receive_message(SOCKET socket_handle, Message& message) {
                 return false;
             }
             parsed.username = object.at("username").get<std::string>();
+        }
+
+        if (object.contains("user_code")) {
+            if (!object.at("user_code").is_string()) {
+                return false;
+            }
+            parsed.user_code = object.at("user_code").get<std::string>();
         }
 
         if (object.contains("content")) {

@@ -14,6 +14,7 @@ namespace {
 constexpr const char* kDefaultServerIp = "127.0.0.1";
 constexpr int kDefaultServerPort = 8888;
 constexpr const char* kDefaultUsername = "Alice";
+constexpr const char* kDefaultUserCode = "ALICE001";
 constexpr const char* kDefaultChatContent = "Hello from C++";
 
 void print_winsock_error(const char* operation) {
@@ -50,6 +51,16 @@ std::string utf8_from_wide(const wchar_t* value) {
     return result;
 }
 
+std::string format_identity(const message::Message& incoming_message) {
+    if (incoming_message.username.empty()) {
+        return {};
+    }
+    if (incoming_message.user_code.empty()) {
+        return incoming_message.username;
+    }
+    return incoming_message.username + "#" + incoming_message.user_code;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t* argv[]) {
@@ -60,8 +71,11 @@ int wmain(int argc, wchar_t* argv[]) {
     const std::string username = argc >= 4
         ? utf8_from_wide(argv[3])
         : kDefaultUsername;
-    const std::string chat_content = argc >= 5
+    const std::string user_code = argc >= 5
         ? utf8_from_wide(argv[4])
+        : kDefaultUserCode;
+    const std::string chat_content = argc >= 6
+        ? utf8_from_wide(argv[5])
         : kDefaultChatContent;
 
     WSADATA wsa_data{};
@@ -107,7 +121,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
     std::cout << "Connected to " << server_ip << ':' << server_port << '\n';
 
-    const message::Message login{"login", username, ""};
+    const message::Message login{"login", username, user_code, ""};
     if (!message::send_message(socket_handle, login)) {
         std::cerr << "Failed to send login message.\n";
         closesocket(socket_handle);
@@ -129,9 +143,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return 1;
     }
 
-    std::cout << "Logged in as " << username << '\n';
+    std::cout << "Logged in as "
+              << format_identity(login_response) << '\n';
 
-    const message::Message chat{"chat", "", chat_content};
+    const message::Message chat{"chat", "", "", chat_content};
     if (!message::send_message(socket_handle, chat)) {
         std::cerr << "Failed to send chat message.\n";
         closesocket(socket_handle);
@@ -139,21 +154,45 @@ int wmain(int argc, wchar_t* argv[]) {
         return 1;
     }
 
-    message::Message chat_response;
-    if (!message::receive_message(socket_handle, chat_response)) {
-        std::cerr << "Failed to receive chat response.\n";
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-    if (chat_response.type != "chat") {
-        std::cerr << "Unexpected chat response: " << chat_response.content << '\n';
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
+    while (true) {
+        message::Message incoming_message;
+        if (!message::receive_message(socket_handle, incoming_message)) {
+            std::cerr << "Failed to receive chat response.\n";
+            closesocket(socket_handle);
+            WSACleanup();
+            return 1;
+        }
 
-    std::cout << "Server echoed: " << chat_response.content << '\n';
+        if (incoming_message.type == "system") {
+            const std::string identity = format_identity(incoming_message);
+            if (!identity.empty()) {
+                std::cout << "[System] " << identity << ": " << incoming_message.content << '\n';
+            } else {
+                std::cout << "[System] " << incoming_message.content << '\n';
+            }
+            continue;
+        }
+
+        if (incoming_message.type == "chat") {
+            const std::string identity = format_identity(incoming_message);
+            if (!identity.empty()) {
+                std::cout << identity << ": " << incoming_message.content << '\n';
+            } else {
+                std::cout << incoming_message.content << '\n';
+            }
+            break;
+        }
+
+        if (incoming_message.type == "error" || incoming_message.type == "login_error") {
+            std::cerr << "Server error: " << incoming_message.content << '\n';
+            closesocket(socket_handle);
+            WSACleanup();
+            return 1;
+        }
+
+        std::cout << "Received " << incoming_message.type
+                  << ": " << incoming_message.content << '\n';
+    }
 
     closesocket(socket_handle);
     WSACleanup();

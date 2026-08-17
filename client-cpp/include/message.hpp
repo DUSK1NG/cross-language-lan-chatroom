@@ -9,6 +9,7 @@ namespace message {
 struct Message {
     std::string type;
     std::string username;
+    std::string user_code;
     std::string content;
 };
 
