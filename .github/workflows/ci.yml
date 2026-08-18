@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.20.x
+
+      - name: Verify CMake and MinGW
+        shell: pwsh
+        run: |
+          cmake --version
+          mingw32-make --version
+
+      - name: Test Go server
+        shell: pwsh
+        run: cd server-go && go test ./...
+
+      - name: Test Go server with race detector
+        shell: pwsh
+        run: cd server-go && go test -race ./...
+
+      - name: Vet Go server
+        shell: pwsh
+        run: cd server-go && go vet ./...
+
+      - name: Build Go server
+        shell: pwsh
+        run: cd server-go && go build -o chat-server.exe .
+
+      - name: Configure C++ client
+        shell: pwsh
+        run: cmake -S client-cpp -B client-cpp/build -G "MinGW Makefiles"
+
+      - name: Build C++ client
+        shell: pwsh
+        run: cmake --build client-cpp/build --config Release
+
+      - name: Test C++ client
+        shell: pwsh
+        run: ctest --test-dir client-cpp/build --output-on-failure
+
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.20.x
+
+      - name: Test Go server
+        run: cd server-go && go test ./...
+
+      - name: Test Go server with race detector
+        run: cd server-go && go test -race ./...
+
+      - name: Vet Go server
+        run: cd server-go && go vet ./...
+
+      - name: Build Go server
+        run: cd server-go && go build -o chat-server .
