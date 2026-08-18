@@ -23,6 +23,8 @@ C++ Client C ─┘                                      0.0.0.0:8888
 
 Go Server 使用一个 Hub goroutine 管理客户端 map、注册、注销、广播和定向响应。每个已登录客户端有读取路径和写入路径；Client.Send 只由 Hub 写入和关闭，避免多个 goroutine 同时操作共享 map 或触发 send on closed channel。
 
+完整架构图见 [docs/architecture.md](docs/architecture.md)。
+
 ## 目录结构
 
 ~~~text
@@ -30,6 +32,9 @@ server-go/                 Go TCP Server
 client-cpp/                C++17 Windows Client
 docs/protocol.md           framing 和 JSON 协议
 docs/testing.md             构建、异常测试和局域网测试
+docs/architecture.md       Mermaid 架构图
+docs/github-publishing.md  GitHub 发布清单
+screenshots/                局域网测试截图
 docs/superpowers/           设计、实现计划和任务记录
 ~~~
 
@@ -139,6 +144,10 @@ Wi-Fi 和 Ethernet 可以互通，因为 TCP 建立在 IP 之上；只要两台�
 
 实际 Stage 9 局域网验证已通过：Ethernet 服务端 `192.168.0.3` 与 Wi-Fi 客户端 `192.168.0.108` 成功建立 TCP 连接，Alice/Bob 完成多人中文聊天和断线清理测试。
 
+## Screenshots
+
+测试截图说明见 [screenshots/README.md](screenshots/README.md)，建议展示 Server 监听、多个客户端中文聊天、`/users` 和 Ethernet/Wi-Fi 拓扑。
+
 ## Stage 8 稳定性行为
 
 - 长度头不足 4 字节、payload 截断、长度为 0 或超过 64 KiB：拒绝当前 frame。
@@ -167,3 +176,7 @@ Stage 8 的 C++ 连接失败路径、协议防御代码审查和严格编译路�
 ## Resume 项目描述
 
 独立开发基于 Go 与 C++ 的跨语言局域网多人聊天室，使用 TCP Socket 和 4-byte big-endian length + UTF-8 JSON 应用层协议处理粘包与拆包；Go Server 采用 goroutine/channel 管理并发客户端和广播，C++ Client 基于 Winsock2 与 std::thread 实现异步收发，并完成协议异常、断线清理和局域网通信设计。
+
+## GitHub 发布
+
+当前本地仓库尚未配置 `origin`，发布步骤见 [docs/github-publishing.md](docs/github-publishing.md)；配置远程仓库前请确认仓库名称和可见性。
