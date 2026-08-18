@@ -173,7 +173,7 @@ cd ..\client-cpp
 | 超长 frame | `length > 65536` | 不分配 payload，当前连接结束 | Go protocol test 与 C++ `protocol-tests` 自动化覆盖 |
 | payload 截断 | 声明长度大于实际数据后关闭 | `io.ReadFull` / `recv_all` 返回失败 | Go protocol test 与 C++ `protocol-tests` 自动化覆盖 |
 | 非法 JSON / UTF-8 | 发送 malformed payload | 消息解析失败，连接不继续处理 | Go message test 覆盖；C++ `protocol-tests` 自动化覆盖 malformed JSON，非法 UTF-8 仍由 Go 自动化覆盖 |
-| 异常后重连 | 异常 Client 退出后启动新 Client | 新连接可以登录 | 需本机手工复核 |
+| 异常后重连 | Server 运行期间停止后重新启动 | Client 显示 `Connection to server lost.`、`Reconnecting...`，按 1/2/4/8/16/30 秒退避，重新登录后恢复聊天 | 需本机手工复核 |
 
 不要把“没有崩溃”当成全部协议测试通过；还要同时检查连接关闭、Server 继续接受新连接、其他 Client 仍能收发，以及测试后没有残留进程。
 
@@ -234,4 +234,4 @@ Test-NetConnection 192.168.1.100 -Port 8888
 
 - C++ 客户端仍是 Windows-only；Ubuntu job 不负责验证 `client-cpp`
 - 交互式控制台“自然输入 / 退出”、真实局域网组网和截图核对仍需真实 Windows 环境手工复核
-- 当前版本没有自动重连、TLS 或持久化数据库，这些能力也不在现有验收范围内
+- 当前版本已经支持 C++ Client 自动重连；TLS 和持久化数据库仍未实现，这些能力不在本次验收范围内

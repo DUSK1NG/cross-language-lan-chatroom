@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(chat-client
     src/main.cpp
     src/command.cpp
+    src/connection.cpp
     src/message.cpp
     src/protocol.cpp
 )
@@ -47,6 +48,21 @@ target_include_directories(protocol-tests PRIVATE
 find_package(Threads REQUIRED)
 target_link_libraries(protocol-tests PRIVATE ws2_32 Threads::Threads)
 
+add_executable(connection-tests
+    tests/connection_tests.cpp
+    src/connection.cpp
+    src/message.cpp
+    src/protocol.cpp
+)
+
+target_include_directories(connection-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+target_link_libraries(connection-tests PRIVATE ws2_32 Threads::Threads)
+
 enable_testing()
 add_test(NAME command-tests COMMAND command-tests)
 add_test(NAME protocol-tests COMMAND protocol-tests)
+add_test(NAME connection-tests COMMAND connection-tests)

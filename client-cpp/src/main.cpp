@@ -5,9 +5,11 @@
 #include <windows.h>
 
 #include "command.hpp"
+#include "connection.hpp"
 #include "message.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
@@ -34,10 +36,6 @@ enum class InputReadResult {
     kEndOfInput,
     kError,
 };
-
-void print_winsock_error(const char* operation) {
-    std::cerr << operation << " failed. WSA error: " << WSAGetLastError() << '\n';
-}
 
 void print_locked(std::mutex& output_mutex, const std::string& text, std::ostream& stream = std::cout) {
     const std::lock_guard<std::mutex> lock(output_mutex);
@@ -382,12 +380,6 @@ InputReadResult read_next_input_line(
     return InputReadResult::kLineReady;
 }
 
-void shutdown_socket(SOCKET socket_handle) {
-    if (socket_handle != INVALID_SOCKET) {
-        shutdown(socket_handle, SD_BOTH);
-    }
-}
-
 void print_help(std::mutex& output_mutex) {
     print_locked(
         output_mutex,
@@ -426,21 +418,53 @@ void print_room_list_response(
 }
 
 void receive_loop(
-    SOCKET socket_handle,
+    connection::ConnectionState& connection_state,
     std::atomic<bool>& running,
+    std::atomic<bool>& reconnect_enabled,
     std::mutex& output_mutex,
     const std::string& local_user_code,
     std::unordered_map<std::string, std::string>& private_peer_names,
     std::mutex& private_peer_mutex) {
+    connection::ReconnectBackoff backoff;
     while (running.load()) {
         message::Message incoming_message;
-        if (!message::receive_message(socket_handle, incoming_message)) {
-            if (running.load()) {
-                print_locked(output_mutex, "Connection to server lost.\n", std::cerr);
+        if (!connection_state.receive(incoming_message)) {
+            connection_state.close_current();
+            if (!running.load() || !reconnect_enabled.load()) {
+                return;
             }
-            running.store(false);
-            shutdown_socket(socket_handle);
-            return;
+
+            print_locked(output_mutex, "Connection to server lost.\n", std::cerr);
+            while (running.load() && reconnect_enabled.load()) {
+                print_locked(output_mutex, "Reconnecting...\n");
+                const std::chrono::seconds delay = backoff.next_delay();
+                if (!connection_state.wait_before_retry(
+                        delay, running, reconnect_enabled)) {
+                    return;
+                }
+
+                message::Message login_response;
+                connection::LoginResult login_result =
+                    connection::LoginResult::kRetryableFailure;
+                if (connection_state.connect_and_login(login_response, login_result)) {
+                    backoff.reset();
+                    print_locked(output_mutex, "Reconnected and logged in.\n");
+                    break;
+                }
+
+                if (login_result == connection::LoginResult::kRejected) {
+                    print_locked(
+                        output_mutex,
+                        "Login rejected after reconnect: " +
+                            login_response.content + "\n",
+                        std::cerr);
+                    reconnect_enabled.store(false);
+                    running.store(false);
+                    connection_state.request_stop();
+                    return;
+                }
+            }
+            continue;
         }
 
         if (incoming_message.type == "chat") {
@@ -563,60 +587,16 @@ int wmain(int argc, wchar_t* argv[]) {
         return 1;
     }
 
-    SOCKET socket_handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (socket_handle == INVALID_SOCKET) {
-        print_winsock_error("socket");
-        WSACleanup();
-        return 1;
-    }
-
-    sockaddr_in server_address{};
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(static_cast<u_short>(server_port));
-
-    const int address_result = inet_pton(
-        AF_INET, server_ip.c_str(), &server_address.sin_addr);
-    if (address_result != 1) {
-        if (address_result == 0) {
-            std::cerr << "Invalid IPv4 address: " << server_ip << '\n';
-        } else {
-            print_winsock_error("inet_pton");
-        }
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-
-    if (connect(
-            socket_handle,
-            reinterpret_cast<const sockaddr*>(&server_address),
-            sizeof(server_address)) == SOCKET_ERROR) {
-        print_winsock_error("connect");
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-
-    std::cout << "Connected to " << server_ip << ':' << server_port << '\n';
-
-    const message::Message login{"login", username, user_code, "", {}, ""};
-    if (!message::send_message(socket_handle, login)) {
-        std::cerr << "Failed to send login message.\n";
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-
+    connection::ConnectionState connection_state(
+        connection::Config{server_ip, server_port, username, user_code});
     message::Message login_response;
-    if (!message::receive_message(socket_handle, login_response)) {
-        std::cerr << "Failed to receive login response.\n";
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-    if (login_response.type != "login_ok") {
-        std::cerr << "Login failed: " << login_response.content << '\n';
-        closesocket(socket_handle);
+    connection::LoginResult login_result = connection::LoginResult::kRetryableFailure;
+    if (!connection_state.connect_and_login(login_response, login_result)) {
+        if (login_result == connection::LoginResult::kRejected) {
+            std::cerr << "Login failed: " << login_response.content << '\n';
+        } else {
+            std::cerr << "Failed to connect or receive login response.\n";
+        }
         WSACleanup();
         return 1;
     }
@@ -625,16 +605,28 @@ int wmain(int argc, wchar_t* argv[]) {
               << format_identity(login_response) << '\n';
 
     std::atomic<bool> running{true};
+    std::atomic<bool> reconnect_enabled{true};
     std::mutex output_mutex;
     std::unordered_map<std::string, std::string> private_peer_names;
     std::mutex private_peer_mutex;
 
     print_help(output_mutex);
 
+    const auto send_or_report = [&](const message::Message& outgoing_message,
+                                    const char* error_text) {
+        if (connection_state.send(outgoing_message)) {
+            return true;
+        }
+        print_locked(output_mutex, std::string(error_text) + "\n", std::cerr);
+        connection_state.request_disconnect();
+        return false;
+    };
+
     std::thread receiver_thread(
         receive_loop,
-        socket_handle,
+        std::ref(connection_state),
         std::ref(running),
+        std::ref(reconnect_enabled),
         std::ref(output_mutex),
         std::cref(user_code),
         std::ref(private_peer_names),
@@ -647,13 +639,11 @@ int wmain(int argc, wchar_t* argv[]) {
     const bool console_input_ready = !use_console_input || console_input_mode.activate(input_handle);
     std::wstring console_input;
     std::string redirected_input;
-    bool shutdown_requested = false;
-
     if (!console_input_ready) {
         print_locked(output_mutex, "Failed to configure console input.\n", std::cerr);
+        reconnect_enabled.store(false);
         running.store(false);
-        shutdown_socket(socket_handle);
-        shutdown_requested = true;
+        connection_state.request_stop();
     }
 
     while (console_input_ready && running.load()) {
@@ -674,16 +664,16 @@ int wmain(int argc, wchar_t* argv[]) {
 
         if (read_result == InputReadResult::kError) {
             print_locked(output_mutex, "Failed to read input.\n", std::cerr);
+            reconnect_enabled.store(false);
             running.store(false);
-            shutdown_socket(socket_handle);
-            shutdown_requested = true;
+            connection_state.request_stop();
             break;
         }
 
         if (read_result == InputReadResult::kEndOfInput) {
+            reconnect_enabled.store(false);
             running.store(false);
-            shutdown_socket(socket_handle);
-            shutdown_requested = true;
+            connection_state.request_stop();
             break;
         }
 
@@ -703,37 +693,19 @@ int wmain(int argc, wchar_t* argv[]) {
         if (!input_line.empty() && input_line.front() == '/') {
             if (input_line == "/users") {
                 const message::Message users_request{"users_request", "", "", "", {}, ""};
-                if (!message::send_message(socket_handle, users_request)) {
-                    print_locked(output_mutex, "Failed to request online users.\n", std::cerr);
-                    running.store(false);
-                    shutdown_socket(socket_handle);
-                    shutdown_requested = true;
-                    break;
-                }
+                send_or_report(users_request, "Failed to request online users.");
                 continue;
             }
 
             if (input_line == "/rooms") {
                 const message::Message rooms_request{"rooms_request", "", "", "", {}, ""};
-                if (!message::send_message(socket_handle, rooms_request)) {
-                    print_locked(output_mutex, "Failed to request rooms.\n", std::cerr);
-                    running.store(false);
-                    shutdown_socket(socket_handle);
-                    shutdown_requested = true;
-                    break;
-                }
+                send_or_report(rooms_request, "Failed to request rooms.");
                 continue;
             }
 
             if (input_line == "/leave") {
                 const message::Message leave_message{"room_leave", "", "", "", {}, ""};
-                if (!message::send_message(socket_handle, leave_message)) {
-                    print_locked(output_mutex, "Failed to leave room.\n", std::cerr);
-                    running.store(false);
-                    shutdown_socket(socket_handle);
-                    shutdown_requested = true;
-                    break;
-                }
+                send_or_report(leave_message, "Failed to leave room.");
                 continue;
             }
 
@@ -749,24 +721,18 @@ int wmain(int argc, wchar_t* argv[]) {
                 message::Message join_message{
                     "room_join", "", "", room_command.room_name, {}, ""};
                 join_message.room = room_command.room_name;
-                if (!message::send_message(socket_handle, join_message)) {
-                    print_locked(output_mutex, "Failed to join room.\n", std::cerr);
-                    running.store(false);
-                    shutdown_socket(socket_handle);
-                    shutdown_requested = true;
-                    break;
-                }
+                send_or_report(join_message, "Failed to join room.");
                 continue;
             }
 
             if (input_line == "/quit") {
                 const message::Message quit_message{"quit", "", "", "", {}, ""};
-                if (!message::send_message(socket_handle, quit_message)) {
+                if (!connection_state.send(quit_message)) {
                     print_locked(output_mutex, "Failed to send quit message.\n", std::cerr);
                 }
+                reconnect_enabled.store(false);
                 running.store(false);
-                shutdown_socket(socket_handle);
-                shutdown_requested = true;
+                connection_state.request_stop();
                 break;
             }
 
@@ -790,13 +756,7 @@ int wmain(int argc, wchar_t* argv[]) {
                         private_command.target_name + "#" + private_command.target_user_code;
                 }
                 set_target_user_code(private_message, private_command.target_user_code);
-                if (!message::send_message(socket_handle, private_message)) {
-                    print_locked(output_mutex, "Failed to send private message.\n", std::cerr);
-                    running.store(false);
-                    shutdown_socket(socket_handle);
-                    shutdown_requested = true;
-                    break;
-                }
+                send_or_report(private_message, "Failed to send private message.");
 
                 continue;
             }
@@ -806,26 +766,19 @@ int wmain(int argc, wchar_t* argv[]) {
         }
 
         const message::Message chat_message{"chat", "", "", input_line, {}, ""};
-        if (!message::send_message(socket_handle, chat_message)) {
-            print_locked(output_mutex, "Failed to send chat message.\n", std::cerr);
-            running.store(false);
-            shutdown_socket(socket_handle);
-            shutdown_requested = true;
-            break;
-        }
+        send_or_report(chat_message, "Failed to send chat message.");
     }
 
     console_input_mode.restore();
+    reconnect_enabled.store(false);
     running.store(false);
-    if (!shutdown_requested) {
-        shutdown_socket(socket_handle);
-    }
+    connection_state.request_stop();
 
     if (receiver_thread.joinable()) {
         receiver_thread.join();
     }
 
-    closesocket(socket_handle);
+    connection_state.close_current();
     WSACleanup();
     return 0;
 }

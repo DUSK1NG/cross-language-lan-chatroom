@@ -30,12 +30,15 @@ Hub 是客户端 map、Send channel 和 user_code 集合的唯一所有者，避
 
 ~~~mermaid
 flowchart LR
-    M["Main thread<br/>input + send"] --> N["Winsock TCP socket"]
+    M["Main thread<br/>input"] -->|"thread-safe send"| CS["ConnectionState<br/>socket + login state"]
+    CS --> N["Current Winsock TCP socket"]
     N --> R["Receive thread<br/>recv frame + parse JSON"]
+    R --> RC["Reconnect loop<br/>1/2/4/8/16/30s backoff"]
+    RC -->|"login + login_ok"| CS
     R --> O["UTF-8 console output"]
-    M --> X["running atomic + shutdown"]
+    M --> X["running + reconnect_enabled"]
     R --> X
-    X --> J["join + closesocket + WSACleanup"]
+    X --> J["stop + join + one socket close + WSACleanup"]
 ~~~
 
 ## Network topology

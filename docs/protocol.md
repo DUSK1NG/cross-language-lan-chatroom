@@ -287,9 +287,9 @@ Server 注销客户端、关闭连接，并向其他在线客户端广播离线�
 - 缺少 type 或字段类型错误；
 - users 不是 string array。
 
-Go Server 会结束当前 read path，注销该 client，关闭连接；其他 client 和 Server 进程继续运行。C++ Client 在登录成功后的接收线程中遇到 recv == 0、SOCKET_ERROR 或 frame/JSON 解析失败时统一显示 `Connection to server lost.`，设置 running = false，执行 shutdown，等待 receive thread join，再关闭 socket。登录阶段若收不到 login response，则显示对应的登录接收错误并退出。
+Go Server 会结束当前 read path，注销该 client，关闭连接；其他 client 和 Server 进程继续运行。C++ Client 在登录成功后的接收线程中遇到 recv == 0、SOCKET_ERROR 或 frame/JSON 解析失败时统一显示 `Connection to server lost.`，关闭当前连接并进入 `Reconnecting...` 循环；连接成功后重新发送 `login`，等待 `login_ok`，再继续接收。用户主动退出、输入结束或本地输入错误时，客户端会禁止重连，等待 receive thread join 后再关闭 socket。登录阶段若收到明确的 `login_error`，则显示登录错误并退出。
 
-当前版本不自动重连。用户需要重新启动 Client 建立新 TCP connection。
+C++ Client 在 TCP 连接异常断开后会自动建立新 TCP connection，并重新发送原始 `login` 消息。重连等待为 1、2、4、8、16、30 秒，之后保持 30 秒上限；只有收到 `login_ok` 后才恢复发送聊天、私聊和房间消息。`/quit`、输入结束和本地输入错误不会触发重连。
 
 ## 7. Security Boundary
 
