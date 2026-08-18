@@ -5,108 +5,56 @@
 #include <utility>
 
 namespace message {
+namespace {
 
-bool send_message(SOCKET socket_handle, const Message& message) {
+nlohmann::json serialize(const Message& message) {
     nlohmann::json object = nlohmann::json{{"type", message.type}};
-    if (!message.username.empty()) {
-        object["username"] = message.username;
-    }
-    if (!message.user_code.empty()) {
-        object["user_code"] = message.user_code;
-    }
-    if (!message.target_user_code.empty()) {
-        object["target_user_code"] = message.target_user_code;
-    }
-    if (!message.room.empty()) {
-        object["room"] = message.room;
-    }
-    if (!message.content.empty()) {
-        object["content"] = message.content;
-    }
-    if (!message.users.empty()) {
-        object["users"] = message.users;
-    }
-    if (!message.rooms.empty()) {
-        object["rooms"] = message.rooms;
-    }
-
-    return protocol::send_frame(socket_handle, object.dump());
+    if (!message.username.empty()) object["username"] = message.username;
+    if (!message.user_code.empty()) object["user_code"] = message.user_code;
+    if (!message.target_user_code.empty()) object["target_user_code"] = message.target_user_code;
+    if (!message.room.empty()) object["room"] = message.room;
+    if (!message.content.empty()) object["content"] = message.content;
+    if (!message.users.empty()) object["users"] = message.users;
+    if (!message.rooms.empty()) object["rooms"] = message.rooms;
+    return object;
 }
 
-bool receive_message(SOCKET socket_handle, Message& message) {
-    // 失败时也保证输出对象不暴露调用前的旧消息内容。
+template <typename ReceiveFrame>
+bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
     message = Message{};
-
     std::string payload;
-    if (!protocol::recv_frame(socket_handle, payload)) {
-        return false;
-    }
+    if (!receive_frame(payload)) return false;
 
     try {
         const nlohmann::json object = nlohmann::json::parse(payload);
-        if (!object.contains("type") || !object.at("type").is_string()) {
-            return false;
-        }
+        if (!object.contains("type") || !object.at("type").is_string()) return false;
 
         Message parsed;
         parsed.type = object.at("type").get<std::string>();
-
-        if (object.contains("username")) {
-            if (!object.at("username").is_string()) {
-                return false;
-            }
-            parsed.username = object.at("username").get<std::string>();
-        }
-
-        if (object.contains("user_code")) {
-            if (!object.at("user_code").is_string()) {
-                return false;
-            }
-            parsed.user_code = object.at("user_code").get<std::string>();
-        }
-
-        if (object.contains("target_user_code")) {
-            if (!object.at("target_user_code").is_string()) {
-                return false;
-            }
-            parsed.target_user_code = object.at("target_user_code").get<std::string>();
-        }
-
-        if (object.contains("room")) {
-            if (!object.at("room").is_string()) {
-                return false;
-            }
-            parsed.room = object.at("room").get<std::string>();
-        }
-
-        if (object.contains("content")) {
-            if (!object.at("content").is_string()) {
-                return false;
-            }
-            parsed.content = object.at("content").get<std::string>();
-        }
+        const auto read_string = [&object](const char* key, std::string& destination) {
+            if (!object.contains(key)) return true;
+            if (!object.at(key).is_string()) return false;
+            destination = object.at(key).get<std::string>();
+            return true;
+        };
+        if (!read_string("username", parsed.username) ||
+            !read_string("user_code", parsed.user_code) ||
+            !read_string("target_user_code", parsed.target_user_code) ||
+            !read_string("room", parsed.room) ||
+            !read_string("content", parsed.content)) return false;
 
         if (object.contains("users")) {
-            if (!object.at("users").is_array()) {
-                return false;
-            }
-            for (const auto& user_value : object.at("users")) {
-                if (!user_value.is_string()) {
-                    return false;
-                }
-                parsed.users.push_back(user_value.get<std::string>());
+            if (!object.at("users").is_array()) return false;
+            for (const auto& value : object.at("users")) {
+                if (!value.is_string()) return false;
+                parsed.users.push_back(value.get<std::string>());
             }
         }
-
         if (object.contains("rooms")) {
-            if (!object.at("rooms").is_array()) {
-                return false;
-            }
-            for (const auto& room_value : object.at("rooms")) {
-                if (!room_value.is_string()) {
-                    return false;
-                }
-                parsed.rooms.push_back(room_value.get<std::string>());
+            if (!object.at("rooms").is_array()) return false;
+            for (const auto& value : object.at("rooms")) {
+                if (!value.is_string()) return false;
+                parsed.rooms.push_back(value.get<std::string>());
             }
         }
 
@@ -115,6 +63,32 @@ bool receive_message(SOCKET socket_handle, Message& message) {
     } catch (const nlohmann::json::exception&) {
         return false;
     }
+}
+
+}  // namespace
+
+bool send_message(SOCKET socket_handle, const Message& message) {
+    return protocol::send_frame(socket_handle, serialize(message).dump());
+}
+
+bool receive_message(SOCKET socket_handle, Message& message) {
+    return receive_message_impl(
+        [socket_handle](std::string& payload) {
+            return protocol::recv_frame(socket_handle, payload);
+        },
+        message);
+}
+
+bool send_message(SSL* ssl_handle, const Message& message) {
+    return protocol::send_frame(ssl_handle, serialize(message).dump());
+}
+
+bool receive_message(SSL* ssl_handle, Message& message) {
+    return receive_message_impl(
+        [ssl_handle](std::string& payload) {
+            return protocol::recv_frame(ssl_handle, payload);
+        },
+        message);
 }
 
 }  // namespace message

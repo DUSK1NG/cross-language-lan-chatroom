@@ -82,6 +82,24 @@ $env:GO111MODULE = 'off'
 go build -o chat-server.exe .
 ```
 
+服务端现在默认使用 TLS。启动时必须提供证书和私钥：
+
+```powershell
+.\chat-server.exe -cert .\certs\server.crt -key .\certs\server.key
+```
+
+也可以使用环境变量 `CHAT_TLS_CERT` 和 `CHAT_TLS_KEY`。服务端仍监听
+`0.0.0.0:8888`，但当前 C++ 客户端尚未实现 TLS 握手，因此暂时不能直接连接这个 TLS 服务端。
+
+本地学习测试可以生成自签名证书（需要 OpenSSL）：
+
+```powershell
+New-Item -ItemType Directory -Force certs | Out-Null
+openssl req -x509 -newkey rsa:2048 -nodes -keyout certs\server.key -out certs\server.crt -days 365 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1"
+```
+
+当前 C++ 客户端已经支持 OpenSSL 3.x TLS；使用自签名开发证书时，启动客户端必须追加 `--ca-file .\certs\server.crt`。
+
 如果 Go 已经在系统 `PATH` 中，也可以直接运行：
 
 ```powershell
@@ -124,7 +142,7 @@ ctest --test-dir client-cpp/build --output-on-failure
 
 ```powershell
 cd server-go
-.\chat-server.exe
+.\chat-server.exe -cert .\certs\server.crt -key .\certs\server.key
 ```
 
 另开 PowerShell 启动 Client：
@@ -197,7 +215,7 @@ Wi-Fi 和 Ethernet 可以互通，因为 TCP 建立在 IP 之上；只要两台�
 
 第一版明确不包含：
 
-- TLS
+- C++ 客户端暂未支持 TLS 握手
 - 账号密码和持久化数据库
 - 聊天室房间、文件 / 图片 / 音视频传输
 - GUI
@@ -206,7 +224,7 @@ Wi-Fi 和 Ethernet 可以互通，因为 TCP 建立在 IP 之上；只要两台�
 
 ## 后续方向
 
-聊天室房间、Qt GUI、SQLite 聊天记录、TLS，以及 Android / Web 客户端。
+聊天室房间、Qt GUI、SQLite 聊天记录，以及 Android / Web 客户端。Go 服务端 TLS 已完成，C++ 客户端 TLS 适配仍待实现。
 
 ## Resume 项目描述
 
@@ -215,3 +233,18 @@ Wi-Fi 和 Ethernet 可以互通，因为 TCP 建立在 IP 之上；只要两台�
 ## GitHub 发布
 
 发布和 release 前检查见 [docs/github-publishing.md](docs/github-publishing.md)。
+## C++ 客户端 TLS
+
+C++ 客户端使用 OpenSSL 3.x 建立 TLS 连接，默认启用严格证书验证和主机名/IP 校验，不提供关闭验证的选项。每次自动重连都会重新创建 SSL_CTX、SSL 并重新执行 SSL_connect。
+
+系统 CA：运行 chat-client.exe 192.168.1.100 8888 Alice ALICE001。
+
+自签名开发 CA：运行 chat-client.exe 192.168.1.100 8888 Alice ALICE001 --ca-file .\certs\lan-ca.pem。
+
+当前 Go Server 已支持 TLS；启动时提供证书和私钥后，TLS Client 可使用相同的 TLS listener。4-byte length + JSON 应用层协议保持不变。
+
+MinGW-w64 直接构建：
+
+    g++ -std=c++17 -Wall -Wextra -Wpedantic -municode -Iinclude -Ithird_party src\main.cpp src\command.cpp src\connection.cpp src\message.cpp src\protocol.cpp -o chat-client.exe -lws2_32 -lssl -lcrypto
+
+CMake 构建需要 OpenSSL 3.x 开发包。

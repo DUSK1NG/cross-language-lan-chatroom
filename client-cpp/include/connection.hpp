@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <string>
 
 namespace connection {
@@ -18,6 +19,7 @@ struct Config {
     int server_port = 0;
     std::string username;
     std::string user_code;
+    std::string ca_file;
 };
 
 enum class LoginResult {
@@ -53,18 +55,21 @@ public:
 
     bool is_ready() const;
     bool stop_requested() const;
+    std::string last_error() const;
     bool wait_before_retry(
         std::chrono::seconds delay,
         const std::atomic<bool>& running,
         const std::atomic<bool>& reconnect_enabled) const;
 
 private:
+    struct Session;
     Config config_;
     mutable std::mutex mutex_;
     mutable std::condition_variable condition_;
-    mutable SOCKET socket_handle_ = INVALID_SOCKET;
+    mutable std::shared_ptr<Session> session_;
     mutable bool ready_ = false;
     bool stop_requested_ = false;
+    std::string last_error_;
 };
 
 }  // namespace connection

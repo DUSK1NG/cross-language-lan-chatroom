@@ -39,7 +39,7 @@ bool test_backoff_sequence_and_reset() {
 }
 
 bool test_initial_connection_state() {
-    const connection::Config config{"127.0.0.1", 8888, "Alice", "ALICE001"};
+    const connection::Config config{"127.0.0.1", 8888, "Alice", "ALICE001", ""};
     const connection::ConnectionState state(config);
     return expect_true(
                "initial connection state",
@@ -52,7 +52,7 @@ bool test_initial_connection_state() {
 }
 
 bool test_stop_interrupts_retry_wait() {
-    const connection::Config config{"127.0.0.1", 8888, "Alice", "ALICE001"};
+    const connection::Config config{"127.0.0.1", 8888, "Alice", "ALICE001", ""};
     connection::ConnectionState state(config);
     std::atomic<bool> running{true};
     std::atomic<bool> reconnect_enabled{true};

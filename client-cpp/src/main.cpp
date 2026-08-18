@@ -564,6 +564,20 @@ int wmain(int argc, wchar_t* argv[]) {
     const std::string user_code = argc >= 5
         ? utf8_from_wide(argv[4])
         : kDefaultUserCode;
+    std::string ca_file;
+    for (int index = 5; index < argc; ++index) {
+        const std::string option = utf8_from_wide(argv[index]);
+        if (option != "--ca-file" || index + 1 >= argc) {
+            std::cerr << "Usage: chat-client.exe [server-ip] [port] [username] [user-code] "
+                         "[--ca-file path]\n";
+            return 1;
+        }
+        ca_file = utf8_from_wide(argv[++index]);
+        if (ca_file.empty()) {
+            std::cerr << "--ca-file requires a non-empty path.\n";
+            return 1;
+        }
+    }
 
     int server_port = kDefaultServerPort;
     if (argc >= 3) {
@@ -588,14 +602,15 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     connection::ConnectionState connection_state(
-        connection::Config{server_ip, server_port, username, user_code});
+        connection::Config{server_ip, server_port, username, user_code, ca_file});
     message::Message login_response;
     connection::LoginResult login_result = connection::LoginResult::kRetryableFailure;
     if (!connection_state.connect_and_login(login_response, login_result)) {
         if (login_result == connection::LoginResult::kRejected) {
             std::cerr << "Login failed: " << login_response.content << '\n';
         } else {
-            std::cerr << "Failed to connect or receive login response.\n";
+            std::cerr << "Failed to connect or receive login response: "
+                      << connection_state.last_error() << '\n';
         }
         WSACleanup();
         return 1;

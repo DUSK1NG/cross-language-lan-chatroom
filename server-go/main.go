@@ -1,14 +1,24 @@
 package main
 
 import (
+	"crypto/tls"
+	"flag"
 	"log"
-	"net"
 )
 
 const listenAddress = "0.0.0.0:8888"
 
 func main() {
-	listener, err := net.Listen("tcp", listenAddress)
+	certPath := flag.String("cert", "", "path to the TLS certificate PEM file")
+	keyPath := flag.String("key", "", "path to the TLS private key PEM file")
+	flag.Parse()
+
+	tlsConfig, err := loadTLSConfig(*certPath, *keyPath)
+	if err != nil {
+		log.Fatalf("TLS configuration error: %v", err)
+	}
+
+	listener, err := tls.Listen("tcp", listenAddress, tlsConfig)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", listenAddress, err)
 	}

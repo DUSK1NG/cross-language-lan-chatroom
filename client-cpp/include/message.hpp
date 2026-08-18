@@ -39,5 +39,7 @@ struct Message {
 
 bool send_message(SOCKET socket_handle, const Message& message);
 bool receive_message(SOCKET socket_handle, Message& message);
+bool send_message(SSL* ssl_handle, const Message& message);
+bool receive_message(SSL* ssl_handle, Message& message);
 
 }  // namespace message

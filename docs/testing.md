@@ -35,6 +35,14 @@ go vet ./...
 go build -o chat-server.exe .
 ```
 
+TLS 服务端启动需要证书和私钥：
+
+```powershell
+.\chat-server.exe -cert .\certs\server.crt -key .\certs\server.key
+```
+
+缺少参数和环境变量时，预期服务端输出包含 `TLS certificate and private key are required` 并退出。
+
 重点覆盖：
 
 - 4-byte header 不完整
@@ -103,7 +111,7 @@ ctest --test-dir build --output-on-failure
 
 ```powershell
 cd ..\server-go
-.\chat-server.exe
+.\chat-server.exe -cert .\certs\server.crt -key .\certs\server.key
 ```
 
 确认日志包含：
@@ -234,4 +242,16 @@ Test-NetConnection 192.168.1.100 -Port 8888
 
 - C++ 客户端仍是 Windows-only；Ubuntu job 不负责验证 `client-cpp`
 - 交互式控制台“自然输入 / 退出”、真实局域网组网和截图核对仍需真实 Windows 环境手工复核
-- 当前版本已经支持 C++ Client 自动重连；TLS 和持久化数据库仍未实现，这些能力不在本次验收范围内
+- 当前版本已经支持 C++ Client 自动重连；Go Server TLS 已实现，但 C++ Client 尚未支持 TLS，因此 TLS 聊天联调不在本次验收范围内
+## TLS 客户端构建验证
+
+使用 MSYS2 MinGW64 OpenSSL 3.x 时，先确保编译器、OpenSSL DLL 和 CMake 在 PATH 中：
+
+    $env:Path = "C:\msys64\mingw64\bin;C:\msys64\ucrt64\bin;$env:Path"
+    cmake -S client-cpp -B client-cpp/build -G "MinGW Makefiles"
+    cmake --build client-cpp/build --config Release
+    ctest --test-dir client-cpp/build --output-on-failure
+
+如果 CTest 报 0xc0000135，说明测试进程找不到 libssl-3-x64.dll 或 libcrypto-3-x64.dll；将包含这些 DLL 的 OpenSSL bin 目录加入当前 PowerShell 的 PATH 后重新执行。TLS 聊天联调时，先启动已配置证书和私钥的 Go Server，再用 --ca-file 指定签发服务端证书的 CA。
+
+TLS 当前已完成 Go Server 与 C++ Client 的端到端 localhost 联调；自签名证书必须通过 `--ca-file` 显式指定，不提供关闭证书验证的模式。

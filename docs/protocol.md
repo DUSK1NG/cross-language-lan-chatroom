@@ -6,8 +6,21 @@
 
 - Transport：TCP。
 - Server listen address：0.0.0.0:8888。
+- Server transport security：TLS 1.2 or newer，证书由服务端启动参数或环境变量提供。
 - Client 连接时使用 Server 的 IPv4 地址和 TCP port。
 - TCP 是字节流，不保证一次 send 对应一次 recv，所以协议必须自行定义消息边界。
+
+TLS 只负责加密和认证 TCP 字节流，不改变上层 4-byte length header、UTF-8 JSON 和消息类型。当前 Go 服务端已启用 TLS；C++ 客户端仍需后续增加 TLS 客户端握手后才能连接。
+
+服务端启动配置：
+
+```powershell
+.\chat-server.exe -cert .\certs\server.crt -key .\certs\server.key
+```
+
+C++ 客户端已经使用 OpenSSL 3.x 完成 TLS 握手；自签名开发证书需要在客户端通过 `--ca-file` 显式信任。
+
+也可以设置：`CHAT_TLS_CERT` 和 `CHAT_TLS_KEY`。证书或私钥缺失时服务端会明确报错并退出，不会回退到明文 TCP。
 
 ## 2. Frame Format
 
@@ -294,3 +307,14 @@ C++ Client 在 TCP 连接异常断开后会自动建立新 TCP connection，并�
 ## 7. Security Boundary
 
 content 和其他字段只作为文本数据处理。Server 和 Client 不执行远程消息中的 cmd、PowerShell、shell 或任何系统命令，不使用 system() 处理网络输入。
+## TLS 传输层
+
+C++ 客户端在长度头和 JSON 协议外层使用 OpenSSL 3.x TLS。TLS 只负责加密和认证，4-byte big-endian length header + JSON payload 不变。
+
+- 默认使用系统信任库并启用 SSL_VERIFY_PEER。
+- 客户端同时校验服务器证书链和服务器 IP/主机名。
+- 自签名开发证书必须通过 --ca-file path 显式指定信任 CA。
+- 不允许通过命令行关闭证书验证。
+- 自动重连会重新创建 SSL_CTX 和 SSL，重新执行证书验证与 SSL_connect。
+
+当前 Go Server 已提供 TLS listener；客户端和服务端证书配置一致后即可进行端到端 TLS 联调。
