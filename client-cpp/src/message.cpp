@@ -25,6 +25,9 @@ bool send_message(SOCKET socket_handle, const Message& message) {
 }
 
 bool receive_message(SOCKET socket_handle, Message& message) {
+    // 失败时也保证输出对象不暴露调用前的旧消息内容。
+    message = Message{};
+
     std::string payload;
     if (!protocol::recv_frame(socket_handle, payload)) {
         return false;

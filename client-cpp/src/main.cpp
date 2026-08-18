@@ -9,6 +9,7 @@
 #include <atomic>
 #include <iostream>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -443,8 +444,13 @@ int wmain(int argc, wchar_t* argv[]) {
 
     int server_port = kDefaultServerPort;
     if (argc >= 3) {
+        const std::string port_text = utf8_from_wide(argv[2]);
         try {
-            server_port = std::stoi(utf8_from_wide(argv[2]));
+            std::size_t parsed_length = 0;
+            server_port = std::stoi(port_text, &parsed_length);
+            if (parsed_length != port_text.size() || server_port < 1 || server_port > 65535) {
+                throw std::invalid_argument("port out of range");
+            }
         } catch (const std::exception&) {
             std::cerr << "Invalid port.\n";
             return 1;
