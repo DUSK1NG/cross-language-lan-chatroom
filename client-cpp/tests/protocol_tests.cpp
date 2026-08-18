@@ -5,7 +5,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <initializer_list>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -298,6 +297,32 @@ bool test_recv_frame_rejects_truncated_payload() {
         "protocol::recv_frame should reject truncated payload");
 }
 
+bool test_recv_all_reads_known_byte_sequence() {
+    const std::string case_name = "recv_all reads known byte sequence";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
+        return false;
+    }
+
+    const std::string sent = "known-byte-sequence";
+    if (!expect_true(
+            case_name,
+            protocol::send_all(sockets.client, sent.data(), sent.size()),
+            "failed to send known byte sequence")) {
+        return false;
+    }
+
+    std::string received(sent.size(), '\0');
+    if (!expect_true(
+            case_name,
+            protocol::recv_all(sockets.server, received.data(), received.size()),
+            "protocol::recv_all should read the complete known byte sequence")) {
+        return false;
+    }
+
+    return expect_equal(case_name, received, sent, "recv_all payload");
+}
+
 bool test_receive_message_rejects_malformed_json() {
     const std::string case_name = "receive_message rejects malformed json";
     SocketPair sockets = create_loopback_pair(case_name);
@@ -372,7 +397,7 @@ bool test_valid_message_round_trip() {
         "chat",
         "Alice",
         "A001",
-        u8"浣犲ソ锛岃繖鏄祴璇曟秷鎭€俙",
+        u8"你好，这是测试消息。",
         {}};
 
     if (!expect_true(
@@ -452,6 +477,8 @@ int main() {
          test_recv_frame_rejects_short_header},
         {"protocol::recv_frame rejects truncated payload",
          test_recv_frame_rejects_truncated_payload},
+        {"protocol::recv_all reads a complete known byte sequence",
+         test_recv_all_reads_known_byte_sequence},
         {"message::receive_message rejects malformed JSON",
          test_receive_message_rejects_malformed_json},
         {"message::receive_message rejects JSON without string type",
