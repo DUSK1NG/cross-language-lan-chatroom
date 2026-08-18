@@ -108,6 +108,9 @@ func validateMessage(message Message) error {
 	case "users_request", "quit":
 		return nil
 	case "users_response":
+		if message.Users == nil {
+			return fmt.Errorf("users list must be a JSON array")
+		}
 		for _, user := range message.Users {
 			if !utf8.ValidString(user) {
 				return fmt.Errorf("users list must contain valid UTF-8 strings")

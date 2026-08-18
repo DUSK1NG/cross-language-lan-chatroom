@@ -350,6 +350,21 @@ func TestReceiveMessageRejectsUsersNonArray(t *testing.T) {
 	}
 }
 
+func TestValidateMessageRejectsUsersNull(t *testing.T) {
+	var stream bytes.Buffer
+	if err := writeFrame(&stream, []byte(`{"type":"users_response","users":null}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := receiveMessage(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateMessage(message); err == nil {
+		t.Fatal("expected users:null to be rejected")
+	}
+}
+
 func TestReceiveMessageRejectsUsersNonStringElement(t *testing.T) {
 	var stream bytes.Buffer
 	if err := writeFrame(&stream, []byte(`{"type":"users_response","users":["Alice#A001",123]}`)); err != nil {
