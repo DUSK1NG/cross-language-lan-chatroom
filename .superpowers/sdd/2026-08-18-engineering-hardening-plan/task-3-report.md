@@ -2,7 +2,7 @@
 
 ## Changed files
 
-- `.github/workflows/ci.yml`: Added a fixed MSYS2 setup action and explicit MINGW64 toolchain preparation to the Windows CI job.
+- `.github/workflows/ci.yml`: Changed MSYS2 toolchain preparation to disable floating package-database updates while retaining the fixed action release and explicit MINGW64 toolchain package.
 - `.superpowers/sdd/2026-08-18-engineering-hardening-plan/task-3-report.md`: Updated this implementation report and commit metadata.
 
 No application source or existing documentation was modified.
@@ -10,8 +10,8 @@ No application source or existing documentation was modified.
 ## YAML validation
 
 - Manually inspected the workflow structure and contract: valid top-level `name`, `on`, `permissions`, and `jobs` mappings; both jobs use the required runner, checkout, setup-go, and Go 1.20.x configuration.
-- Scripted contract checks passed for the required triggers, actions, runners, commands, MSYS2 setup, MINGW64 selection, and toolchain package; `continue-on-error` is absent.
-- The Windows job now uses `msys2/setup-msys2@v2.32.0` with `msystem: MINGW64`, `update: true`, and `mingw-w64-x86_64-toolchain`, then adds the action's reported `mingw64\bin` directory to `GITHUB_PATH`. The fixed action release avoids the floating `@v2` reference while using the official MSYS2 setup action.
+- Scripted contract checks passed for the required triggers, actions, runners, commands, MSYS2 setup, MINGW64 selection, `update: false`, and toolchain package; `continue-on-error` is absent.
+- The Windows job uses the fixed `msys2/setup-msys2@v2.32.0` action release with `msystem: MINGW64`, `update: false`, and `mingw-w64-x86_64-toolchain`, then adds the action's reported `mingw64\bin` directory to `GITHUB_PATH`. This uses the fixed action release's bundled MSYS2 package state without performing a floating package-database update. No exact package version is claimed because it was not independently verified.
 - Verified the Windows job contains the required Go, CMake, MinGW, and CTest commands, while Ubuntu contains only the four required Go commands.
 - No YAML parser or `actionlint` executable is available in the local environment, so parser-based validation could not be run.
 
@@ -26,9 +26,9 @@ No application source or existing documentation was modified.
 
 ## Commit
 
-- Commit hash: `93f0ea5a64f4e40ebbe1bd2fbea333ee10c0a7ce`
+- Commit hash: `f441a1c9221df09504bc9693fdae36fd04430ffb`
 - Commit message: `ci: test go server and cpp client`
 
 ## Concerns
 
-- GitHub Actions execution was not available locally. CMake and the C++ client remain untested locally because `cmake`, `mingw32-make`, and `ctest` are unavailable; the workflow now installs the MinGW toolchain instead of relying on a preinstalled `mingw32-make`.
+- GitHub Actions execution was not available locally. CMake and the C++ client remain untested locally because `cmake`, `mingw32-make`, and `ctest` are unavailable; the workflow now installs the MinGW toolchain with `update: false` instead of relying on a preinstalled `mingw32-make` or floating updates.
