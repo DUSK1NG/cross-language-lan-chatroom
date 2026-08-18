@@ -1,7 +1,7 @@
 # GitHub 发布清单
 
 当前公开仓库已上线：<https://github.com/DUSK1NG/cross-language-lan-chatroom>
-当前仓库事实：`origin` 指向 `https://github.com/DUSK1NG/cross-language-lan-chatroom.git`，主分支为 `master`，并跟踪 `origin/master`。
+当前仓库事实：`origin` 指向 `https://github.com/DUSK1NG/cross-language-lan-chatroom.git`；默认发布分支 / 公开仓库主线为 `master`。
 
 ## 发布前检查
 

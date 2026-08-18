@@ -17,7 +17,7 @@
 
 - 公开仓库：<https://github.com/DUSK1NG/cross-language-lan-chatroom>
 - 当前仓库事实：`origin` 已配置为 `https://github.com/DUSK1NG/cross-language-lan-chatroom.git`
-- 当前仓库事实：主分支为 `master`，并跟踪 `origin/master`
+- 默认发布分支 / 公开仓库主线为 `master`
 - 当前里程碑：`v1.0.0`
 
 ## Architecture
@@ -89,7 +89,7 @@ go build -o chat-server.exe .
 
 ## Build Client
 
-在 `client-cpp` 目录执行。
+MinGW 和 MSVC 直接构建命令在 `client-cpp` 目录执行。
 
 MinGW 直接构建：
 
@@ -103,7 +103,7 @@ MSVC 直接构建：
 cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE src\main.cpp src\message.cpp src\protocol.cpp /Iinclude /Ithird_party ws2_32.lib /Fe:chat-client.exe
 ```
 
-CMake 构建与测试：
+CMake 构建与测试从仓库根目录执行：
 
 ```powershell
 cmake -S client-cpp -B client-cpp/build -G "MinGW Makefiles"
