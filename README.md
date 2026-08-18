@@ -137,6 +137,8 @@ Wi-Fi 和 Ethernet 可以互通，因为 TCP 建立在 IP 之上；只要两台�
 
 详细测试流程见 [docs/testing.md](docs/testing.md)。
 
+实际 Stage 9 局域网验证已通过：Ethernet 服务端 `192.168.0.3` 与 Wi-Fi 客户端 `192.168.0.108` 成功建立 TCP 连接，Alice/Bob 完成多人中文聊天和断线清理测试。
+
 ## Stage 8 稳定性行为
 
 - 长度头不足 4 字节、payload 截断、长度为 0 或超过 64 KiB：拒绝当前 frame。
