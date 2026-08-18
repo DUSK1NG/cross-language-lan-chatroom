@@ -25,6 +25,12 @@ qt_add_qml_module(lan-chat-gui
         qml/Main.qml
         qml/theme/Theme.qml
         qml/components/TitleBar.qml
+        qml/components/RoomItem.qml
+        qml/components/DirectMessageItem.qml
+        qml/components/ChatHeader.qml
+        qml/components/MessageDelegate.qml
+        qml/components/MemberItem.qml
+        qml/components/MessageComposer.qml
         qml/pages/ModeSelectionPage.qml
         qml/pages/ChatPage.qml
 )
