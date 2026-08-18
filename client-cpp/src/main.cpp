@@ -578,6 +578,14 @@ void receive_loop(
             continue;
         }
 
+        if (incoming_message.type == "offline_message") {
+            const std::string identity = format_identity(incoming_message);
+            print_locked(output_mutex,
+                "[Offline private from " + (identity.empty() ? incoming_message.username : identity) + "] " +
+                    incoming_message.content + "\n");
+            continue;
+        }
+
         if (incoming_message.type == "error") {
             print_locked(output_mutex, "Server error: " + incoming_message.content + "\n", std::cerr);
             continue;

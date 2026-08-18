@@ -145,6 +145,11 @@ func validateMessage(message Message) error {
 		if message.Content == "" {
 			return fmt.Errorf("message content must not be empty")
 		}
+	case "offline_message":
+		if message.Username == "" || message.UserCode == "" {
+			return fmt.Errorf("offline message sender is required")
+		}
+		return validateTextContent("offline message", message.Content)
 	default:
 		return fmt.Errorf("unsupported message type: %s", message.Type)
 	}

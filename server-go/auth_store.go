@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	authDBPathEnv     = "CHAT_DB_PATH"
-	defaultAuthDBPath = "chat.db"
-	minPasswordBytes  = 8
-	maxPasswordBytes  = 72
+	authDBPathEnv             = "CHAT_DB_PATH"
+	defaultAuthDBPath         = "chat.db"
+	minPasswordBytes          = 8
+	maxPasswordBytes          = 72
+	maxOfflineMessagesPerUser = 100
 )
 
 var (
@@ -71,11 +72,98 @@ CREATE TABLE IF NOT EXISTS accounts (
     normalized_code TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
-);`
+);
+CREATE TABLE IF NOT EXISTS offline_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_code TEXT NOT NULL,
+    sender_username TEXT NOT NULL,
+    sender_code TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_offline_messages_target
+    ON offline_messages(target_code, id);`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("initialize auth database: %w", err)
 	}
 	return nil
+}
+
+func (s *AuthStore) HasUserCode(userCode string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("auth store is not initialized")
+	}
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM accounts WHERE normalized_code = ?`, strings.ToLower(userCode)).Scan(&count)
+	return count > 0, err
+}
+
+func (s *AuthStore) SaveOfflineMessage(targetCode string, message Message) error {
+	if s == nil || s.db == nil {
+		return errors.New("auth store is not initialized")
+	}
+	if err := validateTextContent("offline message", message.Content); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO offline_messages
+        (target_code, sender_username, sender_code, content, created_at)
+        VALUES (?, ?, ?, ?, ?)`, strings.ToLower(targetCode), message.Username,
+		message.UserCode, message.Content, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("save offline message: %w", err)
+	}
+	_, err = s.db.Exec(`DELETE FROM offline_messages
+        WHERE target_code = ? AND id NOT IN
+        (SELECT id FROM offline_messages WHERE target_code = ? ORDER BY id DESC LIMIT ?)`,
+		strings.ToLower(targetCode), strings.ToLower(targetCode), maxOfflineMessagesPerUser)
+	return err
+}
+
+func (s *AuthStore) TakeOfflineMessages(targetCode string) ([]Message, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("auth store is not initialized")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(`SELECT id, sender_username, sender_code, content
+        FROM offline_messages WHERE target_code = ? ORDER BY id`, strings.ToLower(targetCode))
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	var ids []int64
+	var messages []Message
+	for rows.Next() {
+		var id int64
+		var message Message
+		if err := rows.Scan(&id, &message.Username, &message.UserCode, &message.Content); err != nil {
+			_ = rows.Close()
+			_ = tx.Rollback()
+			return nil, err
+		}
+		message.Type = "offline_message"
+		message.TargetUserCode = targetCode
+		ids = append(ids, id)
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		_ = tx.Rollback()
+		return nil, err
+	}
+	_ = rows.Close()
+	if len(ids) > 0 {
+		if _, err := tx.Exec(`DELETE FROM offline_messages WHERE target_code = ?`, strings.ToLower(targetCode)); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return messages, nil
 }
 
 func (s *AuthStore) Close() error {

@@ -136,6 +136,16 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 	}
 
 	go client.writePump(hub)
+	if store != nil {
+		offlineMessages, err := store.TakeOfflineMessages(client.UserCode)
+		if err != nil {
+			log.Printf("failed to load offline messages for %s: %v", client.Username, err)
+		} else {
+			for _, offlineMessage := range offlineMessages {
+				client.Send <- offlineMessage
+			}
+		}
+	}
 	log.Printf("user logged in: %s", client.Username)
 
 	shouldUnregister = false

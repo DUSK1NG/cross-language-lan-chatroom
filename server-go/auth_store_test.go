@@ -169,3 +169,25 @@ func TestAuthStoreUsesConfiguredDatabasePath(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAuthStoreStoresAndTakesOfflineMessages(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if err := store.Register("Bob", "BOB001", "correct-password"); err != nil {
+		t.Fatalf("register Bob: %v", err)
+	}
+	message := Message{Type: "private_chat", Username: "Alice", UserCode: "A001", Content: "你好，Bob"}
+	if err := store.SaveOfflineMessage("bob001", message); err != nil {
+		t.Fatalf("save offline message: %v", err)
+	}
+	messages, err := store.TakeOfflineMessages("BOB001")
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("take offline messages = %#v, %v", messages, err)
+	}
+	if messages[0].Type != "offline_message" || messages[0].Username != "Alice" || messages[0].Content != message.Content {
+		t.Fatalf("offline message = %+v", messages[0])
+	}
+	remaining, err := store.TakeOfflineMessages("BOB001")
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("offline messages were not removed: %#v, %v", remaining, err)
+	}
+}

@@ -33,6 +33,7 @@ func main() {
 		log.Fatalf("auth database error: %v", err)
 	}
 	defer store.Close()
+	hub.OfflineStore = store
 	log.Printf("account database: %s", resolveDBPath(*dbPath))
 
 	for {

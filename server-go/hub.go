@@ -99,6 +99,7 @@ type Hub struct {
 	ActiveCodes  map[string]*Client
 	UsedCodes    map[string]struct{}
 	Rooms        map[string]map[*Client]bool
+	OfflineStore *AuthStore
 }
 
 func NewHub() *Hub {
@@ -407,7 +408,23 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 
 	target, ok := h.ActiveCodes[targetCode]
 	if !ok {
-		h.deliverError(sender, "Target user not found")
+		if h.OfflineStore == nil {
+			h.deliverError(sender, "Target user not found")
+			return
+		}
+		exists, err := h.OfflineStore.HasUserCode(targetCode)
+		if err != nil || !exists {
+			h.deliverError(sender, "Target user not found")
+			return
+		}
+		message := Message{Type: "private_chat", Username: sender.Username,
+			UserCode: sender.UserCode, TargetUserCode: request.TargetCode, Content: request.Content}
+		if err := h.OfflineStore.SaveOfflineMessage(targetCode, message); err != nil {
+			h.deliverError(sender, "Failed to save offline message")
+			return
+		}
+		h.deliver(sender, message)
+		h.deliver(sender, Message{Type: "system", Content: "Private message saved for offline user"})
 		return
 	}
 	if target == sender {
