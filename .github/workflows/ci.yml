@@ -19,6 +19,23 @@ jobs:
         with:
           go-version: 1.20.x
 
+      - name: Prepare MinGW toolchain
+        id: msys2
+        uses: msys2/setup-msys2@v2.32.0
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-toolchain
+
+      - name: Add prepared MinGW to PATH
+        shell: pwsh
+        run: |
+          $mingwBin = Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'mingw64\bin'
+          if (-not (Test-Path -LiteralPath $mingwBin)) {
+            throw "Prepared MinGW directory was not found: $mingwBin"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $mingwBin
+
       - name: Verify CMake and MinGW
         shell: pwsh
         run: |
