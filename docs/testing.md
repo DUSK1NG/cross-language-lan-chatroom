@@ -74,17 +74,18 @@ cd ..\client-cpp
 ctest --test-dir build --output-on-failure
 ```
 
-`protocol-tests` 是 C++ 协议层的 loopback TCP 自动化测试目标，当前共有 12 个直接测试，覆盖：
+`protocol-tests` 是 C++ 协议层的 loopback TCP 自动化测试目标，当前共有 13 个直接测试，覆盖：
 
 - `send_frame` 拒绝空 payload
 - `send_frame` 拒绝超长 payload
 - `recv_frame` 拒绝 0 长度、超长长度、短 header 和截断 payload
-- `recv_all` 读取完整已知字节序列
+- `recv_all` 在发送线程延迟分段发送时读取完整已知字节序列
+- `recv_frame` 在 header 与 payload 均分段到达时接收合法 frame
 - `receive_message` 拒绝 malformed JSON、缺少字符串 `type`、数值型 `content`
 - 合法 UTF-8 消息往返保持字段一致
 - 三个合法 frame 按发送顺序被接收
 
-其中包含对 UTF-8 round-trip 和 `recv_all` 的直接覆盖。
+分段接收测试设置了有限接收超时，避免网络回归导致 CI 无限阻塞；其中还包含对 UTF-8 round-trip 和 `recv_all` 的直接覆盖。
 
 ## 5. localhost 基础测试
 
@@ -118,11 +119,11 @@ cd ..\client-cpp
 | 不存在端口 | Client 连接未监听端口 | 显示 `connect failed`，安全退出 | 可自动复现 |
 | 客户端强制关闭 | 结束一个 Client 进程 | Server 注销该连接，其他 Client 继续聊天 | Go 测试覆盖；C++ 交互需手工复核 |
 | Server 突然关闭 | 停止 Server | Client 显示 `Connection to server lost.` 并退出 | 需本机手工复核 |
-| 短 header | 发送少于 4 bytes | 当前连接被拒绝，不影响 Server | Go protocol test 覆盖 |
-| 0 长度 | header 为 `00 00 00 00` | 当前连接被拒绝 | Go protocol test 覆盖；C++ frame 防御代码已审查，需手工或辅助工具复核 |
-| 超长 frame | `length > 65536` | 不分配 payload，当前连接结束 | Go protocol test 覆盖；C++ frame 防御代码已审查，需手工或辅助工具复核 |
-| payload 截断 | 声明长度大于实际数据后关闭 | `io.ReadFull` / `recv_all` 返回失败 | Go protocol test 覆盖；C++ 需手工辅助复核 |
-| 非法 JSON / UTF-8 | 发送 malformed payload | 消息解析失败，连接不继续处理 | Go message test 覆盖 |
+| 短 header | 发送少于 4 bytes | 当前连接被拒绝，不影响 Server | Go protocol test 与 C++ `protocol-tests` 自动化覆盖 |
+| 0 长度 | header 为 `00 00 00 00` | 当前连接被拒绝 | Go protocol test 与 C++ `protocol-tests` 自动化覆盖 |
+| 超长 frame | `length > 65536` | 不分配 payload，当前连接结束 | Go protocol test 与 C++ `protocol-tests` 自动化覆盖 |
+| payload 截断 | 声明长度大于实际数据后关闭 | `io.ReadFull` / `recv_all` 返回失败 | Go protocol test 与 C++ `protocol-tests` 自动化覆盖 |
+| 非法 JSON / UTF-8 | 发送 malformed payload | 消息解析失败，连接不继续处理 | Go message test 覆盖；C++ `protocol-tests` 自动化覆盖 malformed JSON，非法 UTF-8 仍由 Go 自动化覆盖 |
 | 异常后重连 | 异常 Client 退出后启动新 Client | 新连接可以登录 | 需本机手工复核 |
 
 不要把“没有崩溃”当成全部协议测试通过；还要同时检查连接关闭、Server 继续接受新连接、其他 Client 仍能收发，以及测试后没有残留进程。

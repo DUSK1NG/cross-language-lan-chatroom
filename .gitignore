@@ -4,6 +4,15 @@
 # Stage build outputs
 server-go/chat-server.exe
 client-cpp/chat-client.exe
+client-cpp/protocol-tests.exe
+client-cpp/*-direct.exe
+client-cpp/build/
+client-cpp/build-direct/
+
+# Generic local verification outputs
+.cache/
+*.test
+coverage.out
 
 # Local implementation worktrees
 .worktrees/

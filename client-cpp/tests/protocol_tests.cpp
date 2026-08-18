@@ -3,14 +3,20 @@
 
 #include <winsock2.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 namespace {
+
+constexpr DWORD kReceiveTimeoutMs = 2000;
+constexpr auto kSegmentDelay = std::chrono::milliseconds(30);
 
 struct ScopedWinsock {
     ScopedWinsock() : started(WSAStartup(MAKEWORD(2, 2), &data) == 0) {}
@@ -91,6 +97,27 @@ bool expect_equal(
     return true;
 }
 
+bool set_receive_timeout(SOCKET socket_handle) {
+    const DWORD timeout_ms = kReceiveTimeoutMs;
+    return setsockopt(
+               socket_handle,
+               SOL_SOCKET,
+               SO_RCVTIMEO,
+               reinterpret_cast<const char*>(&timeout_ms),
+               sizeof(timeout_ms)) != SOCKET_ERROR;
+}
+
+bool send_segments(SOCKET socket_handle, const std::vector<std::string>& segments) {
+    for (const auto& segment : segments) {
+        std::this_thread::sleep_for(kSegmentDelay);
+        if (segment.empty() ||
+            !protocol::send_all(socket_handle, segment.data(), segment.size())) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool expect_equal(
     const std::string& case_name,
     std::size_t actual,
@@ -161,6 +188,12 @@ SocketPair create_loopback_pair(const std::string& case_name) {
     if (sockets.server == INVALID_SOCKET) {
         fail(case_name, "failed to accept server socket");
         return sockets;
+    }
+
+    if (!set_receive_timeout(sockets.server)) {
+        fail(case_name, "failed to set server receive timeout");
+        closesocket(sockets.server);
+        sockets.server = INVALID_SOCKET;
     }
 
     return sockets;
@@ -304,23 +337,62 @@ bool test_recv_all_reads_known_byte_sequence() {
         return false;
     }
 
+    const std::vector<std::string> segments = {"known", "-byte", "-sequence"};
     const std::string sent = "known-byte-sequence";
-    if (!expect_true(
-            case_name,
-            protocol::send_all(sockets.client, sent.data(), sent.size()),
-            "failed to send known byte sequence")) {
-        return false;
-    }
+    std::atomic<bool> sender_succeeded{false};
+    std::thread sender([&]() {
+        sender_succeeded.store(send_segments(sockets.client, segments));
+    });
 
     std::string received(sent.size(), '\0');
-    if (!expect_true(
-            case_name,
-            protocol::recv_all(sockets.server, received.data(), received.size()),
-            "protocol::recv_all should read the complete known byte sequence")) {
+    const bool receive_succeeded =
+        protocol::recv_all(sockets.server, received.data(), received.size());
+    sender.join();
+
+    return expect_true(case_name, sender_succeeded.load(), "segmented sender failed") &&
+        expect_true(
+               case_name,
+               receive_succeeded,
+               "protocol::recv_all should read all delayed segments before timeout") &&
+        expect_equal(case_name, received, sent, "recv_all payload");
+}
+
+bool test_recv_frame_reads_segmented_header_and_payload() {
+    const std::string case_name = "recv_frame reads segmented header and payload";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
         return false;
     }
 
-    return expect_equal(case_name, received, sent, "recv_all payload");
+    const std::string sent = R"({"type":"chat","content":"segmented frame"})";
+    const std::uint32_t network_length =
+        htonl(static_cast<std::uint32_t>(sent.size()));
+    const std::string header(
+        reinterpret_cast<const char*>(&network_length), sizeof(network_length));
+    const std::vector<std::string> segments = {
+        header.substr(0, 1),
+        header.substr(1, 2),
+        header.substr(3, 1),
+        sent.substr(0, 7),
+        sent.substr(7, 9),
+        sent.substr(16),
+    };
+
+    std::atomic<bool> sender_succeeded{false};
+    std::thread sender([&]() {
+        sender_succeeded.store(send_segments(sockets.client, segments));
+    });
+
+    std::string received;
+    const bool receive_succeeded = protocol::recv_frame(sockets.server, received);
+    sender.join();
+
+    return expect_true(case_name, sender_succeeded.load(), "segmented sender failed") &&
+        expect_true(
+               case_name,
+               receive_succeeded,
+               "protocol::recv_frame should accept delayed header and payload segments") &&
+        expect_equal(case_name, received, sent, "segmented frame payload");
 }
 
 bool test_receive_message_rejects_malformed_json() {
@@ -479,6 +551,8 @@ int main() {
          test_recv_frame_rejects_truncated_payload},
         {"protocol::recv_all reads a complete known byte sequence",
          test_recv_all_reads_known_byte_sequence},
+        {"protocol::recv_frame reads a segmented valid frame",
+         test_recv_frame_reads_segmented_header_and_payload},
         {"message::receive_message rejects malformed JSON",
          test_receive_message_rejects_malformed_json},
         {"message::receive_message rejects JSON without string type",

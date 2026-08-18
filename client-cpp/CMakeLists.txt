@@ -19,6 +19,10 @@ target_include_directories(chat-client PRIVATE
 
 target_link_libraries(chat-client PRIVATE ws2_32)
 
+if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_link_options(chat-client PRIVATE -municode)
+endif()
+
 add_executable(protocol-tests
     tests/protocol_tests.cpp
     src/message.cpp
@@ -30,7 +34,8 @@ target_include_directories(protocol-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
-target_link_libraries(protocol-tests PRIVATE ws2_32)
+find_package(Threads REQUIRED)
+target_link_libraries(protocol-tests PRIVATE ws2_32 Threads::Threads)
 
 enable_testing()
 add_test(NAME protocol-tests COMMAND protocol-tests)
