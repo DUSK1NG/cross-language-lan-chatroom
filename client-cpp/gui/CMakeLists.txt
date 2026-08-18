@@ -31,8 +31,10 @@ qt_add_qml_module(lan-chat-gui
         qml/components/MessageDelegate.qml
         qml/components/MemberItem.qml
         qml/components/MessageComposer.qml
+        qml/components/UserProfilePopup.qml
         qml/pages/ModeSelectionPage.qml
         qml/pages/ChatPage.qml
+        qml/pages/SettingsPage.qml
 )
 
 target_link_libraries(lan-chat-gui PRIVATE

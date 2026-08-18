@@ -8,6 +8,7 @@ RowLayout {
     property string userCode: ""
     property bool online: true
     property bool admin: false
+    signal userSelected()
     height: 38
     spacing: 8
 
@@ -28,5 +29,9 @@ RowLayout {
         color: Theme.accent
         font.pixelSize: 9
         font.weight: Font.Bold
+    }
+    MouseArea {
+        anchors.fill: parent
+        onClicked: root.userSelected()
     }
 }

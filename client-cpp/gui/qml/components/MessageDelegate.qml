@@ -11,6 +11,7 @@ Item {
     property string content: ""
     property bool selfMessage: false
     property bool systemMessage: false
+    property bool hovered: hoverArea.containsMouse
     height: systemMessage ? 28 : messageColumn.implicitHeight + 4
 
     Label {
@@ -51,5 +52,19 @@ Item {
                 font.pixelSize: 14
             }
         }
+        Row {
+            visible: root.hovered
+            anchors.right: root.selfMessage ? parent.right : undefined
+            spacing: 6
+            Label { text: "复制"; color: Theme.accent; font.pixelSize: 10 }
+            Label { text: "更多"; color: Theme.secondaryText; font.pixelSize: 10 }
+        }
+    }
+
+    MouseArea {
+        id: hoverArea
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
     }
 }

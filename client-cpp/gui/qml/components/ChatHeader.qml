@@ -7,6 +7,7 @@ RowLayout {
     id: root
     property string title: "# lobby"
     property string subtitle: ""
+    signal settingsRequested()
     height: 42
 
     Label {
@@ -22,5 +23,14 @@ RowLayout {
         Layout.leftMargin: 8
     }
     Item { Layout.fillWidth: true }
-    Label { text: "Mock UI"; color: Theme.secondaryText; font.pixelSize: 12 }
+    ToolButton {
+        text: "⚙"
+        background: null
+        onClicked: root.settingsRequested()
+        contentItem: Text {
+            text: parent.text
+            color: parent.hovered ? Theme.primaryText : Theme.secondaryText
+            font.pixelSize: 18
+        }
+    }
 }

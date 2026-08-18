@@ -9,6 +9,7 @@ Item {
     property string activeRoom: "lobby"
     property string activeDirectMessage: ""
     property string headerTitle: "# lobby"
+    signal settingsRequested()
 
     ListModel {
         id: roomModel
@@ -61,6 +62,13 @@ Item {
         })
         composer.text = ""
         messageList.positionViewAtEnd()
+    }
+
+    function showProfile(name, code, isAdmin) {
+        profilePopup.displayName = name
+        profilePopup.userCode = code
+        profilePopup.admin = isAdmin
+        profilePopup.open()
     }
 
     RowLayout {
@@ -129,6 +137,7 @@ Item {
 
                 ChatHeader {
                     Layout.fillWidth: true
+                    onSettingsRequested: root.settingsRequested()
                     title: root.headerTitle
                     subtitle: root.activeDirectMessage === "" ? "学习交流群" : "私聊 · Mock 数据"
                 }
@@ -184,9 +193,12 @@ Item {
                         userCode: model.userCode
                         online: model.online
                         admin: model.admin
+                        onUserSelected: root.showProfile(displayName, userCode, admin)
                     }
                 }
             }
         }
     }
+
+    UserProfilePopup { id: profilePopup }
 }

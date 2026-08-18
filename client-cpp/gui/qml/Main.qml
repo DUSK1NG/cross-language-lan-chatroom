@@ -21,6 +21,9 @@ ApplicationWindow {
         currentPage = "chat"
     }
 
+    function openSettings() { currentPage = "settings" }
+    function returnToChat() { currentPage = "chat" }
+
     TitleBar {
         id: titleBar
         anchors.top: parent.top
@@ -36,9 +39,16 @@ ApplicationWindow {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        source: currentPage === "mode" ? "pages/ModeSelectionPage.qml" : "pages/ChatPage.qml"
+        source: currentPage === "mode" ? "pages/ModeSelectionPage.qml" :
+                currentPage === "settings" ? "pages/SettingsPage.qml" : "pages/ChatPage.qml"
         onLoaded: {
-            if (item && currentPage === "chat") item.modeName = window.selectedMode
+            if (!item) return
+            if (currentPage === "chat") {
+                item.modeName = window.selectedMode
+                item.settingsRequested.connect(window.openSettings)
+            } else if (currentPage === "settings") {
+                item.backRequested.connect(window.returnToChat)
+            }
         }
     }
 }
