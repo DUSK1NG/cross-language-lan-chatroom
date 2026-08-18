@@ -1,6 +1,7 @@
 #include "auth.hpp"
 
 #include <charconv>
+#include <random>
 
 namespace auth {
 namespace {
@@ -32,11 +33,22 @@ bool take_value(
     return true;
 }
 
+std::string make_guest_code() {
+    static constexpr char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    std::random_device random;
+    std::uniform_int_distribution<std::size_t> distribution(0, sizeof(alphabet) - 2);
+    std::string code = "GUEST";
+    for (int index = 0; index < 6; ++index) code += alphabet[distribution(random)];
+    return code;
+}
+
 }  // namespace
 
 std::string usage() {
     return "Usage: chat-client.exe [server-ip] [port] [username] [user-code] "
-           "[--password password] [--register] [--ca-file path]";
+           "[--password password] [--register] [--ca-file path]\n"
+           "       chat-client.exe --guest [server-ip] [port] [username] [--ca-file path]\n"
+           "       chat-client.exe --host [username] [--server-exe path] [--cert path] [--key path]";
 }
 
 bool parse_arguments(
@@ -53,12 +65,35 @@ bool parse_arguments(
             options.register_account = true;
             continue;
         }
+        if (argument == "--guest") {
+            options.guest_mode = true;
+            options.user_code.clear();
+            continue;
+        }
+        if (argument == "--host") {
+            options.host_mode = true;
+            options.guest_mode = true;
+            options.user_code.clear();
+            continue;
+        }
         if (argument == "--password") {
             if (!take_value(args, index, options.password, "--password", error)) return false;
             continue;
         }
         if (argument == "--ca-file") {
             if (!take_value(args, index, options.ca_file, "--ca-file", error)) return false;
+            continue;
+        }
+        if (argument == "--server-exe") {
+            if (!take_value(args, index, options.server_exe, "--server-exe", error)) return false;
+            continue;
+        }
+        if (argument == "--cert") {
+            if (!take_value(args, index, options.cert_file, "--cert", error)) return false;
+            continue;
+        }
+        if (argument == "--key") {
+            if (!take_value(args, index, options.key_file, "--key", error)) return false;
             continue;
         }
         if (!argument.empty() && argument.front() == '-') {
@@ -82,8 +117,37 @@ bool parse_arguments(
         }
     }
 
+    if (options.host_mode) {
+        if (positional_count == 0) {
+            options.username = "Host";
+        } else if (positional_count == 1) {
+            options.username = options.server_ip;
+            options.server_ip = "127.0.0.1";
+        } else {
+            error = "Host mode accepts only an optional username.";
+            return false;
+        }
+        options.server_port = 8888;
+    } else if (options.guest_mode) {
+        if (positional_count != 3) {
+            error = "Guest mode requires: --guest server-ip port username";
+            return false;
+        }
+    } else if (positional_count < 4) {
+        error = "Server mode requires: server-ip port username user-code";
+        return false;
+    }
+
+    if (options.guest_mode && options.user_code.empty()) {
+        options.user_code = make_guest_code();
+    }
+
     if (options.register_account && options.password.empty()) {
         error = "--register requires --password.";
+        return false;
+    }
+    if (options.guest_mode && (options.register_account || !options.password.empty())) {
+        error = "Guest/host mode does not use account passwords.";
         return false;
     }
     return true;

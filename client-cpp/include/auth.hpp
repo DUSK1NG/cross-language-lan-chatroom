@@ -15,6 +15,11 @@ struct ClientOptions {
     std::string ca_file;
     std::string password;
     bool register_account = false;
+    bool guest_mode = false;
+    bool host_mode = false;
+    std::string server_exe = "..\\server-go\\chat-server.exe";
+    std::string cert_file = "..\\certs\\server.crt";
+    std::string key_file = "..\\certs\\server.key";
 };
 
 bool parse_arguments(

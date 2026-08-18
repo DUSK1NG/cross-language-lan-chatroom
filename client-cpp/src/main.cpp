@@ -23,6 +23,55 @@
 
 namespace {
 
+class HostServerProcess {
+public:
+    bool start(const auth::ClientOptions& options, std::string& error) {
+        std::wstring command = quote(to_wide(options.server_exe)) + L" -cert " +
+            quote(to_wide(options.cert_file)) + L" -key " + quote(to_wide(options.key_file));
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        std::vector<wchar_t> command_buffer(command.begin(), command.end());
+        command_buffer.push_back(L'\0');
+        if (!CreateProcessW(nullptr, command_buffer.data(), nullptr, nullptr, FALSE,
+                            CREATE_NEW_PROCESS_GROUP, nullptr, nullptr, &startup, &process)) {
+            error = "Failed to start Go server process. Check --server-exe, --cert and --key.";
+            return false;
+        }
+        CloseHandle(process.hThread);
+        process_handle_ = process.hProcess;
+        Sleep(700);
+        return true;
+    }
+
+    void stop() {
+        if (process_handle_ == nullptr) return;
+        TerminateProcess(process_handle_, 0);
+        WaitForSingleObject(process_handle_, 3000);
+        CloseHandle(process_handle_);
+        process_handle_ = nullptr;
+    }
+
+    ~HostServerProcess() { stop(); }
+
+private:
+    static std::wstring to_wide(const std::string& value) {
+        if (value.empty()) return {};
+        const int size = MultiByteToWideChar(CP_UTF8, 0, value.data(),
+                                             static_cast<int>(value.size()), nullptr, 0);
+        std::wstring result(static_cast<std::size_t>(size), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                            result.data(), size);
+        return result;
+    }
+
+    static std::wstring quote(const std::wstring& value) {
+        return L"\"" + value + L"\"";
+    }
+
+    HANDLE process_handle_ = nullptr;
+};
+
 constexpr DWORD kConsolePollIntervalMs = 100;
 constexpr DWORD kInputBufferSize = 256;
 constexpr DWORD kConsoleEventBufferSize = 32;
@@ -565,6 +614,19 @@ int wmain(int argc, wchar_t* argv[]) {
     if (!auth::parse_arguments(arguments, client_options, argument_error)) {
         std::cerr << argument_error << '\n' << auth::usage() << '\n';
         return 1;
+    }
+
+    HostServerProcess host_server;
+    if (client_options.host_mode) {
+        std::string host_error;
+        if (!host_server.start(client_options, host_error)) {
+            std::cerr << host_error << '\n';
+            return 1;
+        }
+        if (client_options.ca_file.empty()) {
+            client_options.ca_file = client_options.cert_file;
+        }
+        std::cout << "本机聊天已启动，其他用户请连接本机局域网 IP。\n";
     }
 
     const std::string& user_code = client_options.user_code;
