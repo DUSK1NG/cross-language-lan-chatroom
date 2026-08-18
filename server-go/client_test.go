@@ -358,7 +358,7 @@ func TestHandleConnectionUsersRequest(t *testing.T) {
 	usersResponse := receiveClientTestMessage(t, firstClient)
 	want := Message{
 		Type:  "users_response",
-		Users: []string{"Alex#A001", "Zoe#Z001"},
+		Users: []string{"Alex#A001@lobby", "Zoe#Z001@lobby"},
 	}
 	if !reflect.DeepEqual(usersResponse, want) {
 		t.Fatalf("users response = %+v, want %+v", usersResponse, want)

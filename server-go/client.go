@@ -163,6 +163,21 @@ func (c *Client) readPump(hub *Hub) {
 		case "users_request":
 			hub.RequestUsers <- c
 
+		case "room_join":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", Content: "Invalid room name"}) {
+					return
+				}
+				continue
+			}
+			hub.RoomJoin <- RoomRequest{Client: c, Room: message.Room}
+
+		case "room_leave":
+			hub.RoomLeave <- c
+
+		case "rooms_request":
+			hub.RequestRooms <- c
+
 		case "quit":
 			hub.Unregister <- c
 			return

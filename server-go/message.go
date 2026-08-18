@@ -9,13 +9,16 @@ import (
 )
 
 const maxUsernameSize = 32
+const maxRoomNameSize = 32
 
 type Message struct {
 	Type           string   `json:"type"`
 	Username       string   `json:"username,omitempty"`
 	UserCode       string   `json:"user_code,omitempty"`
 	TargetUserCode string   `json:"target_user_code,omitempty"`
+	Room           string   `json:"room,omitempty"`
 	Users          []string `json:"users,omitempty"`
+	Rooms          []string `json:"rooms,omitempty"`
 	Content        string   `json:"content,omitempty"`
 }
 
@@ -103,11 +106,24 @@ func validateMessage(message Message) error {
 			return fmt.Errorf("invalid target user code: %w", err)
 		}
 		return validateTextContent("private chat", message.Content)
+	case "room_join":
+		return validateRoomName(message.Room)
+	case "room_leave", "rooms_request":
+		return nil
 	case "users_request", "quit":
 		return nil
 	case "users_response":
 		if message.Users == nil {
 			return fmt.Errorf("users list must be a JSON array")
+		}
+	case "rooms_response":
+		if message.Rooms == nil {
+			return fmt.Errorf("rooms list must be a JSON array")
+		}
+		for _, room := range message.Rooms {
+			if err := validateRoomName(room); err != nil {
+				return fmt.Errorf("invalid room in rooms list: %w", err)
+			}
 		}
 		for _, user := range message.Users {
 			if !utf8.ValidString(user) {
@@ -122,6 +138,22 @@ func validateMessage(message Message) error {
 		return fmt.Errorf("unsupported message type: %s", message.Type)
 	}
 
+	return nil
+}
+
+func validateRoomName(room string) error {
+	if room == "" {
+		return fmt.Errorf("room name must not be empty")
+	}
+	if len(room) > maxRoomNameSize {
+		return fmt.Errorf("room name is too long")
+	}
+	for _, r := range room {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_') {
+			return fmt.Errorf("room name must contain only ASCII letters, digits, or underscore")
+		}
+	}
 	return nil
 }
 

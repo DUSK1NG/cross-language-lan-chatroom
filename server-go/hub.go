@@ -13,6 +13,8 @@ const clientSendBufferSize = 16
 var ErrUserCodeAlreadyUsed = errors.New("user code already exists")
 var errRegisterRequestMissingIdentity = errors.New("register request requires user code identity")
 
+const defaultRoomName = "lobby"
+
 type RegisterRequest struct {
 	Client *Client
 	Result chan error
@@ -31,12 +33,18 @@ type PrivateMessageRequest struct {
 	Content    string
 }
 
+type RoomRequest struct {
+	Client *Client
+	Room   string
+}
+
 // Client 表示一个已经完成登录的客户端连接。
 type Client struct {
 	Conn           net.Conn
 	Username       string
 	UserCode       string
 	NormalizedCode string
+	Room           string
 	Send           chan Message
 
 	closeOnce     sync.Once
@@ -49,6 +57,7 @@ func newClient(conn net.Conn, username, userCode, normalizedCode string) *Client
 		Username:       username,
 		UserCode:       userCode,
 		NormalizedCode: normalizedCode,
+		Room:           defaultRoomName,
 		Send:           make(chan Message, clientSendBufferSize),
 	}
 }
@@ -83,8 +92,12 @@ type Hub struct {
 	Outbound     chan OutboundMessage
 	RequestUsers chan *Client
 	Private      chan PrivateMessageRequest
+	RoomJoin     chan RoomRequest
+	RoomLeave    chan *Client
+	RequestRooms chan *Client
 	ActiveCodes  map[string]*Client
 	UsedCodes    map[string]struct{}
+	Rooms        map[string]map[*Client]bool
 }
 
 func NewHub() *Hub {
@@ -96,8 +109,12 @@ func NewHub() *Hub {
 		Outbound:     make(chan OutboundMessage),
 		RequestUsers: make(chan *Client),
 		Private:      make(chan PrivateMessageRequest),
+		RoomJoin:     make(chan RoomRequest),
+		RoomLeave:    make(chan *Client),
+		RequestRooms: make(chan *Client),
 		ActiveCodes:  make(map[string]*Client),
 		UsedCodes:    make(map[string]struct{}),
+		Rooms:        make(map[string]map[*Client]bool),
 	}
 }
 
@@ -122,6 +139,15 @@ func (h *Hub) Run() {
 
 		case request := <-h.Private:
 			h.handlePrivateMessage(request)
+
+		case request := <-h.RoomJoin:
+			h.handleRoomJoin(request)
+
+		case client := <-h.RoomLeave:
+			h.handleRoomLeave(client)
+
+		case client := <-h.RequestRooms:
+			h.handleRequestRooms(client)
 		}
 	}
 }
@@ -137,6 +163,13 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 		h.respondRegister(request.Result, errRegisterRequestMissingIdentity)
 		return
 	}
+	if client.Room == "" {
+		client.Room = defaultRoomName
+	}
+	if err := validateRoomName(client.Room); err != nil {
+		h.respondRegister(request.Result, err)
+		return
+	}
 
 	if _, used := h.UsedCodes[client.NormalizedCode]; used {
 		h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
@@ -146,7 +179,8 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 	h.UsedCodes[client.NormalizedCode] = struct{}{}
 	h.ActiveCodes[client.NormalizedCode] = client
 	h.Clients[client] = true
-	h.broadcastSystemMessage(presenceMessage(client, "joined the chat"))
+	h.addToRoom(client, client.Room)
+	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined the chat"))
 	log.Printf("client registered: %s", client.Username)
 	h.respondRegister(request.Result, nil)
 }
@@ -161,7 +195,7 @@ func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {
 
 	h.removeClient(client)
 	if broadcastLeave {
-		h.broadcastSystemMessage(presenceMessage(client, "left the chat"))
+		h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "left the chat"))
 	}
 	client.closeSend()
 	client.closeConnection()
@@ -169,9 +203,24 @@ func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {
 }
 
 func (h *Hub) broadcastMessage(message Message) {
-	for client := range h.Clients {
+	room := ""
+	if message.UserCode != "" {
+		if normalized, err := normalizeUserCode(message.UserCode); err == nil {
+			if sender, ok := h.ActiveCodes[normalized]; ok {
+				room = sender.Room
+			}
+		}
+	}
+	for client := range h.roomClients(room) {
 		h.deliver(client, message)
 	}
+}
+
+func (h *Hub) roomClients(room string) map[*Client]bool {
+	if room == "" {
+		return h.Clients
+	}
+	return h.Rooms[room]
 }
 
 func (h *Hub) deliver(client *Client, message Message) bool {
@@ -200,6 +249,7 @@ func (h *Hub) removeSlowClient(client *Client) {
 
 func (h *Hub) removeClient(client *Client) {
 	delete(h.Clients, client)
+	h.removeFromRoom(client)
 
 	if client == nil || client.NormalizedCode == "" {
 		return
@@ -223,6 +273,15 @@ func (h *Hub) broadcastSystemMessage(content string) {
 	h.broadcastMessage(message)
 }
 
+func (h *Hub) broadcastSystemMessageToRoom(room, content string) {
+	if content == "" {
+		return
+	}
+	for client := range h.Rooms[room] {
+		h.deliver(client, Message{Type: "system", Content: content})
+	}
+}
+
 func (h *Hub) handleRequestUsers(requester *Client) {
 	if requester == nil {
 		return
@@ -233,7 +292,7 @@ func (h *Hub) handleRequestUsers(requester *Client) {
 
 	users := make([]string, 0, len(h.Clients))
 	for client := range h.Clients {
-		users = append(users, client.Username+"#"+client.UserCode)
+		users = append(users, client.Username+"#"+client.UserCode+"@"+client.Room)
 	}
 	sort.Strings(users)
 
@@ -241,6 +300,83 @@ func (h *Hub) handleRequestUsers(requester *Client) {
 		Type:  "users_response",
 		Users: users,
 	})
+}
+
+func (h *Hub) handleRequestRooms(requester *Client) {
+	if requester == nil {
+		return
+	}
+	if _, ok := h.Clients[requester]; !ok {
+		return
+	}
+	rooms := make([]string, 0, len(h.Rooms))
+	for room := range h.Rooms {
+		rooms = append(rooms, room)
+	}
+	sort.Strings(rooms)
+	h.deliver(requester, Message{Type: "rooms_response", Rooms: rooms, Room: requester.Room})
+}
+
+func (h *Hub) handleRoomJoin(request RoomRequest) {
+	client := request.Client
+	if client == nil {
+		return
+	}
+	if _, ok := h.Clients[client]; !ok {
+		return
+	}
+	if err := validateRoomName(request.Room); err != nil {
+		h.deliverError(client, "Invalid room name")
+		return
+	}
+	if request.Room == client.Room {
+		h.deliver(client, Message{Type: "system", Content: "Already in room " + client.Room})
+		return
+	}
+	oldRoom := client.Room
+	h.broadcastSystemMessageToRoom(oldRoom, presenceMessage(client, "left room "+oldRoom))
+	h.removeFromRoom(client)
+	client.Room = request.Room
+	h.addToRoom(client, client.Room)
+	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined room "+client.Room))
+}
+
+func (h *Hub) handleRoomLeave(client *Client) {
+	if client == nil {
+		return
+	}
+	if _, ok := h.Clients[client]; !ok {
+		return
+	}
+	if client.Room == defaultRoomName {
+		h.deliver(client, Message{Type: "system", Content: "Already in room " + defaultRoomName})
+		return
+	}
+	oldRoom := client.Room
+	h.broadcastSystemMessageToRoom(oldRoom, presenceMessage(client, "left room "+oldRoom))
+	h.removeFromRoom(client)
+	client.Room = defaultRoomName
+	h.addToRoom(client, client.Room)
+	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined room "+defaultRoomName))
+}
+
+func (h *Hub) addToRoom(client *Client, room string) {
+	if h.Rooms[room] == nil {
+		h.Rooms[room] = make(map[*Client]bool)
+	}
+	h.Rooms[room][client] = true
+}
+
+func (h *Hub) removeFromRoom(client *Client) {
+	if client == nil || client.Room == "" {
+		return
+	}
+	if members, ok := h.Rooms[client.Room]; ok {
+		delete(members, client)
+		if len(members) == 0 && client.Room != defaultRoomName {
+			delete(h.Rooms, client.Room)
+		}
+	}
 }
 
 func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {

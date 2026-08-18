@@ -289,6 +289,20 @@ func TestValidateMessage(t *testing.T) {
 			message: Message{Type: "private_chat", TargetUserCode: "BoB01", Content: "Hello"},
 		},
 		{
+			name:    "valid room join",
+			message: Message{Type: "room_join", Room: "room_2026"},
+		},
+		{
+			name:    "room join with punctuation",
+			message: Message{Type: "room_join", Room: "room-2026"},
+			wantErr: true,
+		},
+		{
+			name:    "room join empty",
+			message: Message{Type: "room_join"},
+			wantErr: true,
+		},
+		{
 			name:    "private chat missing target code",
 			message: Message{Type: "private_chat", Content: "Hello"},
 			wantErr: true,
@@ -341,6 +355,22 @@ func TestValidateCommandMessages(t *testing.T) {
 		{
 			name:    "empty users response",
 			message: Message{Type: "users_response", Users: []string{}},
+		},
+		{
+			name:    "room join",
+			message: Message{Type: "room_join", Room: "study_1"},
+		},
+		{
+			name:    "room leave",
+			message: Message{Type: "room_leave"},
+		},
+		{
+			name:    "rooms request",
+			message: Message{Type: "rooms_request"},
+		},
+		{
+			name:    "rooms response",
+			message: Message{Type: "rooms_response", Rooms: []string{"lobby", "study_1"}},
 		},
 	}
 
