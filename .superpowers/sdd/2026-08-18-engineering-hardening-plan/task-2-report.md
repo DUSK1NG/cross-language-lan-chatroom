@@ -40,6 +40,7 @@ All 12 protocol tests passed
 ## Commit hash
 
 - Initial Task 2 commit: `9b1ba1b`
+- Fix round 1 implementation commit: `6e4d15a`
 
 ## Concerns
 
