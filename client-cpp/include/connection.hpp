@@ -20,6 +20,8 @@ struct Config {
     std::string username;
     std::string user_code;
     std::string ca_file;
+    std::string password;
+    bool register_account = false;
 };
 
 enum class LoginResult {
@@ -69,6 +71,7 @@ private:
     mutable std::shared_ptr<Session> session_;
     mutable bool ready_ = false;
     bool stop_requested_ = false;
+    bool registration_completed_ = false;
     std::string last_error_;
 };
 

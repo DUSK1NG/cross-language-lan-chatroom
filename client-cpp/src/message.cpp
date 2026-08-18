@@ -16,6 +16,7 @@ nlohmann::json serialize(const Message& message) {
     if (!message.content.empty()) object["content"] = message.content;
     if (!message.users.empty()) object["users"] = message.users;
     if (!message.rooms.empty()) object["rooms"] = message.rooms;
+    if (!message.password.empty()) object["password"] = message.password;
     return object;
 }
 
@@ -41,7 +42,8 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("user_code", parsed.user_code) ||
             !read_string("target_user_code", parsed.target_user_code) ||
             !read_string("room", parsed.room) ||
-            !read_string("content", parsed.content)) return false;
+            !read_string("content", parsed.content) ||
+            !read_string("password", parsed.password)) return false;
 
         if (object.contains("users")) {
             if (!object.at("users").is_array()) return false;

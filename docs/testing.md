@@ -64,7 +64,7 @@ TLS 服务端启动需要证书和私钥：
 
 ```powershell
 cd ..\client-cpp
-g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\command.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
+g++ -std=c++17 -Wall -Wextra -pedantic -municode -Iinclude -Ithird_party src\main.cpp src\auth.cpp src\command.cpp src\connection.cpp src\message.cpp src\protocol.cpp -o chat-client.exe -lws2_32 -lssl -lcrypto
 ```
 
 预期：编译成功且没有 warning。

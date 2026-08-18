@@ -1,5 +1,29 @@
 # Go + C++ LAN Chat
 
+## Go Server 账号认证
+
+服务端支持 SQLite 账号数据库。数据库路径可通过 `-db` 或 `CHAT_DB_PATH` 配置，默认路径为 `chat.db`。
+
+注册请求使用 `register`：
+
+```json
+{"type":"register","username":"Alice","user_code":"ALICE01","password":"correct-password"}
+```
+
+收到 `register_ok` 后，客户端使用 `login_auth` 登录：
+
+```json
+{"type":"login_auth","username":"Alice","password":"correct-password"}
+```
+
+服务端只保存 bcrypt 密码哈希，不保存明文密码。已注册身份不能使用旧的无密码 `login` 绕过认证；未注册身份仍可使用旧 `login` 流程，以保持旧客户端兼容。
+
+自定义数据库启动示例：
+
+```powershell
+.\chat-server.exe -cert .\certs\server.crt -key .\certs\server.key -db .\data\chat.db
+```
+
 一个面向 Windows 11 的跨语言局域网多人聊天室：Go 负责 TCP Server，C++ 负责 Winsock2 Client。项目使用自定义应用层 framing 和 JSON 协议，适合学习 TCP 字节流、并发、跨语言协议和异常清理。
 
 ## 项目特点
@@ -113,13 +137,13 @@ MinGW 和 MSVC 直接构建命令在 `client-cpp` 目录执行。
 MinGW 直接构建：
 
 ```powershell
-g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\command.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
+g++ -std=c++17 -Wall -Wextra -pedantic -municode -Iinclude -Ithird_party src\main.cpp src\auth.cpp src\command.cpp src\connection.cpp src\message.cpp src\protocol.cpp -o chat-client.exe -lws2_32 -lssl -lcrypto
 ```
 
 MSVC 直接构建：
 
 ```powershell
-cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE src\main.cpp src\command.cpp src\message.cpp src\protocol.cpp /Iinclude /Ithird_party ws2_32.lib /Fe:chat-client.exe
+cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE src\main.cpp src\auth.cpp src\command.cpp src\connection.cpp src\message.cpp src\protocol.cpp /Iinclude /Ithird_party ws2_32.lib libssl.lib libcrypto.lib /Fe:chat-client.exe
 ```
 
 CMake 构建与测试从仓库根目录执行：
@@ -248,3 +272,24 @@ MinGW-w64 直接构建：
     g++ -std=c++17 -Wall -Wextra -Wpedantic -municode -Iinclude -Ithird_party src\main.cpp src\command.cpp src\connection.cpp src\message.cpp src\protocol.cpp -o chat-client.exe -lws2_32 -lssl -lcrypto
 
 CMake 构建需要 OpenSSL 3.x 开发包。
+## C++ 客户端账号参数
+
+普通无账号模式保持兼容：
+
+```powershell
+.\chat-client.exe 127.0.0.1 8888 Alice ALICE001 --ca-file .\certs\server.crt
+```
+
+使用已有账号登录：
+
+```powershell
+.\chat-client.exe 127.0.0.1 8888 Alice ALICE001 --password password123 --ca-file .\certs\server.crt
+```
+
+注册并随后登录：
+
+```powershell
+.\chat-client.exe 127.0.0.1 8888 Alice ALICE001 --password password123 --register --ca-file .\certs\server.crt
+```
+
+`--register` 只在首次连接执行；自动重连只重新发送 `login_auth`，不会重复注册。密码只保存在客户端进程内存中，不会打印到日志；密码认证必须配合 TLS 使用。

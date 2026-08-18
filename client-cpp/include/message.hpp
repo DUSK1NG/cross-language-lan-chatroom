@@ -17,7 +17,8 @@ struct Message {
         std::vector<std::string> users_value = {},
         std::string target_user_code_value = {},
         std::string room_value = {},
-        std::vector<std::string> rooms_value = {})
+        std::vector<std::string> rooms_value = {},
+        std::string password_value = {})
         : type(std::move(type_value)),
           username(std::move(username_value)),
           user_code(std::move(user_code_value)),
@@ -25,7 +26,8 @@ struct Message {
           users(std::move(users_value)),
           target_user_code(std::move(target_user_code_value)),
           room(std::move(room_value)),
-          rooms(std::move(rooms_value)) {}
+          rooms(std::move(rooms_value)),
+          password(std::move(password_value)) {}
 
     std::string type;
     std::string username;
@@ -35,6 +37,7 @@ struct Message {
     std::string target_user_code;
     std::string room;
     std::vector<std::string> rooms{};
+    std::string password;
 };
 
 bool send_message(SOCKET socket_handle, const Message& message);

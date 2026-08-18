@@ -8,6 +8,10 @@ import (
 )
 
 func handleConnection(conn net.Conn, hub *Hub) {
+	handleConnectionWithStore(conn, hub, nil)
+}
+
+func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 	remoteAddress := conn.RemoteAddr().String()
 	log.Printf("client connected: %s", remoteAddress)
 
@@ -30,41 +34,80 @@ func handleConnection(conn net.Conn, hub *Hub) {
 		log.Printf("client disconnected: %s", remoteAddress)
 	}()
 
-	loginMessage, err := receiveMessage(conn)
-	if err != nil {
-		log.Printf("failed to receive login message from %s: %v", remoteAddress, err)
-		_ = sendMessage(conn, Message{
-			Type:    "error",
-			Content: "Invalid JSON message",
-		})
-		return
-	}
-	if loginMessage.Type != "login" {
-		_ = sendMessage(conn, Message{
-			Type:    "login_error",
-			Content: "Expected login message",
-		})
-		return
-	}
-	if err := validateMessage(loginMessage); err != nil {
-		log.Printf("invalid login message from %s: %v", remoteAddress, err)
-		_ = sendMessage(conn, Message{
-			Type:    "login_error",
-			Content: "Invalid username",
-		})
-		return
-	}
+	for {
+		loginMessage, err := receiveMessage(conn)
+		if err != nil {
+			log.Printf("failed to receive authentication message from %s: %v", remoteAddress, err)
+			_ = sendMessage(conn, Message{Type: "error", Content: "Invalid JSON message"})
+			return
+		}
 
-	normalizedCode, err := normalizeUserCode(loginMessage.UserCode)
-	if err != nil {
-		log.Printf("failed to normalize user code for %s: %v", remoteAddress, err)
-		_ = sendMessage(conn, Message{
-			Type:    "login_error",
-			Content: "Invalid username",
-		})
-		return
+		switch loginMessage.Type {
+		case "register":
+			if store == nil {
+				_ = sendMessage(conn, Message{Type: "register_error", Content: "Account storage is unavailable"})
+				continue
+			}
+			if err := validateMessage(loginMessage); err != nil {
+				_ = sendMessage(conn, Message{Type: "register_error", Content: "Invalid registration data"})
+				continue
+			}
+			if err := store.Register(loginMessage.Username, loginMessage.UserCode, loginMessage.Password); err != nil {
+				content := "Registration failed"
+				if errors.Is(err, ErrAccountAlreadyExists) {
+					content = "Username or user code already exists"
+				}
+				_ = sendMessage(conn, Message{Type: "register_error", Content: content})
+				continue
+			}
+			if err := sendMessage(conn, Message{Type: "register_ok", Content: "Registration successful"}); err != nil {
+				return
+			}
+			continue
+
+		case "login_auth":
+			if store == nil {
+				_ = sendMessage(conn, Message{Type: "login_error", Content: "Account storage is unavailable"})
+				return
+			}
+			if err := validateMessage(loginMessage); err != nil {
+				_ = sendMessage(conn, Message{Type: "login_error", Content: "Invalid credentials"})
+				return
+			}
+			account, err := store.Authenticate(loginMessage.Username, loginMessage.Password)
+			if err != nil {
+				_ = sendMessage(conn, Message{Type: "login_error", Content: "Invalid username or password"})
+				return
+			}
+			normalizedCode, _ := normalizeUserCode(account.UserCode)
+			client = newClient(conn, account.Username, account.UserCode, normalizedCode)
+			client.AccountBacked = true
+
+		case "login":
+			if err := validateMessage(loginMessage); err != nil {
+				_ = sendMessage(conn, Message{Type: "login_error", Content: "Invalid username"})
+				return
+			}
+			if store != nil {
+				hasIdentity, err := store.HasIdentity(loginMessage.Username, loginMessage.UserCode)
+				if err != nil {
+					_ = sendMessage(conn, Message{Type: "login_error", Content: "Account storage error"})
+					return
+				}
+				if hasIdentity {
+					_ = sendMessage(conn, Message{Type: "login_error", Content: "Password login required"})
+					return
+				}
+			}
+			normalizedCode, _ := normalizeUserCode(loginMessage.UserCode)
+			client = newClient(conn, loginMessage.Username, loginMessage.UserCode, normalizedCode)
+
+		default:
+			_ = sendMessage(conn, Message{Type: "login_error", Content: "Expected register, login_auth, or login message"})
+			return
+		}
+		break
 	}
-	client = newClient(conn, loginMessage.Username, loginMessage.UserCode, normalizedCode)
 
 	registerResult := make(chan error, 1)
 	hub.Register <- RegisterRequest{Client: client, Result: registerResult}

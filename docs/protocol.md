@@ -1,5 +1,58 @@
 # Cross-Language Chat Protocol
 
+## 账号认证协议
+
+Go Server 使用 `database/sql`、SQLite 和 bcrypt 保存账号。数据库路径由 `-db` 或 `CHAT_DB_PATH` 指定，默认是 `chat.db`。
+
+### register
+
+客户端发送：
+
+```json
+{
+  "type": "register",
+  "username": "Alice",
+  "user_code": "ALICE01",
+  "password": "correct-password"
+}
+```
+
+成功响应：
+
+```json
+{
+  "type": "register_ok",
+  "content": "Registration successful"
+}
+```
+
+用户名和用户代码均不区分大小写且必须唯一。重复用户名或代码返回 `register_error`。
+
+### login_auth
+
+注册成功后，客户端发送：
+
+```json
+{
+  "type": "login_auth",
+  "username": "Alice",
+  "password": "correct-password"
+}
+```
+
+密码通过 bcrypt 校验。成功后服务端返回原有的 `login_ok`，并从数据库绑定保存的用户名和用户代码：
+
+```json
+{
+  "type": "login_ok",
+  "username": "Alice",
+  "user_code": "ALICE01",
+  "content": "Login successful"
+}
+```
+
+密码错误或账号不存在返回 `login_error`。服务端只保存 bcrypt 哈希，不保存密码明文。旧的 `login` 消息仍兼容未注册身份；如果身份已经存在于账号数据库，旧登录会返回 `Password login required`。
+
 本文档描述 Go Server 与 C++ Client 之间的当前协议。协议只处理文本聊天，不处理文件、图片、命令执行或二进制业务数据。
 
 ## 1. Transport
@@ -318,3 +371,29 @@ C++ 客户端在长度头和 JSON 协议外层使用 OpenSSL 3.x TLS。TLS 只�
 - 自动重连会重新创建 SSL_CTX 和 SSL，重新执行证书验证与 SSL_connect。
 
 当前 Go Server 已提供 TLS listener；客户端和服务端证书配置一致后即可进行端到端 TLS 联调。
+## 8. 账号认证
+
+账号模式必须使用 TLS。密码字段只用于 `register` 和 `login_auth`，客户端不会把密码写入日志。
+
+注册请求：
+
+```json
+{
+  "type": "register",
+  "username": "Alice",
+  "user_code": "ALICE001",
+  "password": "password123"
+}
+```
+
+注册成功返回 `register_ok`，失败返回 `register_error`。注册成功后，客户端继续发送：
+
+```json
+{
+  "type": "login_auth",
+  "username": "Alice",
+  "password": "password123"
+}
+```
+
+未提供 `--password` 时，客户端发送旧版 `login`，用于兼容无账号模式。自动重连只重新发送 `login_auth` 或兼容的 `login`，不会重复发送 `register`。

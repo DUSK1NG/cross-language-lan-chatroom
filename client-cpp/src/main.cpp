@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include "command.hpp"
+#include "auth.hpp"
 #include "connection.hpp"
 #include "message.hpp"
 
@@ -22,10 +23,6 @@
 
 namespace {
 
-constexpr const char* kDefaultServerIp = "127.0.0.1";
-constexpr int kDefaultServerPort = 8888;
-constexpr const char* kDefaultUsername = "Alice";
-constexpr const char* kDefaultUserCode = "ALICE001";
 constexpr DWORD kConsolePollIntervalMs = 100;
 constexpr DWORD kInputBufferSize = 256;
 constexpr DWORD kConsoleEventBufferSize = 32;
@@ -557,42 +554,20 @@ int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
-    const std::string server_ip = argc >= 2 ? utf8_from_wide(argv[1]) : kDefaultServerIp;
-    const std::string username = argc >= 4
-        ? utf8_from_wide(argv[3])
-        : kDefaultUsername;
-    const std::string user_code = argc >= 5
-        ? utf8_from_wide(argv[4])
-        : kDefaultUserCode;
-    std::string ca_file;
-    for (int index = 5; index < argc; ++index) {
-        const std::string option = utf8_from_wide(argv[index]);
-        if (option != "--ca-file" || index + 1 >= argc) {
-            std::cerr << "Usage: chat-client.exe [server-ip] [port] [username] [user-code] "
-                         "[--ca-file path]\n";
-            return 1;
-        }
-        ca_file = utf8_from_wide(argv[++index]);
-        if (ca_file.empty()) {
-            std::cerr << "--ca-file requires a non-empty path.\n";
-            return 1;
-        }
+    std::vector<std::string> arguments;
+    arguments.reserve(argc > 1 ? static_cast<std::size_t>(argc - 1) : 0);
+    for (int index = 1; index < argc; ++index) {
+        arguments.push_back(utf8_from_wide(argv[index]));
     }
 
-    int server_port = kDefaultServerPort;
-    if (argc >= 3) {
-        const std::string port_text = utf8_from_wide(argv[2]);
-        try {
-            std::size_t parsed_length = 0;
-            server_port = std::stoi(port_text, &parsed_length);
-            if (parsed_length != port_text.size() || server_port < 1 || server_port > 65535) {
-                throw std::invalid_argument("port out of range");
-            }
-        } catch (const std::exception&) {
-            std::cerr << "Invalid port.\n";
-            return 1;
-        }
+    auth::ClientOptions client_options;
+    std::string argument_error;
+    if (!auth::parse_arguments(arguments, client_options, argument_error)) {
+        std::cerr << argument_error << '\n' << auth::usage() << '\n';
+        return 1;
     }
+
+    const std::string& user_code = client_options.user_code;
 
     WSADATA wsa_data{};
     const int startup_result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
@@ -602,7 +577,14 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     connection::ConnectionState connection_state(
-        connection::Config{server_ip, server_port, username, user_code, ca_file});
+        connection::Config{
+            client_options.server_ip,
+            client_options.server_port,
+            client_options.username,
+            client_options.user_code,
+            client_options.ca_file,
+            client_options.password,
+            client_options.register_account});
     message::Message login_response;
     connection::LoginResult login_result = connection::LoginResult::kRetryableFailure;
     if (!connection_state.connect_and_login(login_response, login_result)) {

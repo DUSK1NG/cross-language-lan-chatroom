@@ -38,7 +38,7 @@ func TestHubRejectsReusedUserCodeAfterUnregister(t *testing.T) {
 		Content: "Alice#Alex2026 joined the chat",
 	})
 
-	hub.Unregister <- first
+	sendHubUnregister(t, hub, first)
 	assertChannelClosed(t, first.Send)
 
 	second := newTestClient(t, "Bob", "Alex2026")
@@ -46,6 +46,33 @@ func TestHubRejectsReusedUserCodeAfterUnregister(t *testing.T) {
 	if !errors.Is(err, ErrUserCodeAlreadyUsed) {
 		t.Fatalf("register second client error = %v, want %v", err, ErrUserCodeAlreadyUsed)
 	}
+}
+
+func TestHubAllowsAccountBackedUserCodeAfterUnregister(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	first := newTestClient(t, "Alice", "Alex2026")
+	first.AccountBacked = true
+	if err := registerForTest(t, hub, first); err != nil {
+		t.Fatalf("register first account client: %v", err)
+	}
+	assertMessageReceived(t, first.Send, Message{
+		Type:    "system",
+		Content: "Alice#Alex2026 joined the chat",
+	})
+	sendHubUnregister(t, hub, first)
+	assertChannelClosed(t, first.Send)
+
+	second := newTestClient(t, "Alice", "Alex2026")
+	second.AccountBacked = true
+	if err := registerForTest(t, hub, second); err != nil {
+		t.Fatalf("register account client after reconnect: %v", err)
+	}
+	assertMessageReceived(t, second.Send, Message{
+		Type:    "system",
+		Content: "Alice#Alex2026 joined the chat",
+	})
 }
 
 func TestHubBroadcastsJoinMessageOnFirstRegistration(t *testing.T) {

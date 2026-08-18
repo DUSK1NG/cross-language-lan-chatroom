@@ -20,6 +20,7 @@ type Message struct {
 	Users          []string `json:"users,omitempty"`
 	Rooms          []string `json:"rooms,omitempty"`
 	Content        string   `json:"content,omitempty"`
+	Password       string   `json:"password,omitempty"`
 }
 
 func validateUserCode(code string) error {
@@ -99,6 +100,16 @@ func validateMessage(message Message) error {
 		if _, err := normalizeUserCode(message.UserCode); err != nil {
 			return err
 		}
+	case "register":
+		if err := validateLoginIdentity(message); err != nil {
+			return err
+		}
+		return validatePassword(message.Password)
+	case "login_auth":
+		if message.Username == "" || !utf8.ValidString(message.Username) || len([]byte(message.Username)) > maxUsernameSize {
+			return fmt.Errorf("invalid username")
+		}
+		return validatePassword(message.Password)
 	case "chat":
 		return validateTextContent("chat", message.Content)
 	case "private_chat":
@@ -130,7 +141,7 @@ func validateMessage(message Message) error {
 				return fmt.Errorf("users list must contain valid UTF-8 strings")
 			}
 		}
-	case "login_ok", "login_error", "system", "error":
+	case "register_ok", "register_error", "login_ok", "login_error", "system", "error":
 		if message.Content == "" {
 			return fmt.Errorf("message content must not be empty")
 		}
@@ -138,6 +149,16 @@ func validateMessage(message Message) error {
 		return fmt.Errorf("unsupported message type: %s", message.Type)
 	}
 
+	return nil
+}
+
+func validateLoginIdentity(message Message) error {
+	if message.Username == "" || !utf8.ValidString(message.Username) || len([]byte(message.Username)) > maxUsernameSize {
+		return fmt.Errorf("invalid username")
+	}
+	if _, err := normalizeUserCode(message.UserCode); err != nil {
+		return err
+	}
 	return nil
 }
 

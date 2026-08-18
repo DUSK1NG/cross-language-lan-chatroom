@@ -44,6 +44,7 @@ type Client struct {
 	Username       string
 	UserCode       string
 	NormalizedCode string
+	AccountBacked  bool
 	Room           string
 	Send           chan Message
 
@@ -171,9 +172,15 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 		return
 	}
 
-	if _, used := h.UsedCodes[client.NormalizedCode]; used {
+	if _, active := h.ActiveCodes[client.NormalizedCode]; active {
 		h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
 		return
+	}
+	if !client.AccountBacked {
+		if _, used := h.UsedCodes[client.NormalizedCode]; used {
+			h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
+			return
+		}
 	}
 
 	h.UsedCodes[client.NormalizedCode] = struct{}{}
