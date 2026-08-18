@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -236,6 +237,135 @@ func TestHubIgnoresOutboundMessageForUnregisteredClient(t *testing.T) {
 	})
 }
 
+func TestHubUnregisterIsIdempotent(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	client := newTestClient(t, "Alice", "Alice01")
+	if err := registerForTest(t, hub, client); err != nil {
+		t.Fatalf("register client: %v", err)
+	}
+	assertMessageReceived(t, client.Send, Message{
+		Type:    "system",
+		Content: "Alice#Alice01 joined the chat",
+	})
+
+	sendHubUnregister(t, hub, client)
+	assertChannelClosed(t, client.Send)
+
+	// A second unregister must be ignored rather than panic or stop the Hub.
+	sendHubUnregister(t, hub, client)
+	assertChannelClosed(t, client.Send)
+
+	next := newTestClient(t, "Bob", "Bob01")
+	if err := registerForTest(t, hub, next); err != nil {
+		t.Fatalf("register client after repeated unregister: %v", err)
+	}
+	assertMessageReceived(t, next.Send, Message{
+		Type:    "system",
+		Content: "Bob#Bob01 joined the chat",
+	})
+}
+
+func TestHubIgnoresConcurrentLateOutboundAfterUnregister(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	client := newTestClient(t, "Alice", "Alice01")
+	if err := registerForTest(t, hub, client); err != nil {
+		t.Fatalf("register client: %v", err)
+	}
+	assertMessageReceived(t, client.Send, Message{
+		Type:    "system",
+		Content: "Alice#Alice01 joined the chat",
+	})
+
+	hub.Unregister <- client
+	assertChannelClosed(t, client.Send)
+
+	const senderCount = 4
+	const messagesPerSender = 32
+	var senders sync.WaitGroup
+	senders.Add(senderCount)
+	finished := make(chan struct{})
+	go func() {
+		senders.Wait()
+		close(finished)
+	}()
+
+	for sender := 0; sender < senderCount; sender++ {
+		go func(sender int) {
+			defer senders.Done()
+			for messageIndex := 0; messageIndex < messagesPerSender; messageIndex++ {
+				hub.Outbound <- OutboundMessage{
+					Client: client,
+					Message: Message{
+						Type:    "error",
+						Content: "late outbound",
+					},
+				}
+			}
+		}(sender)
+	}
+
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out sending late outbound messages")
+	}
+
+	next := newTestClient(t, "Bob", "Bob01")
+	if err := registerForTest(t, hub, next); err != nil {
+		t.Fatalf("register next client after late outbound: %v", err)
+	}
+	assertMessageReceived(t, next.Send, Message{
+		Type:    "system",
+		Content: "Bob#Bob01 joined the chat",
+	})
+}
+
+func TestHubRemovesSlowClientAndKeepsHealthyClient(t *testing.T) {
+	hub := NewHub()
+
+	slow := newTestClient(t, "Slow", "Slow01")
+	registerResult := make(chan error, 1)
+	hub.handleRegisterRequest(RegisterRequest{Client: slow, Result: registerResult})
+	if err := <-registerResult; err != nil {
+		t.Fatalf("register slow client: %v", err)
+	}
+	assertMessageReceived(t, slow.Send, Message{
+		Type:    "system",
+		Content: "Slow#Slow01 joined the chat",
+	})
+
+	pressureMessage := Message{
+		Type:     "chat",
+		Username: "Server",
+		Content:  "buffer pressure",
+	}
+	for index := 0; index < cap(slow.Send)+1; index++ {
+		hub.deliver(slow, pressureMessage)
+	}
+	assertChannelClosedAfterDraining(t, slow.Send)
+
+	healthy := newTestClient(t, "Healthy", "Healthy01")
+	registerResult = make(chan error, 1)
+	hub.handleRegisterRequest(RegisterRequest{Client: healthy, Result: registerResult})
+	if err := <-registerResult; err != nil {
+		t.Fatalf("register healthy client after slow removal: %v", err)
+	}
+	assertMessageReceived(t, healthy.Send, Message{
+		Type:    "system",
+		Content: "Healthy#Healthy01 joined the chat",
+	})
+
+	want := Message{Type: "chat", Username: "Healthy", Content: "server still works"}
+	if !hub.deliver(healthy, want) {
+		t.Fatal("healthy client did not accept broadcast")
+	}
+	assertMessageReceived(t, healthy.Send, want)
+}
+
 func TestHandleConnectionRegistersLoginUserCodeAndBroadcastsJoin(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
@@ -349,6 +479,16 @@ func registerForTest(t *testing.T, hub *Hub, client *Client) error {
 	return <-request.Result
 }
 
+func sendHubUnregister(t *testing.T, hub *Hub, client *Client) {
+	t.Helper()
+
+	select {
+	case hub.Unregister <- client:
+	case <-time.After(time.Second):
+		t.Fatal("timed out sending unregister request")
+	}
+}
+
 func newTestClient(t *testing.T, username string, userCode string) *Client {
 	t.Helper()
 
@@ -388,6 +528,24 @@ func assertChannelClosed(t *testing.T, messages <-chan Message) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for channel to close")
+	}
+}
+
+func assertChannelClosedAfterDraining(t *testing.T, messages <-chan Message) {
+	t.Helper()
+
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case _, ok := <-messages:
+			if !ok {
+				return
+			}
+		case <-deadline.C:
+			t.Fatal("timed out waiting for channel to close after draining")
+		}
 	}
 }
 
