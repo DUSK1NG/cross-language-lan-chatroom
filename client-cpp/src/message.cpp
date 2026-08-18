@@ -17,6 +17,7 @@ nlohmann::json serialize(const Message& message) {
     if (!message.users.empty()) object["users"] = message.users;
     if (!message.rooms.empty()) object["rooms"] = message.rooms;
     if (!message.password.empty()) object["password"] = message.password;
+    if (message.history_limit > 0) object["history_limit"] = message.history_limit;
     return object;
 }
 
@@ -44,6 +45,10 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("room", parsed.room) ||
             !read_string("content", parsed.content) ||
             !read_string("password", parsed.password)) return false;
+        if (object.contains("history_limit")) {
+            if (!object.at("history_limit").is_number_integer()) return false;
+            parsed.history_limit = object.at("history_limit").get<int>();
+        }
 
         if (object.contains("users")) {
             if (!object.at("users").is_array()) return false;

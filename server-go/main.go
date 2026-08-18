@@ -34,6 +34,7 @@ func main() {
 	}
 	defer store.Close()
 	hub.OfflineStore = store
+	hub.HistoryStore = store
 	log.Printf("account database: %s", resolveDBPath(*dbPath))
 
 	for {

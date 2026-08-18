@@ -10,6 +10,7 @@ import (
 
 const maxUsernameSize = 32
 const maxRoomNameSize = 32
+const maxHistoryLimit = 100
 
 type Message struct {
 	Type           string   `json:"type"`
@@ -21,6 +22,7 @@ type Message struct {
 	Rooms          []string `json:"rooms,omitempty"`
 	Content        string   `json:"content,omitempty"`
 	Password       string   `json:"password,omitempty"`
+	HistoryLimit   int      `json:"history_limit,omitempty"`
 }
 
 func validateUserCode(code string) error {
@@ -122,6 +124,11 @@ func validateMessage(message Message) error {
 	case "room_leave", "rooms_request":
 		return nil
 	case "users_request", "quit":
+		return nil
+	case "history_request":
+		if message.HistoryLimit < 0 || message.HistoryLimit > maxHistoryLimit {
+			return fmt.Errorf("history limit must be between 0 and %d", maxHistoryLimit)
+		}
 		return nil
 	case "users_response":
 		if message.Users == nil {

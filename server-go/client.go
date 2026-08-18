@@ -231,6 +231,15 @@ func (c *Client) readPump(hub *Hub) {
 		case "rooms_request":
 			hub.RequestRooms <- c
 
+		case "history_request":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", Content: "Invalid history request"}) {
+					return
+				}
+				continue
+			}
+			hub.RequestHistory <- HistoryRequest{Client: c, Limit: message.HistoryLimit}
+
 		case "quit":
 			hub.Unregister <- c
 			return

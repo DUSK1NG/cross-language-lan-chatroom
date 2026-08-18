@@ -38,6 +38,11 @@ type RoomRequest struct {
 	Room   string
 }
 
+type HistoryRequest struct {
+	Client *Client
+	Limit  int
+}
+
 // Client 表示一个已经完成登录的客户端连接。
 type Client struct {
 	Conn           net.Conn
@@ -86,37 +91,40 @@ func (c *Client) closeSend() {
 // Hub 是聊天室中客户端集合和广播消息的唯一管理者。
 // Clients、ActiveCodes 和 UsedCodes 只能由 Run goroutine 访问。
 type Hub struct {
-	Clients      map[*Client]bool
-	Register     chan RegisterRequest
-	Unregister   chan *Client
-	Broadcast    chan Message
-	Outbound     chan OutboundMessage
-	RequestUsers chan *Client
-	Private      chan PrivateMessageRequest
-	RoomJoin     chan RoomRequest
-	RoomLeave    chan *Client
-	RequestRooms chan *Client
-	ActiveCodes  map[string]*Client
-	UsedCodes    map[string]struct{}
-	Rooms        map[string]map[*Client]bool
-	OfflineStore *AuthStore
+	Clients        map[*Client]bool
+	Register       chan RegisterRequest
+	Unregister     chan *Client
+	Broadcast      chan Message
+	Outbound       chan OutboundMessage
+	RequestUsers   chan *Client
+	Private        chan PrivateMessageRequest
+	RoomJoin       chan RoomRequest
+	RoomLeave      chan *Client
+	RequestRooms   chan *Client
+	RequestHistory chan HistoryRequest
+	ActiveCodes    map[string]*Client
+	UsedCodes      map[string]struct{}
+	Rooms          map[string]map[*Client]bool
+	OfflineStore   *AuthStore
+	HistoryStore   *AuthStore
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		Clients:      make(map[*Client]bool),
-		Register:     make(chan RegisterRequest),
-		Unregister:   make(chan *Client),
-		Broadcast:    make(chan Message),
-		Outbound:     make(chan OutboundMessage),
-		RequestUsers: make(chan *Client),
-		Private:      make(chan PrivateMessageRequest),
-		RoomJoin:     make(chan RoomRequest),
-		RoomLeave:    make(chan *Client),
-		RequestRooms: make(chan *Client),
-		ActiveCodes:  make(map[string]*Client),
-		UsedCodes:    make(map[string]struct{}),
-		Rooms:        make(map[string]map[*Client]bool),
+		Clients:        make(map[*Client]bool),
+		Register:       make(chan RegisterRequest),
+		Unregister:     make(chan *Client),
+		Broadcast:      make(chan Message),
+		Outbound:       make(chan OutboundMessage),
+		RequestUsers:   make(chan *Client),
+		Private:        make(chan PrivateMessageRequest),
+		RoomJoin:       make(chan RoomRequest),
+		RoomLeave:      make(chan *Client),
+		RequestRooms:   make(chan *Client),
+		RequestHistory: make(chan HistoryRequest),
+		ActiveCodes:    make(map[string]*Client),
+		UsedCodes:      make(map[string]struct{}),
+		Rooms:          make(map[string]map[*Client]bool),
 	}
 }
 
@@ -150,6 +158,9 @@ func (h *Hub) Run() {
 
 		case client := <-h.RequestRooms:
 			h.handleRequestRooms(client)
+
+		case request := <-h.RequestHistory:
+			h.handleRequestHistory(request)
 		}
 	}
 }
@@ -219,9 +230,33 @@ func (h *Hub) broadcastMessage(message Message) {
 			}
 		}
 	}
+	if message.Type == "chat" && h.HistoryStore != nil {
+		if err := h.HistoryStore.SaveHistoryMessage(room, message); err != nil {
+			log.Printf("failed to save chat history: %v", err)
+		}
+	}
 	for client := range h.roomClients(room) {
 		h.deliver(client, message)
 	}
+}
+
+func (h *Hub) handleRequestHistory(request HistoryRequest) {
+	client := request.Client
+	if client == nil || h.HistoryStore == nil {
+		return
+	}
+	if _, ok := h.Clients[client]; !ok {
+		return
+	}
+	messages, err := h.HistoryStore.ListHistory(client.Room, request.Limit)
+	if err != nil {
+		h.deliverError(client, "Failed to load message history")
+		return
+	}
+	for _, message := range messages {
+		h.deliver(client, message)
+	}
+	h.deliver(client, Message{Type: "history_end", Content: "History loaded", Room: client.Room})
 }
 
 func (h *Hub) roomClients(room string) map[*Client]bool {
