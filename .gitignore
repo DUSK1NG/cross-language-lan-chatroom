@@ -4,3 +4,6 @@
 # Stage build outputs
 server-go/chat-server.exe
 client-cpp/chat-client.exe
+
+# Local implementation worktrees
+.worktrees/
