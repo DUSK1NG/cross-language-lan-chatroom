@@ -56,7 +56,7 @@ go build -o chat-server.exe .
 
 ```powershell
 cd ..\client-cpp
-g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
+g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\command.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
 ```
 
 预期：编译成功且没有 warning。
@@ -79,6 +79,8 @@ cmake --build build --config Release
 cd ..\client-cpp
 ctest --test-dir build --output-on-failure
 ```
+
+当前 CMake 注册两个测试目标：`command-tests` 和 `protocol-tests`；构建目录应包含 `chat-client.exe`、`command-tests.exe` 和 `protocol-tests.exe`。私聊功能的直接测试为：`protocol-tests` 15 个场景、`command-tests` 4 个命令解析场景。
 
 `protocol-tests` 是 C++ 协议层的 loopback TCP 自动化测试目标，当前共有 13 个直接测试，覆盖：
 
@@ -119,6 +121,36 @@ cd ..\client-cpp
 ```
 
 分别检查：登录、中文聊天、`/users`、`/help`、`/quit` 和其他客户端继续工作。
+
+### 5.1 三客户端 localhost 私聊验收
+
+保持 Server 运行，再打开三个 PowerShell 窗口：
+
+```powershell
+cd ..\client-cpp
+.\chat-client.exe 127.0.0.1 8888 Alice ALICE001
+```
+
+```powershell
+cd ..\client-cpp
+.\chat-client.exe 127.0.0.1 8888 Bob BOB001
+```
+
+```powershell
+cd ..\client-cpp
+.\chat-client.exe 127.0.0.1 8888 Charlie CHARLIE001
+```
+
+按以下顺序验收：
+
+1. Alice 输入 `/users`，确认列表中包含 `Alice#ALICE001`、`Bob#BOB001` 和 `Charlie#CHARLIE001`。
+2. Alice 输入 `/msg Bob#BOB001 你好，这是私聊消息。`。
+3. Alice 应看到类似 `[Private -> Bob#BOB001] 你好，这是私聊消息。`，Bob 应看到类似 `[Private from Alice#ALICE001] 你好，这是私聊消息。`，Charlie 不应看到这条 `private_chat`。
+4. Bob 输入 `/msg alice#alice001 你好，代码大小写不敏感。`，确认 Alice 能收到，说明目标代码比较不区分大小写。
+5. Alice 输入 `/msg Nobody#NOUSER01 测试`，只在 Alice 端确认 `Target user not found`；然后输入 `/msg Alice#ALICE001 测试`，确认收到 `Cannot send private message to yourself`。
+6. 再发送一条普通中文消息，确认群聊仍然发送给 Alice、Bob 和 Charlie 三个客户端。
+
+私聊验收的关键结论是：成功消息只到达发送者和目标用户；未知目标和自己发送只返回发送者错误；第三个客户端不会收到私聊内容。
 
 ## 6. localhost 异常测试矩阵
 

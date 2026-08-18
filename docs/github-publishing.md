@@ -32,7 +32,7 @@ go vet ./...
 go build -o chat-server.exe .
 
 cd ..\client-cpp
-g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
+g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\command.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
 cmake -S . -B build -G "MinGW Makefiles"
 cmake --build build --config Release
 ctest --test-dir build --output-on-failure

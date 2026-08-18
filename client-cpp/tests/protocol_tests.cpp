@@ -470,6 +470,7 @@ bool test_valid_message_round_trip() {
         "Alice",
         "A001",
         u8"你好，这是测试消息。",
+        {},
         {}};
 
     if (!expect_true(
@@ -492,6 +493,71 @@ bool test_valid_message_round_trip() {
         expect_equal(case_name, received.user_code, sent.user_code, "user_code") &&
         expect_equal(case_name, received.content, sent.content, "content") &&
         expect_equal(case_name, received.users.size(), sent.users.size(), "users size");
+}
+
+bool test_valid_private_message_round_trip() {
+    const std::string case_name = "valid private message round trip";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
+        return false;
+    }
+
+    const message::Message sent{
+        "private_chat",
+        "Alice",
+        "A001",
+        u8"你好，这是私聊消息。",
+        {},
+        "BOB01"};
+
+    if (!expect_true(
+            case_name,
+            message::send_message(sockets.client, sent),
+            "message::send_message should succeed")) {
+        return false;
+    }
+
+    message::Message received;
+    if (!expect_true(
+            case_name,
+            message::receive_message(sockets.server, received),
+            "message::receive_message should succeed")) {
+        return false;
+    }
+
+    return expect_equal(case_name, received.type, sent.type, "type") &&
+        expect_equal(case_name, received.username, sent.username, "username") &&
+        expect_equal(case_name, received.user_code, sent.user_code, "user_code") &&
+        expect_equal(
+               case_name,
+               received.target_user_code,
+               sent.target_user_code,
+               "target_user_code") &&
+        expect_equal(case_name, received.content, sent.content, "content") &&
+        expect_equal(case_name, received.users.size(), sent.users.size(), "users size");
+}
+
+bool test_receive_message_rejects_numeric_target_user_code() {
+    const std::string case_name = "receive_message rejects numeric target user code";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
+        return false;
+    }
+
+    if (!expect_true(
+            case_name,
+            protocol::send_frame(
+                sockets.client,
+                R"({"type":"private_chat","target_user_code":123,"content":"hello"})"),
+            "failed to send JSON with numeric target_user_code")) {
+        return false;
+    }
+
+    message::Message received;
+    return expect_false(
+        case_name,
+        message::receive_message(sockets.server, received),
+        "message::receive_message should reject numeric target_user_code");
 }
 
 bool test_three_frames_preserve_order() {
@@ -559,7 +625,11 @@ int main() {
          test_receive_message_rejects_missing_string_type},
         {"message::receive_message rejects numeric content",
          test_receive_message_rejects_numeric_content},
+        {"message::receive_message rejects numeric target_user_code",
+         test_receive_message_rejects_numeric_target_user_code},
         {"valid UTF-8 message round-trip preserves fields", test_valid_message_round_trip},
+        {"valid private message round-trip preserves fields",
+         test_valid_private_message_round_trip},
         {"three valid frames are received in send order", test_three_frames_preserve_order},
     };
 

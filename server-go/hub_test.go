@@ -151,6 +151,90 @@ func TestHubBroadcastsToAllRegisteredClients(t *testing.T) {
 	assertMessageReceived(t, second.Send, want)
 }
 
+func TestHubRoutesPrivateMessageOnlyToSenderAndTarget(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	sender := newTestClient(t, "Alice", "A001")
+	target := newTestClient(t, "Bob", "Bob01")
+	third := newTestClient(t, "Charlie", "C003")
+	if err := registerForTest(t, hub, sender); err != nil {
+		t.Fatalf("register %s: %v", sender.Username, err)
+	}
+	assertMessageReceived(t, sender.Send, Message{Type: "system", Content: "Alice#A001 joined the chat"})
+
+	if err := registerForTest(t, hub, target); err != nil {
+		t.Fatalf("register %s: %v", target.Username, err)
+	}
+	assertMessageReceived(t, sender.Send, Message{Type: "system", Content: "Bob#Bob01 joined the chat"})
+	assertMessageReceived(t, target.Send, Message{Type: "system", Content: "Bob#Bob01 joined the chat"})
+
+	if err := registerForTest(t, hub, third); err != nil {
+		t.Fatalf("register %s: %v", third.Username, err)
+	}
+	assertMessageReceived(t, sender.Send, Message{Type: "system", Content: "Charlie#C003 joined the chat"})
+	assertMessageReceived(t, target.Send, Message{Type: "system", Content: "Charlie#C003 joined the chat"})
+	assertMessageReceived(t, third.Send, Message{Type: "system", Content: "Charlie#C003 joined the chat"})
+
+	hub.Private <- PrivateMessageRequest{
+		Sender:     sender,
+		TargetCode: "bOB01",
+		Content:    "你好，这是私聊。",
+	}
+
+	want := Message{
+		Type:           "private_chat",
+		Username:       "Alice",
+		UserCode:       "A001",
+		TargetUserCode: "Bob01",
+		Content:        "你好，这是私聊。",
+	}
+	assertMessageReceived(t, sender.Send, want)
+	assertMessageReceived(t, target.Send, want)
+	assertNoMessageReceived(t, third.Send)
+}
+
+func TestHubPrivateMessageErrorsOnlyGoToSender(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	sender := newTestClient(t, "Alice", "A001")
+	target := newTestClient(t, "Bob", "Bob01")
+	if err := registerForTest(t, hub, sender); err != nil {
+		t.Fatalf("register %s: %v", sender.Username, err)
+	}
+	assertMessageReceived(t, sender.Send, Message{Type: "system", Content: "Alice#A001 joined the chat"})
+
+	if err := registerForTest(t, hub, target); err != nil {
+		t.Fatalf("register %s: %v", target.Username, err)
+	}
+	assertMessageReceived(t, sender.Send, Message{Type: "system", Content: "Bob#Bob01 joined the chat"})
+	assertMessageReceived(t, target.Send, Message{Type: "system", Content: "Bob#Bob01 joined the chat"})
+
+	tests := []struct {
+		name       string
+		targetCode string
+		content    string
+		wantError  string
+	}{
+		{name: "unknown target", targetCode: "Missing01", content: "hello", wantError: "Target user not found"},
+		{name: "self target", targetCode: "a001", content: "hello", wantError: "Cannot send private message to yourself"},
+		{name: "invalid target", targetCode: "bad-code", content: "hello", wantError: "Invalid target user code"},
+		{name: "empty content", targetCode: "Bob01", content: "", wantError: "Invalid private chat content"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			hub.Private <- PrivateMessageRequest{
+				Sender:     sender,
+				TargetCode: test.targetCode,
+				Content:    test.content,
+			}
+			assertMessageReceived(t, sender.Send, Message{Type: "error", Content: test.wantError})
+			assertNoMessageReceived(t, target.Send)
+		})
+	}
+}
+
 func TestHubRespondsWithSortedOnlineUsers(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()

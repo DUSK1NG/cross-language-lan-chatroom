@@ -9,7 +9,8 @@
 - TCP 多客户端群聊，支持 Wi-Fi 与 Ethernet 在同一局域网内互通
 - 中文消息统一使用 UTF-8
 - 用户名可以重复；通过自定义 ASCII 字母/数字 `user_code` 区分身份
-- 支持 `/help`、`/users`、`/quit`
+- 支持 `/help`、`/users`、`/msg Name#Code message`、`/quit`
+- 支持按唯一 `user_code` 定向私聊；代码比较不区分大小写，用户名可以重复
 - 支持长度头、半包、粘包、非法 JSON、非法 UTF-8、超长帧和异常断线处理
 - C++ 客户端目前仍为 Windows 专用（Windows-only）
 
@@ -57,7 +58,7 @@ UTF-8 JSON payload
 
 长度表示 JSON payload 的字节数，不是字符数。`payload` 必须满足 `1 <= length <= 64 KiB`。接收端先读取完整 4 字节 header，再读取完整 payload；因此 TCP 的粘包和拆包不会改变消息边界。
 
-主要消息类型包括：`login`、`login_ok`、`login_error`、`chat`、`system`、`users_request`、`users_response`、`quit`、`error`。完整字段和异常行为见 [docs/protocol.md](docs/protocol.md)。
+主要消息类型包括：`login`、`login_ok`、`login_error`、`chat`、`private_chat`、`system`、`users_request`、`users_response`、`quit`、`error`。完整字段和异常行为见 [docs/protocol.md](docs/protocol.md)。
 
 ## Windows 环境
 
@@ -94,13 +95,13 @@ MinGW 和 MSVC 直接构建命令在 `client-cpp` 目录执行。
 MinGW 直接构建：
 
 ```powershell
-g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
+g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\command.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
 ```
 
 MSVC 直接构建：
 
 ```powershell
-cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE src\main.cpp src\message.cpp src\protocol.cpp /Iinclude /Ithird_party ws2_32.lib /Fe:chat-client.exe
+cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE src\main.cpp src\command.cpp src\message.cpp src\protocol.cpp /Iinclude /Ithird_party ws2_32.lib /Fe:chat-client.exe
 ```
 
 CMake 构建与测试从仓库根目录执行：
@@ -145,8 +146,11 @@ cd client-cpp
 /help
 /users
 你好，这是 Go 和 C++ 的跨语言聊天。
+/msg Bob#BOB001 你好，这是一条私聊消息。
 /quit
 ```
+
+私聊命令格式为 `/msg Name#Code message`。其中 `Code` 是目标用户的唯一代码，服务端按代码查找目标并忽略客户端伪造的发送者身份。代码匹配不区分大小写；一条私聊只发送给发送者和目标用户，不会广播给其他客户端。目标不存在或向自己发送时，发送者会收到 Server error。
 
 ## Run：LAN
 
@@ -188,14 +192,14 @@ Wi-Fi 和 Ethernet 可以互通，因为 TCP 建立在 IP 之上；只要两台�
 - 自动重连
 - TLS
 - 账号密码和持久化数据库
-- 私聊、聊天室房间、文件 / 图片 / 音视频传输
+- 聊天室房间、文件 / 图片 / 音视频传输
 - GUI
 
 当前已经有 C++ 协议层 loopback 自动化测试和 GitHub Actions，但交互式控制台“自然输入/退出”、真实局域网组网和完整发布验证仍需要在真实 Windows 环境中手工复核。不要把这些场景写成“已全部本地自动化通过”。
 
 ## 后续方向
 
-私聊、聊天室房间、Qt GUI、SQLite 聊天记录、TLS，以及 Android / Web 客户端。
+聊天室房间、Qt GUI、SQLite 聊天记录、TLS，以及 Android / Web 客户端。
 
 ## Resume 项目描述
 

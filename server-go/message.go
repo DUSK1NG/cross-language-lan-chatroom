@@ -11,11 +11,12 @@ import (
 const maxUsernameSize = 32
 
 type Message struct {
-	Type     string   `json:"type"`
-	Username string   `json:"username,omitempty"`
-	UserCode string   `json:"user_code,omitempty"`
-	Users    []string `json:"users,omitempty"`
-	Content  string   `json:"content,omitempty"`
+	Type           string   `json:"type"`
+	Username       string   `json:"username,omitempty"`
+	UserCode       string   `json:"user_code,omitempty"`
+	TargetUserCode string   `json:"target_user_code,omitempty"`
+	Users          []string `json:"users,omitempty"`
+	Content        string   `json:"content,omitempty"`
 }
 
 func validateUserCode(code string) error {
@@ -96,15 +97,12 @@ func validateMessage(message Message) error {
 			return err
 		}
 	case "chat":
-		if message.Content == "" {
-			return fmt.Errorf("chat content must not be empty")
+		return validateTextContent("chat", message.Content)
+	case "private_chat":
+		if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+			return fmt.Errorf("invalid target user code: %w", err)
 		}
-		if !utf8.ValidString(message.Content) {
-			return fmt.Errorf("chat content must be valid UTF-8")
-		}
-		if len([]byte(message.Content)) > maxMessageSize {
-			return fmt.Errorf("chat content is too long")
-		}
+		return validateTextContent("private chat", message.Content)
 	case "users_request", "quit":
 		return nil
 	case "users_response":
@@ -124,5 +122,18 @@ func validateMessage(message Message) error {
 		return fmt.Errorf("unsupported message type: %s", message.Type)
 	}
 
+	return nil
+}
+
+func validateTextContent(messageKind, content string) error {
+	if content == "" {
+		return fmt.Errorf("%s content must not be empty", messageKind)
+	}
+	if !utf8.ValidString(content) {
+		return fmt.Errorf("%s content must be valid UTF-8", messageKind)
+	}
+	if len([]byte(content)) > maxMessageSize {
+		return fmt.Errorf("%s content is too long", messageKind)
+	}
 	return nil
 }

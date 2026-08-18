@@ -23,6 +23,14 @@ type OutboundMessage struct {
 	Message Message
 }
 
+// PrivateMessageRequest 是客户端提交给 Hub 的私聊请求。
+// Sender 由当前 TCP 连接绑定，不能由客户端消息中的身份字段替代。
+type PrivateMessageRequest struct {
+	Sender     *Client
+	TargetCode string
+	Content    string
+}
+
 // Client 表示一个已经完成登录的客户端连接。
 type Client struct {
 	Conn           net.Conn
@@ -74,6 +82,7 @@ type Hub struct {
 	Broadcast    chan Message
 	Outbound     chan OutboundMessage
 	RequestUsers chan *Client
+	Private      chan PrivateMessageRequest
 	ActiveCodes  map[string]*Client
 	UsedCodes    map[string]struct{}
 }
@@ -86,6 +95,7 @@ func NewHub() *Hub {
 		Broadcast:    make(chan Message),
 		Outbound:     make(chan OutboundMessage),
 		RequestUsers: make(chan *Client),
+		Private:      make(chan PrivateMessageRequest),
 		ActiveCodes:  make(map[string]*Client),
 		UsedCodes:    make(map[string]struct{}),
 	}
@@ -109,6 +119,9 @@ func (h *Hub) Run() {
 
 		case client := <-h.RequestUsers:
 			h.handleRequestUsers(client)
+
+		case request := <-h.Private:
+			h.handlePrivateMessage(request)
 		}
 	}
 }
@@ -227,6 +240,58 @@ func (h *Hub) handleRequestUsers(requester *Client) {
 	h.deliver(requester, Message{
 		Type:  "users_response",
 		Users: users,
+	})
+}
+
+func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
+	sender := request.Sender
+	if sender == nil {
+		return
+	}
+	if _, ok := h.Clients[sender]; !ok {
+		return
+	}
+
+	targetCode, err := normalizeUserCode(request.TargetCode)
+	if err != nil {
+		h.deliverError(sender, "Invalid target user code")
+		return
+	}
+	if err := validateTextContent("private chat", request.Content); err != nil {
+		h.deliverError(sender, "Invalid private chat content")
+		return
+	}
+
+	target, ok := h.ActiveCodes[targetCode]
+	if !ok {
+		h.deliverError(sender, "Target user not found")
+		return
+	}
+	if target == sender {
+		h.deliverError(sender, "Cannot send private message to yourself")
+		return
+	}
+
+	message := Message{
+		Type:           "private_chat",
+		Username:       sender.Username,
+		UserCode:       sender.UserCode,
+		TargetUserCode: target.UserCode,
+		Content:        request.Content,
+	}
+	if !h.deliver(sender, message) {
+		return
+	}
+	h.deliver(target, message)
+}
+
+func (h *Hub) deliverError(client *Client, content string) {
+	if content == "" {
+		return
+	}
+	h.deliver(client, Message{
+		Type:    "error",
+		Content: content,
 	})
 }
 

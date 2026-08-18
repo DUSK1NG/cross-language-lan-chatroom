@@ -130,6 +130,36 @@ func (c *Client) readPump(hub *Hub) {
 			message.UserCode = c.UserCode
 			hub.Broadcast <- message
 
+		case "private_chat":
+			if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+				log.Printf("invalid private chat target from %s: %v", c.Username, err)
+				if !c.enqueue(hub, Message{
+					Type:    "error",
+					Content: "Invalid target user code",
+				}) {
+					return
+				}
+				continue
+			}
+			if err := validateTextContent("private chat", message.Content); err != nil {
+				log.Printf("invalid private chat message from %s: %v", c.Username, err)
+				if !c.enqueue(hub, Message{
+					Type:    "error",
+					Content: "Invalid private chat content",
+				}) {
+					return
+				}
+				continue
+			}
+
+			targetCode, _ := normalizeUserCode(message.TargetUserCode)
+
+			hub.Private <- PrivateMessageRequest{
+				Sender:     c,
+				TargetCode: targetCode,
+				Content:    message.Content,
+			}
+
 		case "users_request":
 			hub.RequestUsers <- c
 

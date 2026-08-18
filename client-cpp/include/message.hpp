@@ -13,6 +13,7 @@ struct Message {
     std::string user_code;
     std::string content;
     std::vector<std::string> users{};
+    std::string target_user_code;
 };
 
 bool send_message(SOCKET socket_handle, const Message& message);

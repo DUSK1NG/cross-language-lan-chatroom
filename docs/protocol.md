@@ -76,6 +76,7 @@ length 是 payload 的字节数：
 | type | string | 消息类型，必需 |
 | username | string | 显示名称 |
 | user_code | string | 用户唯一代码 |
+| target_user_code | string | `private_chat` 的目标用户代码 |
 | content | string | 文本内容 |
 | users | array of string | 在线用户身份列表 |
 
@@ -146,6 +147,46 @@ Server → all clients：
 ~~~
 
 Server 根据当前 TCP connection 绑定身份，客户端提交的 username 和 user_code 不会被信任。
+
+### private_chat
+
+客户端输入 `/msg Name#Code message` 后发送：
+
+~~~json
+{
+  "type": "private_chat",
+  "target_user_code": "BOB01",
+  "content": "你好，这是私聊消息。"
+}
+~~~
+
+`Name` 只用于客户端命令和显示，服务端只使用 `target_user_code` 查找目标。`target_user_code` 必须是 3 到 16 位 ASCII 字母或数字；服务端比较代码时不区分大小写，因此 `BOB01` 和 `bob01` 指向同一个在线用户。发送者的 `username` 和 `user_code` 始终由服务端根据当前 TCP connection 填充，客户端不能通过请求字段伪造发送者身份。
+
+服务端成功路由后，会把同一条消息分别投递给发送者和目标用户：
+
+~~~json
+{
+  "type": "private_chat",
+  "username": "Alice",
+  "user_code": "ALICE001",
+  "target_user_code": "BOB01",
+  "content": "你好，这是私聊消息。"
+}
+~~~
+
+私聊不会发送给群聊中的第三个用户。C++ 客户端通常显示为：
+
+~~~text
+[Private -> Bob#BOB01] 你好，这是私聊消息。
+[Private from Alice#ALICE001] 你好，这是私聊消息。
+~~~
+
+以下情况只向发送者返回 `error`，不会产生私聊广播：
+
+- 目标代码不存在：`Target user not found`
+- 目标代码属于发送者自己：`Cannot send private message to yourself`
+- 目标代码格式错误：`Invalid target user code`
+- 私聊内容为空、非法 UTF-8 或超过 64 KiB：`Invalid private chat content`
 
 ### system
 

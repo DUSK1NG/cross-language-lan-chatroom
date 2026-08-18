@@ -101,6 +101,32 @@ func TestChineseChatMessageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPrivateChatMessageRoundTrip(t *testing.T) {
+	want := Message{
+		Type:           "private_chat",
+		Username:       "Alice",
+		UserCode:       "A001",
+		TargetUserCode: "bOb01",
+		Content:        "你好，这是私聊消息。",
+	}
+	var stream bytes.Buffer
+
+	if err := sendMessage(&stream, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := receiveMessage(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("message = %+v, want %+v", got, want)
+	}
+	if err := validateMessage(got); err != nil {
+		t.Fatalf("private chat message should validate: %v", err)
+	}
+}
+
 func TestMessageJSONContainsExpectedFields(t *testing.T) {
 	t.Run("login", func(t *testing.T) {
 		var stream bytes.Buffer
@@ -163,6 +189,32 @@ func TestMessageJSONContainsExpectedFields(t *testing.T) {
 		}
 		if _, ok := fields["content"]; ok {
 			t.Fatalf("empty optional content should be omitted: %s", payload)
+		}
+	})
+
+	t.Run("private_chat", func(t *testing.T) {
+		var stream bytes.Buffer
+		if err := sendMessage(&stream, Message{
+			Type:           "private_chat",
+			TargetUserCode: "BOB01",
+			Content:        "你好",
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		payload, err := readFrame(&stream)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"type", "target_user_code", "content"} {
+			if _, ok := fields[field]; !ok {
+				t.Fatalf("JSON field %q is missing from %s", field, payload)
+			}
 		}
 	})
 }
@@ -232,6 +284,35 @@ func TestValidateMessage(t *testing.T) {
 			name:    "valid chat",
 			message: Message{Type: "chat", Content: "Hello"},
 		},
+		{
+			name:    "valid private chat",
+			message: Message{Type: "private_chat", TargetUserCode: "BoB01", Content: "Hello"},
+		},
+		{
+			name:    "private chat missing target code",
+			message: Message{Type: "private_chat", Content: "Hello"},
+			wantErr: true,
+		},
+		{
+			name:    "private chat invalid target code",
+			message: Message{Type: "private_chat", TargetUserCode: "Bob-01", Content: "Hello"},
+			wantErr: true,
+		},
+		{
+			name:    "private chat empty content",
+			message: Message{Type: "private_chat", TargetUserCode: "BOB01"},
+			wantErr: true,
+		},
+		{
+			name:    "private chat invalid utf8 content",
+			message: Message{Type: "private_chat", TargetUserCode: "BOB01", Content: string([]byte{0xff})},
+			wantErr: true,
+		},
+		{
+			name:    "private chat oversized content",
+			message: Message{Type: "private_chat", TargetUserCode: "BOB01", Content: strings.Repeat("a", maxMessageSize+1)},
+			wantErr: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -299,6 +380,21 @@ func TestReceiveMessageRejectsWrongFieldType(t *testing.T) {
 	}
 	if !reflect.DeepEqual(message, Message{}) {
 		t.Fatalf("wrong field type returned partial message: %+v", message)
+	}
+}
+
+func TestReceiveMessageRejectsPrivateChatWrongTargetType(t *testing.T) {
+	var stream bytes.Buffer
+	if err := writeFrame(&stream, []byte(`{"type":"private_chat","target_user_code":123,"content":"hello"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	message, err := receiveMessage(&stream)
+	if err == nil {
+		t.Fatal("expected private_chat target_user_code with wrong type to be rejected")
+	}
+	if !reflect.DeepEqual(message, Message{}) {
+		t.Fatalf("wrong target_user_code type returned partial message: %+v", message)
 	}
 }
 

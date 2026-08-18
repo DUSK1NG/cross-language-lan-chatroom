@@ -4,6 +4,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 
+#include "command.hpp"
 #include "message.hpp"
 
 #include <atomic>
@@ -12,6 +13,9 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -112,6 +116,40 @@ std::string format_identity(const message::Message& incoming_message) {
         return incoming_message.username;
     }
     return incoming_message.username + "#" + incoming_message.user_code;
+}
+
+template <typename MessageType, typename = void>
+struct has_target_user_code : std::false_type {};
+
+template <typename MessageType>
+struct has_target_user_code<
+    MessageType,
+    std::void_t<decltype(std::declval<MessageType&>().target_user_code)>>
+    : std::true_type {};
+
+template <typename MessageType>
+std::string get_target_user_code(const MessageType& message) {
+    if constexpr (has_target_user_code<MessageType>::value) {
+        return message.target_user_code;
+    }
+    return {};
+}
+
+template <typename MessageType>
+void set_target_user_code(MessageType& message, const std::string& target_user_code) {
+    if constexpr (has_target_user_code<MessageType>::value) {
+        message.target_user_code = target_user_code;
+    }
+}
+
+std::string normalize_user_code(const std::string& user_code) {
+    std::string normalized = user_code;
+    for (char& value : normalized) {
+        if (value >= 'A' && value <= 'Z') {
+            value = static_cast<char>(value - 'A' + 'a');
+        }
+    }
+    return normalized;
 }
 
 bool is_console_input(HANDLE input_handle) {
@@ -356,6 +394,7 @@ void print_help(std::mutex& output_mutex) {
         "Commands:\n"
         "/help  Show this help\n"
         "/users Show online users\n"
+        "/msg Name#Code message  Send a private message\n"
         "/quit  Exit the chat\n");
 }
 
@@ -370,7 +409,13 @@ void print_users_response(const message::Message& incoming_message, std::mutex& 
     print_locked(output_mutex, output);
 }
 
-void receive_loop(SOCKET socket_handle, std::atomic<bool>& running, std::mutex& output_mutex) {
+void receive_loop(
+    SOCKET socket_handle,
+    std::atomic<bool>& running,
+    std::mutex& output_mutex,
+    const std::string& local_user_code,
+    std::unordered_map<std::string, std::string>& private_peer_names,
+    std::mutex& private_peer_mutex) {
     while (running.load()) {
         message::Message incoming_message;
         if (!message::receive_message(socket_handle, incoming_message)) {
@@ -406,6 +451,38 @@ void receive_loop(SOCKET socket_handle, std::atomic<bool>& running, std::mutex& 
 
         if (incoming_message.type == "users_response") {
             print_users_response(incoming_message, output_mutex);
+            continue;
+        }
+
+        if (incoming_message.type == "private_chat") {
+            const std::string sender_code = normalize_user_code(incoming_message.user_code);
+            const bool sent_by_local_user =
+                !sender_code.empty() && sender_code == normalize_user_code(local_user_code);
+            std::string peer_identity;
+            if (sent_by_local_user) {
+                const std::string target_code = get_target_user_code(incoming_message);
+                {
+                    const std::lock_guard<std::mutex> lock(private_peer_mutex);
+                    const auto peer = private_peer_names.find(normalize_user_code(target_code));
+                    if (peer != private_peer_names.end()) {
+                        peer_identity = peer->second;
+                    }
+                }
+                if (peer_identity.empty()) {
+                    peer_identity = "#" + target_code;
+                }
+                print_locked(
+                    output_mutex,
+                    "[Private -> " + peer_identity + "] " + incoming_message.content + "\n");
+            } else {
+                peer_identity = format_identity(incoming_message);
+                if (peer_identity.empty()) {
+                    peer_identity = incoming_message.username;
+                }
+                print_locked(
+                    output_mutex,
+                    "[Private from " + peer_identity + "] " + incoming_message.content + "\n");
+            }
             continue;
         }
 
@@ -500,7 +577,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
     std::cout << "Connected to " << server_ip << ':' << server_port << '\n';
 
-    const message::Message login{"login", username, user_code, ""};
+    const message::Message login{"login", username, user_code, "", {}, ""};
     if (!message::send_message(socket_handle, login)) {
         std::cerr << "Failed to send login message.\n";
         closesocket(socket_handle);
@@ -527,6 +604,8 @@ int wmain(int argc, wchar_t* argv[]) {
 
     std::atomic<bool> running{true};
     std::mutex output_mutex;
+    std::unordered_map<std::string, std::string> private_peer_names;
+    std::mutex private_peer_mutex;
 
     print_help(output_mutex);
 
@@ -534,7 +613,10 @@ int wmain(int argc, wchar_t* argv[]) {
         receive_loop,
         socket_handle,
         std::ref(running),
-        std::ref(output_mutex));
+        std::ref(output_mutex),
+        std::cref(user_code),
+        std::ref(private_peer_names),
+        std::ref(private_peer_mutex));
 
     const HANDLE input_handle = GetStdHandle(STD_INPUT_HANDLE);
     const HANDLE output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -598,7 +680,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
         if (!input_line.empty() && input_line.front() == '/') {
             if (input_line == "/users") {
-                const message::Message users_request{"users_request", "", "", ""};
+                const message::Message users_request{"users_request", "", "", "", {}, ""};
                 if (!message::send_message(socket_handle, users_request)) {
                     print_locked(output_mutex, "Failed to request online users.\n", std::cerr);
                     running.store(false);
@@ -610,7 +692,7 @@ int wmain(int argc, wchar_t* argv[]) {
             }
 
             if (input_line == "/quit") {
-                const message::Message quit_message{"quit", "", "", ""};
+                const message::Message quit_message{"quit", "", "", "", {}, ""};
                 if (!message::send_message(socket_handle, quit_message)) {
                     print_locked(output_mutex, "Failed to send quit message.\n", std::cerr);
                 }
@@ -620,11 +702,42 @@ int wmain(int argc, wchar_t* argv[]) {
                 break;
             }
 
+            if (command::is_private_message_command(input_line)) {
+                command::PrivateMessageCommand private_command;
+                if (!command::parse_private_message(input_line, private_command)) {
+                    print_locked(
+                        output_mutex,
+                        "Invalid private message. Use: /msg Name#Code message\n",
+                        std::cerr);
+                    continue;
+                }
+
+                message::Message private_message{
+                    "private_chat", "", "", private_command.content, {},
+                    private_command.target_user_code};
+
+                {
+                    const std::lock_guard<std::mutex> lock(private_peer_mutex);
+                    private_peer_names[normalize_user_code(private_command.target_user_code)] =
+                        private_command.target_name + "#" + private_command.target_user_code;
+                }
+                set_target_user_code(private_message, private_command.target_user_code);
+                if (!message::send_message(socket_handle, private_message)) {
+                    print_locked(output_mutex, "Failed to send private message.\n", std::cerr);
+                    running.store(false);
+                    shutdown_socket(socket_handle);
+                    shutdown_requested = true;
+                    break;
+                }
+
+                continue;
+            }
+
             print_locked(output_mutex, "Unknown command. Type /help for help.\n", std::cerr);
             continue;
         }
 
-        const message::Message chat_message{"chat", "", "", input_line};
+        const message::Message chat_message{"chat", "", "", input_line, {}, ""};
         if (!message::send_message(socket_handle, chat_message)) {
             print_locked(output_mutex, "Failed to send chat message.\n", std::cerr);
             running.store(false);

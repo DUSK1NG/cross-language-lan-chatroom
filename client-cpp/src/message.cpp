@@ -14,6 +14,9 @@ bool send_message(SOCKET socket_handle, const Message& message) {
     if (!message.user_code.empty()) {
         object["user_code"] = message.user_code;
     }
+    if (!message.target_user_code.empty()) {
+        object["target_user_code"] = message.target_user_code;
+    }
     if (!message.content.empty()) {
         object["content"] = message.content;
     }
@@ -54,6 +57,13 @@ bool receive_message(SOCKET socket_handle, Message& message) {
                 return false;
             }
             parsed.user_code = object.at("user_code").get<std::string>();
+        }
+
+        if (object.contains("target_user_code")) {
+            if (!object.at("target_user_code").is_string()) {
+                return false;
+            }
+            parsed.target_user_code = object.at("target_user_code").get<std::string>();
         }
 
         if (object.contains("content")) {
