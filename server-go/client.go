@@ -129,6 +129,7 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 		Type:     "login_ok",
 		Username: client.Username,
 		UserCode: client.UserCode,
+		IsAdmin:  client.IsAdmin,
 		Content:  "Login successful",
 	}); err != nil {
 		log.Printf("failed to send login response to %s: %v", remoteAddress, err)
@@ -168,6 +169,12 @@ func (c *Client) readPump(hub *Hub) {
 
 		switch message.Type {
 		case "chat":
+			if c.Muted {
+				if !c.enqueue(hub, Message{Type: "error", Content: "You are muted"}) {
+					return
+				}
+				continue
+			}
 			if err := validateMessage(message); err != nil {
 				log.Printf("invalid chat message from %s: %v", c.Username, err)
 				if !c.enqueue(hub, Message{
@@ -239,6 +246,15 @@ func (c *Client) readPump(hub *Hub) {
 				continue
 			}
 			hub.RequestHistory <- HistoryRequest{Client: c, Limit: message.HistoryLimit}
+
+		case "admin_action":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", Content: "Invalid administrator action"}) {
+					return
+				}
+				continue
+			}
+			hub.AdminAction <- AdminActionRequest{Sender: c, Action: message.Content, TargetCode: message.TargetUserCode}
 
 		case "quit":
 			hub.Unregister <- c

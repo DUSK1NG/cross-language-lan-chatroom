@@ -43,6 +43,12 @@ type HistoryRequest struct {
 	Limit  int
 }
 
+type AdminActionRequest struct {
+	Sender     *Client
+	Action     string
+	TargetCode string
+}
+
 // Client 表示一个已经完成登录的客户端连接。
 type Client struct {
 	Conn           net.Conn
@@ -50,6 +56,8 @@ type Client struct {
 	UserCode       string
 	NormalizedCode string
 	AccountBacked  bool
+	IsAdmin        bool
+	Muted          bool
 	Room           string
 	Send           chan Message
 
@@ -102,11 +110,13 @@ type Hub struct {
 	RoomLeave      chan *Client
 	RequestRooms   chan *Client
 	RequestHistory chan HistoryRequest
+	AdminAction    chan AdminActionRequest
 	ActiveCodes    map[string]*Client
 	UsedCodes      map[string]struct{}
 	Rooms          map[string]map[*Client]bool
 	OfflineStore   *AuthStore
 	HistoryStore   *AuthStore
+	AdminCode      string
 }
 
 func NewHub() *Hub {
@@ -122,6 +132,7 @@ func NewHub() *Hub {
 		RoomLeave:      make(chan *Client),
 		RequestRooms:   make(chan *Client),
 		RequestHistory: make(chan HistoryRequest),
+		AdminAction:    make(chan AdminActionRequest),
 		ActiveCodes:    make(map[string]*Client),
 		UsedCodes:      make(map[string]struct{}),
 		Rooms:          make(map[string]map[*Client]bool),
@@ -161,6 +172,9 @@ func (h *Hub) Run() {
 
 		case request := <-h.RequestHistory:
 			h.handleRequestHistory(request)
+
+		case request := <-h.AdminAction:
+			h.handleAdminAction(request)
 		}
 	}
 }
@@ -197,11 +211,50 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 
 	h.UsedCodes[client.NormalizedCode] = struct{}{}
 	h.ActiveCodes[client.NormalizedCode] = client
+	if h.AdminCode != "" && client.NormalizedCode == h.AdminCode {
+		client.IsAdmin = true
+	}
 	h.Clients[client] = true
 	h.addToRoom(client, client.Room)
 	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined the chat"))
 	log.Printf("client registered: %s", client.Username)
 	h.respondRegister(request.Result, nil)
+}
+
+func (h *Hub) handleAdminAction(request AdminActionRequest) {
+	sender := request.Sender
+	if sender == nil || !sender.IsAdmin {
+		if sender != nil {
+			h.deliverError(sender, "Administrator permission required")
+		}
+		return
+	}
+	targetCode, err := normalizeUserCode(request.TargetCode)
+	if err != nil {
+		h.deliverError(sender, "Invalid target user code")
+		return
+	}
+	target, ok := h.ActiveCodes[targetCode]
+	if !ok || target == sender {
+		h.deliverError(sender, "Target user not found")
+		return
+	}
+	switch request.Action {
+	case "kick":
+		h.deliver(target, Message{Type: "system", Content: "You were kicked by the administrator"})
+		h.unregisterClient(target, true)
+		h.deliver(sender, Message{Type: "system", Content: target.Username + "#" + target.UserCode + " was kicked"})
+	case "mute":
+		target.Muted = !target.Muted
+		status := "muted"
+		if !target.Muted {
+			status = "unmuted"
+		}
+		h.deliver(target, Message{Type: "system", Content: "You were " + status + " by the administrator"})
+		h.deliver(sender, Message{Type: "system", Content: target.Username + "#" + target.UserCode + " is " + status})
+	default:
+		h.deliverError(sender, "Unsupported administrator action")
+	}
 }
 
 func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {

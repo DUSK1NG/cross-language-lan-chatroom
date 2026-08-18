@@ -41,6 +41,7 @@ struct Message {
     std::vector<std::string> rooms{};
     std::string password;
     int history_limit = 0;
+    bool is_admin = false;
 };
 
 bool send_message(SOCKET socket_handle, const Message& message);

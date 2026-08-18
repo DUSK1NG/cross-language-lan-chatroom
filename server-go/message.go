@@ -23,6 +23,7 @@ type Message struct {
 	Content        string   `json:"content,omitempty"`
 	Password       string   `json:"password,omitempty"`
 	HistoryLimit   int      `json:"history_limit,omitempty"`
+	IsAdmin        bool     `json:"is_admin,omitempty"`
 }
 
 func validateUserCode(code string) error {
@@ -128,6 +129,14 @@ func validateMessage(message Message) error {
 	case "history_request":
 		if message.HistoryLimit < 0 || message.HistoryLimit > maxHistoryLimit {
 			return fmt.Errorf("history limit must be between 0 and %d", maxHistoryLimit)
+		}
+		return nil
+	case "admin_action":
+		if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+			return fmt.Errorf("invalid admin target: %w", err)
+		}
+		if message.Content != "kick" && message.Content != "mute" {
+			return fmt.Errorf("unsupported admin action")
 		}
 		return nil
 	case "users_response":

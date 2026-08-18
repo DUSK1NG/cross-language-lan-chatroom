@@ -27,7 +27,8 @@ class HostServerProcess {
 public:
     bool start(const auth::ClientOptions& options, std::string& error) {
         std::wstring command = quote(to_wide(options.server_exe)) + L" -cert " +
-            quote(to_wide(options.cert_file)) + L" -key " + quote(to_wide(options.key_file));
+            quote(to_wide(options.cert_file)) + L" -key " + quote(to_wide(options.key_file)) +
+            L" -admin-code " + quote(to_wide(options.user_code));
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process{};
@@ -434,6 +435,8 @@ void print_help(std::mutex& output_mutex) {
         "/users Show online users\n"
         "/rooms Show available rooms\n"
         "/history [count] Show recent room messages\n"
+        "/kick Name#Code  Kick a user (administrator)\n"
+        "/mute Name#Code  Toggle mute (administrator)\n"
         "/join room_name  Join or create a room\n"
         "/leave Return to lobby\n"
         "/msg Name#Code message  Send a private message\n"
@@ -681,7 +684,8 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     std::cout << "Logged in as "
-              << format_identity(login_response) << '\n';
+              << format_identity(login_response)
+              << (login_response.is_admin ? " (administrator)" : "") << '\n';
 
     std::atomic<bool> running{true};
     std::atomic<bool> reconnect_enabled{true};
@@ -786,6 +790,21 @@ int wmain(int argc, wchar_t* argv[]) {
             message::Message history_request{
                 "history_request", "", "", "", {}, "", "", {}, "", limit};
             send_or_report(history_request, "Failed to request message history.");
+            continue;
+        }
+
+        if (input_line.rfind("/kick ", 0) == 0 || input_line.rfind("/mute ", 0) == 0) {
+            const std::string action = input_line.substr(1, 4);
+            const std::string target = input_line.substr(6);
+            const std::size_t separator = target.find('#');
+            if (separator == std::string::npos || separator == 0 || separator + 1 >= target.size() ||
+                target.find_first_of(" \t\r\n", separator + 1) != std::string::npos) {
+                print_locked(output_mutex, "Usage: /" + action + " Name#Code\n", std::cerr);
+                continue;
+            }
+            message::Message admin_request{
+                "admin_action", "", "", action, {}, target.substr(separator + 1)};
+            send_or_report(admin_request, "Failed to send administrator command.");
             continue;
         }
 
