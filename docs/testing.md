@@ -8,8 +8,12 @@
 - Go SDK（本文示例使用 `C:\Users\jking1\go-sdk\go\bin`）
 - MinGW-w64 g++
 - CMake 3.20+
+- CTest（随 CMake 安装）
+- MinGW Make
 - C++17
 - PowerShell
+
+本机已配置并验证：CMake/CTest 4.3.3，MinGW Make 4.4.1；`C:\msys64\mingw64\bin` 已加入当前 Windows 用户的 `PATH`。
 
 进入项目目录：
 
@@ -67,6 +71,8 @@ cmake --build build --config Release
 
 预期：生成 `chat-client.exe` 与 `protocol-tests.exe`。
 
+本机验证结果：CMake 配置、构建均成功。
+
 ## 4. C++ 协议测试（CTest）
 
 ```powershell
@@ -83,6 +89,8 @@ ctest --test-dir build --output-on-failure
 - `recv_frame` 在 header 与 payload 均分段到达时接收合法 frame
 - `receive_message` 拒绝 malformed JSON、缺少字符串 `type`、数值型 `content`
 - 合法 UTF-8 消息往返保持字段一致
+
+本机验证结果：CTest 报告 `100% tests passed, 0 tests failed out of 1`，协议测试内部 13 个场景全部通过。
 - 三个合法 frame 按发送顺序被接收
 
 分段接收测试设置了有限接收超时，避免网络回归导致 CI 无限阻塞；其中还包含对 UTF-8 round-trip 和 `recv_all` 的直接覆盖。
@@ -185,5 +193,4 @@ Test-NetConnection 192.168.1.100 -Port 8888
 
 - C++ 客户端仍是 Windows-only；Ubuntu job 不负责验证 `client-cpp`
 - 交互式控制台“自然输入 / 退出”、真实局域网组网和截图核对仍需真实 Windows 环境手工复核
-- 本次文档更新任务没有在当前环境里重新运行本地 CMake / CTest，因此不能把它们写成“本地已再次验证通过”
 - 当前版本没有自动重连、TLS 或持久化数据库，这些能力也不在现有验收范围内

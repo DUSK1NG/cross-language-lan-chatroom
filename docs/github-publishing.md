@@ -7,7 +7,7 @@
 
 - [ ] README、协议文档、架构图和测试记录已更新
 - [ ] 本地 Go 检查通过：`go test ./...`、`go test -race ./...`、`go vet ./...`
-- [ ] 本地构建通过：Go Server、C++ Client（至少完成 MinGW 或 MSVC 构建；如环境允许再跑 CMake / CTest）
+- [x] 本地构建通过：Go Server、C++ Client，且已完成 CMake / CTest 验证
 - [ ] GitHub Actions 最近一次 Windows job 与 Ubuntu job 均通过
 - [ ] 不提交 `*.exe`、构建缓存、日志、访问令牌、密钥文件或私人截图
 - [ ] 真实局域网测试截图已脱敏
@@ -38,7 +38,7 @@ cmake --build build --config Release
 ctest --test-dir build --output-on-failure
 ```
 
-如果当前环境不具备 MinGW / CMake / Windows GUI 条件，也至少要在可用 Windows 环境中补跑这些检查，再准备发布。
+如果更换开发机或重新安装工具链，需要先确认 MinGW / CMake / CTest 可执行文件已加入 `PATH`，再重复上述检查。
 
 ## 推送与发布
 
