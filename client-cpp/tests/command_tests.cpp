@@ -106,6 +106,41 @@ bool test_prefix_detection() {
                "non-/msg command was detected as private message");
 }
 
+bool test_room_commands() {
+    command::RoomCommand parsed;
+    if (!expect_true("rooms command", command::is_rooms_command("/rooms"), "not detected")) {
+        return false;
+    }
+    if (!expect_true("leave command", command::is_leave_command("/leave"), "not detected")) {
+        return false;
+    }
+    if (!expect_true("join prefix", command::is_join_command("/join lobby"), "not detected")) {
+        return false;
+    }
+    if (!expect_true(
+            "valid room name",
+            command::parse_join_command("/join study_room_2", parsed),
+            "valid room rejected")) {
+        return false;
+    }
+    return expect_equal("valid room name", parsed.room_name, "study_room_2", "room name");
+}
+
+bool test_invalid_room_commands() {
+    const std::vector<std::string> invalid_inputs = {
+        "/join", "/join ", "/join bad-room", "/join bad room", "/join !room",
+        "/join " + std::string(33, 'a')};
+    for (const auto& input : invalid_inputs) {
+        command::RoomCommand parsed;
+        if (!expect_false(
+                "invalid room command", command::parse_join_command(input, parsed),
+                "invalid room command accepted: " + input)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -114,6 +149,8 @@ int main() {
         {"extra spaces are accepted", test_parse_private_message_allows_extra_spaces},
         {"invalid private commands are rejected", test_rejects_invalid_commands},
         {"/msg prefix is detected", test_prefix_detection},
+        {"room commands are parsed", test_room_commands},
+        {"invalid room commands are rejected", test_invalid_room_commands},
     };
 
     std::size_t failures = 0;

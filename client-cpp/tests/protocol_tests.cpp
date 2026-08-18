@@ -537,6 +537,53 @@ bool test_valid_private_message_round_trip() {
         expect_equal(case_name, received.users.size(), sent.users.size(), "users size");
 }
 
+bool test_room_message_round_trip() {
+    const std::string case_name = "room message round trip";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
+        return false;
+    }
+
+    message::Message sent{"room_join", "", "", "study_room_2", {}, ""};
+    sent.room = "study_room_2";
+    if (!expect_true(
+            case_name, message::send_message(sockets.client, sent),
+            "message::send_message should succeed")) {
+        return false;
+    }
+    message::Message received;
+    return expect_true(
+               case_name, message::receive_message(sockets.server, received),
+               "message::receive_message should succeed") &&
+        expect_equal(case_name, received.type, "room_join", "type") &&
+        expect_equal(case_name, received.content, "study_room_2", "content") &&
+        expect_equal(case_name, received.room, "study_room_2", "room");
+}
+
+bool test_room_list_response_round_trip() {
+    const std::string case_name = "room list response round trip";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
+        return false;
+    }
+    message::Message sent{"room_list_response", "", "", "", {}, ""};
+    sent.rooms = {"lobby", "study_room_2"};
+    if (!expect_true(
+            case_name, message::send_message(sockets.client, sent),
+            "message::send_message should succeed")) {
+        return false;
+    }
+    message::Message received;
+    if (!expect_true(
+            case_name, message::receive_message(sockets.server, received),
+            "message::receive_message should succeed")) {
+        return false;
+    }
+    return expect_equal(case_name, received.type, sent.type, "type") &&
+        expect_equal(case_name, received.rooms.size(), sent.rooms.size(), "rooms size") &&
+        expect_equal(case_name, received.rooms[1], "study_room_2", "room name");
+}
+
 bool test_receive_message_rejects_numeric_target_user_code() {
     const std::string case_name = "receive_message rejects numeric target user code";
     SocketPair sockets = create_loopback_pair(case_name);
@@ -630,6 +677,8 @@ int main() {
         {"valid UTF-8 message round-trip preserves fields", test_valid_message_round_trip},
         {"valid private message round-trip preserves fields",
          test_valid_private_message_round_trip},
+        {"room message round-trip preserves fields", test_room_message_round_trip},
+        {"room list response round-trip preserves fields", test_room_list_response_round_trip},
         {"three valid frames are received in send order", test_three_frames_preserve_order},
     };
 

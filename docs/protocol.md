@@ -77,8 +77,10 @@ length 是 payload 的字节数：
 | username | string | 显示名称 |
 | user_code | string | 用户唯一代码 |
 | target_user_code | string | `private_chat` 的目标用户代码 |
+| room | string | 当前或目标房间名称 |
 | content | string | 文本内容 |
 | users | array of string | 在线用户身份列表 |
+| rooms | array of string | 房间列表 |
 
 当前身份显示格式为：
 
@@ -187,6 +189,28 @@ Server 根据当前 TCP connection 绑定身份，客户端提交的 username �
 - 目标代码属于发送者自己：`Cannot send private message to yourself`
 - 目标代码格式错误：`Invalid target user code`
 - 私聊内容为空、非法 UTF-8 或超过 64 KiB：`Invalid private chat content`
+
+### room_join / room_leave / rooms_request / rooms_response
+
+客户端命令与协议对应关系：
+
+```text
+/join study_room  -> {"type":"room_join","room":"study_room"}
+/leave            -> {"type":"room_leave"}
+/rooms            -> {"type":"rooms_request"}
+```
+
+房间名只允许 1 到 32 个 ASCII 字母、数字或下划线。不存在的房间会在首次加入时创建；客户端初始位于 `lobby`。服务端返回：
+
+```json
+{
+  "type": "rooms_response",
+  "room": "study_room",
+  "rooms": ["lobby", "study_room"]
+}
+```
+
+群聊和上线/离线提示只发送给同一房间的客户端；私聊不受房间限制。在线用户列表使用 `Name#Code@Room` 表示所在房间。
 
 ### system
 

@@ -152,6 +152,15 @@ cd ..\client-cpp
 
 私聊验收的关键结论是：成功消息只到达发送者和目标用户；未知目标和自己发送只返回发送者错误；第三个客户端不会收到私聊内容。
 
+### 5.2 三客户端房间验收
+
+1. 三个客户端分别登录后，确认初始房间都是 `lobby`。
+2. Bob 输入 `/join study_room`，Alice 和 Charlie 仍留在 `lobby`。
+3. Bob 发送群聊，只有 Bob 能看到；Alice 和 Charlie 不应收到。
+4. Alice 输入 `/rooms`，确认列表包含 `lobby` 和 `study_room`。
+5. Alice 输入 `/join study_room` 后，Alice 与 Bob 可以互相群聊。
+6. Alice 输入 `/leave` 返回 `lobby`；私聊仍可使用 `/msg Bob#BOB001 message` 跨房间发送。
+
 ## 6. localhost 异常测试矩阵
 
 | 场景 | 操作 | 预期结果 | 当前记录方式 |

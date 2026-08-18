@@ -26,6 +26,19 @@ bool is_valid_code(const std::string& code) {
     return true;
 }
 
+bool is_valid_room_name(const std::string& room_name) {
+    constexpr std::size_t kMaxRoomNameLength = 32;
+    if (room_name.empty() || room_name.size() > kMaxRoomNameLength) {
+        return false;
+    }
+    for (const char value : room_name) {
+        if (!is_ascii_alphanumeric(value) && value != '_') {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::size_t skip_spaces(const std::string& input, std::size_t position) {
     while (position < input.size() &&
            std::isspace(static_cast<unsigned char>(input[position])) != 0) {
@@ -89,6 +102,39 @@ bool parse_private_message(
     parsed_command.target_name = target_name;
     parsed_command.target_user_code = target_user_code;
     parsed_command.content = input.substr(content_begin);
+    return true;
+}
+
+bool is_rooms_command(const std::string& input) {
+    return input == "/rooms";
+}
+
+bool is_leave_command(const std::string& input) {
+    return input == "/leave";
+}
+
+bool is_join_command(const std::string& input) {
+    return input == "/join" ||
+        (input.size() > 6 && input.compare(0, 6, "/join ") == 0);
+}
+
+bool parse_join_command(const std::string& input, RoomCommand& parsed_command) {
+    parsed_command = RoomCommand{};
+    if (!is_join_command(input)) {
+        return false;
+    }
+    const std::size_t room_begin = skip_spaces(input, 5);
+    if (room_begin >= input.size()) {
+        return false;
+    }
+    const std::size_t room_end = input.find_first_of(" \t\r\n", room_begin);
+    const std::string room_name = input.substr(
+        room_begin,
+        room_end == std::string::npos ? input.size() - room_begin : room_end - room_begin);
+    if (room_end != std::string::npos || !is_valid_room_name(room_name)) {
+        return false;
+    }
+    parsed_command.room_name = room_name;
     return true;
 }
 

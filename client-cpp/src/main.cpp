@@ -394,6 +394,9 @@ void print_help(std::mutex& output_mutex) {
         "Commands:\n"
         "/help  Show this help\n"
         "/users Show online users\n"
+        "/rooms Show available rooms\n"
+        "/join room_name  Join or create a room\n"
+        "/leave Return to lobby\n"
         "/msg Name#Code message  Send a private message\n"
         "/quit  Exit the chat\n");
 }
@@ -405,6 +408,19 @@ void print_users_response(const message::Message& incoming_message, std::mutex& 
         output += ". ";
         output += incoming_message.users[index];
         output += '\n';
+    }
+    print_locked(output_mutex, output);
+}
+
+void print_room_list_response(
+    const message::Message& incoming_message,
+    std::mutex& output_mutex) {
+    std::string output = "Rooms:\n";
+    const auto& rooms = incoming_message.rooms.empty()
+        ? incoming_message.users
+        : incoming_message.rooms;
+    for (std::size_t index = 0; index < rooms.size(); ++index) {
+        output += std::to_string(index + 1) + ". " + rooms[index] + '\n';
     }
     print_locked(output_mutex, output);
 }
@@ -451,6 +467,12 @@ void receive_loop(
 
         if (incoming_message.type == "users_response") {
             print_users_response(incoming_message, output_mutex);
+            continue;
+        }
+
+        if (incoming_message.type == "room_list_response" ||
+            incoming_message.type == "rooms_response") {
+            print_room_list_response(incoming_message, output_mutex);
             continue;
         }
 
@@ -683,6 +705,52 @@ int wmain(int argc, wchar_t* argv[]) {
                 const message::Message users_request{"users_request", "", "", "", {}, ""};
                 if (!message::send_message(socket_handle, users_request)) {
                     print_locked(output_mutex, "Failed to request online users.\n", std::cerr);
+                    running.store(false);
+                    shutdown_socket(socket_handle);
+                    shutdown_requested = true;
+                    break;
+                }
+                continue;
+            }
+
+            if (input_line == "/rooms") {
+                const message::Message rooms_request{"rooms_request", "", "", "", {}, ""};
+                if (!message::send_message(socket_handle, rooms_request)) {
+                    print_locked(output_mutex, "Failed to request rooms.\n", std::cerr);
+                    running.store(false);
+                    shutdown_socket(socket_handle);
+                    shutdown_requested = true;
+                    break;
+                }
+                continue;
+            }
+
+            if (input_line == "/leave") {
+                const message::Message leave_message{"room_leave", "", "", "", {}, ""};
+                if (!message::send_message(socket_handle, leave_message)) {
+                    print_locked(output_mutex, "Failed to leave room.\n", std::cerr);
+                    running.store(false);
+                    shutdown_socket(socket_handle);
+                    shutdown_requested = true;
+                    break;
+                }
+                continue;
+            }
+
+            if (command::is_join_command(input_line)) {
+                command::RoomCommand room_command;
+                if (!command::parse_join_command(input_line, room_command)) {
+                    print_locked(
+                        output_mutex,
+                        "Invalid room name. Use ASCII letters, digits, or underscore; length 1-32.\n",
+                        std::cerr);
+                    continue;
+                }
+                message::Message join_message{
+                    "room_join", "", "", room_command.room_name, {}, ""};
+                join_message.room = room_command.room_name;
+                if (!message::send_message(socket_handle, join_message)) {
+                    print_locked(output_mutex, "Failed to join room.\n", std::cerr);
                     running.store(false);
                     shutdown_socket(socket_handle);
                     shutdown_requested = true;

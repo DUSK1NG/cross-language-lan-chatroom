@@ -150,6 +150,8 @@ cd client-cpp
 /quit
 ```
 
+房间功能：`/rooms` 查看房间，`/join room_name` 加入或创建房间，`/leave` 返回 `lobby`。群聊只发送给同一房间用户，私聊仍可跨房间发送；在线用户显示为 `Name#Code@Room`。
+
 私聊命令格式为 `/msg Name#Code message`。其中 `Code` 是目标用户的唯一代码，服务端按代码查找目标并忽略客户端伪造的发送者身份。代码匹配不区分大小写；一条私聊只发送给发送者和目标用户，不会广播给其他客户端。目标不存在或向自己发送时，发送者会收到 Server error。
 
 ## Run：LAN

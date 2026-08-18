@@ -17,11 +17,17 @@ bool send_message(SOCKET socket_handle, const Message& message) {
     if (!message.target_user_code.empty()) {
         object["target_user_code"] = message.target_user_code;
     }
+    if (!message.room.empty()) {
+        object["room"] = message.room;
+    }
     if (!message.content.empty()) {
         object["content"] = message.content;
     }
     if (!message.users.empty()) {
         object["users"] = message.users;
+    }
+    if (!message.rooms.empty()) {
+        object["rooms"] = message.rooms;
     }
 
     return protocol::send_frame(socket_handle, object.dump());
@@ -66,6 +72,13 @@ bool receive_message(SOCKET socket_handle, Message& message) {
             parsed.target_user_code = object.at("target_user_code").get<std::string>();
         }
 
+        if (object.contains("room")) {
+            if (!object.at("room").is_string()) {
+                return false;
+            }
+            parsed.room = object.at("room").get<std::string>();
+        }
+
         if (object.contains("content")) {
             if (!object.at("content").is_string()) {
                 return false;
@@ -82,6 +95,18 @@ bool receive_message(SOCKET socket_handle, Message& message) {
                     return false;
                 }
                 parsed.users.push_back(user_value.get<std::string>());
+            }
+        }
+
+        if (object.contains("rooms")) {
+            if (!object.at("rooms").is_array()) {
+                return false;
+            }
+            for (const auto& room_value : object.at("rooms")) {
+                if (!room_value.is_string()) {
+                    return false;
+                }
+                parsed.rooms.push_back(room_value.get<std::string>());
             }
         }
 
