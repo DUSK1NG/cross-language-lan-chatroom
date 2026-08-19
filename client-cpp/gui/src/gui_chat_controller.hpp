@@ -18,7 +18,9 @@ class GuiChatController final : public QObject {
     Q_PROPERTY(ChatListModel* memberModel READ memberModel CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool admin READ admin NOTIFY adminChanged)
-    Q_PROPERTY(QString localUserCode READ localUserCode CONSTANT)
+    Q_PROPERTY(QString localUserName READ localUserName NOTIFY localIdentityChanged)
+    Q_PROPERTY(QString localUserCode READ localUserCode NOTIFY localIdentityChanged)
+    Q_PROPERTY(int onlineMemberCount READ onlineMemberCount NOTIFY onlineMemberCountChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
 
 public:
@@ -32,7 +34,9 @@ public:
     ChatListModel* memberModel() const { return memberModel_; }
     bool connected() const { return connected_; }
     bool admin() const { return admin_; }
+    QString localUserName() const { return localUserName_; }
     QString localUserCode() const { return localUserCode_; }
+    int onlineMemberCount() const { return onlineMemberCount_; }
     QString statusText() const { return statusText_; }
 
     Q_INVOKABLE void connectToServer(const QString& serverIp, int serverPort,
@@ -52,7 +56,6 @@ public:
     Q_INVOKABLE void sendMockMessage(const QString& content);
     Q_INVOKABLE void requestUsers();
     Q_INVOKABLE void requestRooms();
-    Q_INVOKABLE void requestHistory(int limit = 50);
     Q_INVOKABLE void selectRoom(const QString& room);
     Q_INVOKABLE void selectDirectMessage(const QString& userCode);
     Q_INVOKABLE void openPrivateChat(const QString& displayName, const QString& userCode);
@@ -61,6 +64,8 @@ public:
 signals:
     void connectedChanged();
     void adminChanged();
+    void localIdentityChanged();
+    void onlineMemberCountChanged();
     void statusTextChanged();
     void activeMessageModelChanged();
 
@@ -80,6 +85,7 @@ private:
     void incrementUnreadForConversation(const QString& key, const QString& username,
                                         const QString& userCode);
     ChatListModel* ensureConversationModel(const QString& key);
+    void clearMockDataForRealSession();
 
     ChatListModel* roomModel_;
     ChatListModel* directMessageModel_;
@@ -93,6 +99,9 @@ private:
     GuiConnectionWorker* worker_ = nullptr;
     bool connected_ = false;
     bool admin_ = false;
+    QString localUserName_ = QStringLiteral("Alice");
     QString statusText_ = QStringLiteral("未连接");
     QString localUserCode_ = QStringLiteral("A001");
+    QString joinedRoom_ = QStringLiteral("lobby");
+    int onlineMemberCount_ = 0;
 };

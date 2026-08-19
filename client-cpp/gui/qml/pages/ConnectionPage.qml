@@ -6,6 +6,7 @@ import LanChatGui
 Item {
     id: root
     signal backRequested()
+    property string modeName: "Remote Server"
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -13,7 +14,7 @@ Item {
         spacing: 14
 
         Label {
-            text: "连接 Go TLS Server"
+            text: root.modeName === "Guest" ? "加入局域网聊天室" : "连接 Go TLS Server"
             color: Theme.primaryText
             font.pixelSize: 26
             font.weight: Font.DemiBold
@@ -23,6 +24,15 @@ Item {
             text: chatController.statusText
             color: chatController.connected ? Theme.success : Theme.secondaryText
             Layout.alignment: Qt.AlignHCenter
+        }
+        Label {
+            text: root.modeName === "Guest"
+                  ? "同一台电脑测试填 127.0.0.1；另一台电脑请填写 Alice 电脑的局域网 IPv4，例如 192.168.0.3"
+                  : "请输入 Go Server 所在电脑的 IPv4 地址"
+            color: Theme.accent
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignHCenter
         }
 
         GridLayout {
@@ -36,6 +46,7 @@ Item {
                 id: serverIp
                 Layout.fillWidth: true
                 text: "127.0.0.1"
+                placeholderText: "Alice 电脑 IPv4，例如 192.168.0.3"
                 selectByMouse: true
             }
 
@@ -49,10 +60,10 @@ Item {
             }
 
             Label { text: "用户名"; color: Theme.primaryText }
-            TextField { id: username; Layout.fillWidth: true; text: "Alice"; selectByMouse: true }
+            TextField { id: username; Layout.fillWidth: true; text: root.modeName === "Guest" ? "Bob" : "Alice"; selectByMouse: true }
 
             Label { text: "用户代码"; color: Theme.primaryText }
-            TextField { id: userCode; Layout.fillWidth: true; text: "A001"; selectByMouse: true }
+            TextField { id: userCode; Layout.fillWidth: true; text: root.modeName === "Guest" ? "B001" : "A001"; selectByMouse: true }
 
             Label { text: "密码"; color: Theme.primaryText }
             TextField {
