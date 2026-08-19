@@ -5,6 +5,7 @@ import LanChatGui
 
 Item {
     id: root
+    signal modeSelected(string mode)
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -35,21 +36,21 @@ Item {
                 title: "远程服务器"
                 subtitle: "连接已经部署的 Go Server"
                 symbol: "▣"
-                onClicked: root.parent.parent.openChat("Remote Server")
+                onClicked: root.modeSelected("Remote Server")
             }
 
             ModeCard {
                 title: "创建本地聊天室"
                 subtitle: "当前电脑作为 Host"
                 symbol: "⌂"
-                onClicked: root.parent.parent.openChat("Local Host")
+                onClicked: root.modeSelected("Local Host")
             }
 
             ModeCard {
                 title: "加入局域网聊天室"
                 subtitle: "作为 Guest 加入房主"
                 symbol: "⇢"
-                onClicked: root.parent.parent.openChat("Guest")
+                onClicked: root.modeSelected("Guest")
             }
         }
     }

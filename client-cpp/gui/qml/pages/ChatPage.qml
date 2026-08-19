@@ -9,57 +9,36 @@ Item {
     property string activeRoom: "lobby"
     property string activeDirectMessage: ""
     property string headerTitle: "# lobby"
+    property var roomModel: chatController.roomModel
+    property var directMessageModel: chatController.directMessageModel
+    property var messageModel: chatController.activeMessageModel
+    property var memberModel: chatController.memberModel
     signal settingsRequested()
-
-    ListModel {
-        id: roomModel
-        ListElement { roomName: "lobby"; memberCount: 3; unreadCount: 0 }
-        ListElement { roomName: "study"; memberCount: 5; unreadCount: 2 }
-        ListElement { roomName: "gaming"; memberCount: 4; unreadCount: 0 }
-    }
-
-    ListModel {
-        id: directMessageModel
-        ListElement { displayName: "Bob"; userCode: "B002"; unreadCount: 2 }
-        ListElement { displayName: "Chen"; userCode: "C003"; unreadCount: 0 }
-    }
-
-    ListModel {
-        id: messageModel
-        ListElement { sender: "Alice"; userCode: "A001"; time: "18:24"; content: "今天的学习资料整理好了吗？"; selfMessage: false; systemMessage: false }
-        ListElement { sender: "Alice"; userCode: "A001"; time: "18:24"; content: "我还在整理最后一部分。"; selfMessage: false; systemMessage: false }
-        ListElement { sender: "Bob"; userCode: "B002"; time: "18:25"; content: "我已经完成了，可以发到这里。"; selfMessage: false; systemMessage: false }
-        ListElement { sender: "Mock User"; userCode: "A001"; time: "18:26"; content: "好的，谢谢！"; selfMessage: true; systemMessage: false }
-    }
-
-    ListModel {
-        id: memberModel
-        ListElement { displayName: "Alice"; userCode: "A001"; online: true; admin: true }
-        ListElement { displayName: "Bob"; userCode: "B002"; online: true; admin: false }
-        ListElement { displayName: "Chen"; userCode: "C003"; online: true; admin: false }
-    }
 
     function selectRoom(roomName) {
         activeRoom = roomName
         activeDirectMessage = ""
         headerTitle = "# " + roomName
+        chatController.selectRoom(roomName)
     }
 
     function selectDirectMessage(name, code) {
         activeDirectMessage = code
         headerTitle = "@ " + name
+        chatController.selectDirectMessage(code)
     }
 
     function appendMockMessage() {
         if (composer.text.trim().length === 0) return
-        messageModel.append({
-            sender: "Mock User",
-            userCode: "A001",
-            time: "18:30",
-            content: composer.text.trim(),
-            selfMessage: true,
-            systemMessage: false
-        })
+        if (chatController.connected) {
+            if (root.activeDirectMessage === "") {
+                chatController.sendRoomMessage(composer.text, root.activeRoom)
+            } else {
+                chatController.sendPrivateMessage(composer.text, root.activeDirectMessage)
+            }
+        } else {
+            chatController.sendMockMessage(composer.text)
+        }
         composer.text = ""
         messageList.positionViewAtEnd()
     }
@@ -68,6 +47,8 @@ Item {
         profilePopup.displayName = name
         profilePopup.userCode = code
         profilePopup.admin = isAdmin
+        profilePopup.canAdmin = chatController.admin
+        profilePopup.selfUser = code.toLowerCase() === chatController.localUserCode.toLowerCase()
         profilePopup.open()
     }
 
@@ -85,16 +66,12 @@ Item {
                 anchors.margins: 14
                 spacing: 10
 
-                Label {
-                    text: "LAN CHAT"
-                    color: Theme.primaryText
-                    font.pixelSize: 16
-                    font.weight: Font.DemiBold
-                }
+                Label { text: "LAN CHAT"; color: Theme.primaryText; font.pixelSize: 16; font.weight: Font.DemiBold }
+                Button { Layout.fillWidth: true; text: "新建频道"; onClicked: createRoomDialog.open() }
                 Label { text: "房间"; color: Theme.secondaryText; font.pixelSize: 12 }
 
                 Repeater {
-                    model: roomModel
+                    model: root.roomModel
                     delegate: RoomItem {
                         Layout.fillWidth: true
                         roomName: model.roomName
@@ -107,7 +84,7 @@ Item {
 
                 Label { text: "私聊"; color: Theme.secondaryText; font.pixelSize: 12; Layout.topMargin: 8 }
                 Repeater {
-                    model: directMessageModel
+                    model: root.directMessageModel
                     delegate: DirectMessageItem {
                         Layout.fillWidth: true
                         displayName: model.displayName
@@ -121,7 +98,11 @@ Item {
                 Item { Layout.fillHeight: true }
                 Label { text: modeName; color: Theme.accent; font.pixelSize: 12 }
                 Label { text: "Mock User#A001"; color: Theme.primaryText; font.pixelSize: 13 }
-                Label { text: "在线 · Mock 数据"; color: Theme.success; font.pixelSize: 11 }
+                Label {
+                    text: chatController.admin ? "在线 · 管理员" : "在线"
+                    color: chatController.admin ? Theme.accent : Theme.success
+                    font.pixelSize: 11
+                }
             }
         }
 
@@ -139,7 +120,7 @@ Item {
                     Layout.fillWidth: true
                     onSettingsRequested: root.settingsRequested()
                     title: root.headerTitle
-                    subtitle: root.activeDirectMessage === "" ? "学习交流群" : "私聊 · Mock 数据"
+                    subtitle: root.activeDirectMessage === "" ? "学习交流 · Mock 数据" : "私聊 · Mock 数据"
                 }
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
@@ -150,7 +131,7 @@ Item {
                     Layout.fillHeight: true
                     spacing: 8
                     clip: true
-                    model: messageModel
+                    model: root.messageModel
                     delegate: MessageDelegate {
                         width: messageList.width
                         sender: model.sender
@@ -177,16 +158,28 @@ Item {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 14
-                spacing: 10
-                Label {
-                    text: "在线成员 · " + memberModel.count
-                    color: Theme.primaryText
-                    font.pixelSize: 14
-                    font.weight: Font.DemiBold
+                anchors.margins: 10
+                spacing: 5
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "在线成员 · " + root.memberModel.count
+                        color: Theme.primaryText
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        Layout.fillWidth: true
+                    }
+                    Button {
+                        text: "刷新"
+                        onClicked: { chatController.requestUsers(); chatController.requestRooms() }
+                    }
                 }
-                Repeater {
-                    model: memberModel
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    spacing: 2
+                    model: root.memberModel
                     delegate: MemberItem {
                         Layout.fillWidth: true
                         displayName: model.displayName
@@ -200,5 +193,39 @@ Item {
         }
     }
 
-    UserProfilePopup { id: profilePopup }
+    UserProfilePopup {
+        id: profilePopup
+        onPrivateRequested: function(displayName, userCode) {
+            chatController.openPrivateChat(displayName, userCode)
+            root.activeDirectMessage = userCode
+            root.headerTitle = "@ " + displayName
+        }
+    }
+
+    Dialog {
+        id: createRoomDialog
+        title: "新建频道"
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        ColumnLayout {
+            width: 300
+            spacing: 8
+            Label { text: "频道名只能使用字母、数字和下划线"; color: Theme.secondaryText; wrapMode: Text.WordWrap }
+            TextField {
+                id: roomNameInput
+                Layout.fillWidth: true
+                placeholderText: "例如 study_group"
+                validator: RegularExpressionValidator { regularExpression: /^[A-Za-z0-9_]{1,32}$/ }
+            }
+        }
+
+        onAccepted: {
+            const roomName = roomNameInput.text.trim()
+            if (roomName.length > 0) root.selectRoom(roomName)
+            roomNameInput.clear()
+        }
+        onRejected: roomNameInput.clear()
+    }
 }

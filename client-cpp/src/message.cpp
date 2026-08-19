@@ -7,6 +7,12 @@
 namespace message {
 namespace {
 
+thread_local std::string g_last_error;
+
+void set_error(const std::string& error) {
+    g_last_error = error;
+}
+
 nlohmann::json serialize(const Message& message) {
     nlohmann::json object = nlohmann::json{{"type", message.type}};
     if (!message.username.empty()) object["username"] = message.username;
@@ -26,11 +32,17 @@ template <typename ReceiveFrame>
 bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
     message = Message{};
     std::string payload;
-    if (!receive_frame(payload)) return false;
+    if (!receive_frame(payload)) {
+        set_error(protocol::last_error());
+        return false;
+    }
 
     try {
         const nlohmann::json object = nlohmann::json::parse(payload);
-        if (!object.contains("type") || !object.at("type").is_string()) return false;
+        if (!object.contains("type") || !object.at("type").is_string()) {
+            set_error("JSON message has no string type field");
+            return false;
+        }
 
         Message parsed;
         parsed.type = object.at("type").get<std::string>();
@@ -45,34 +57,56 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("target_user_code", parsed.target_user_code) ||
             !read_string("room", parsed.room) ||
             !read_string("content", parsed.content) ||
-            !read_string("password", parsed.password)) return false;
+            !read_string("password", parsed.password)) {
+            set_error("JSON message contains a field with the wrong type");
+            return false;
+        }
         if (object.contains("history_limit")) {
-            if (!object.at("history_limit").is_number_integer()) return false;
+            if (!object.at("history_limit").is_number_integer()) {
+                set_error("history_limit is not an integer");
+                return false;
+            }
             parsed.history_limit = object.at("history_limit").get<int>();
         }
         if (object.contains("is_admin")) {
-            if (!object.at("is_admin").is_boolean()) return false;
+            if (!object.at("is_admin").is_boolean()) {
+                set_error("is_admin is not a boolean");
+                return false;
+            }
             parsed.is_admin = object.at("is_admin").get<bool>();
         }
 
         if (object.contains("users")) {
-            if (!object.at("users").is_array()) return false;
+            if (!object.at("users").is_array()) {
+                set_error("users is not an array");
+                return false;
+            }
             for (const auto& value : object.at("users")) {
-                if (!value.is_string()) return false;
+                if (!value.is_string()) {
+                    set_error("users contains a non-string value");
+                    return false;
+                }
                 parsed.users.push_back(value.get<std::string>());
             }
         }
         if (object.contains("rooms")) {
-            if (!object.at("rooms").is_array()) return false;
+            if (!object.at("rooms").is_array()) {
+                set_error("rooms is not an array");
+                return false;
+            }
             for (const auto& value : object.at("rooms")) {
-                if (!value.is_string()) return false;
+                if (!value.is_string()) {
+                    set_error("rooms contains a non-string value");
+                    return false;
+                }
                 parsed.rooms.push_back(value.get<std::string>());
             }
         }
 
         message = std::move(parsed);
         return true;
-    } catch (const nlohmann::json::exception&) {
+    } catch (const nlohmann::json::exception& error) {
+        set_error(std::string("JSON parse failed: ") + error.what());
         return false;
     }
 }
@@ -80,7 +114,9 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
 }  // namespace
 
 bool send_message(SOCKET socket_handle, const Message& message) {
-    return protocol::send_frame(socket_handle, serialize(message).dump());
+    const bool sent = protocol::send_frame(socket_handle, serialize(message).dump());
+    if (!sent) set_error(protocol::last_error());
+    return sent;
 }
 
 bool receive_message(SOCKET socket_handle, Message& message) {
@@ -92,7 +128,9 @@ bool receive_message(SOCKET socket_handle, Message& message) {
 }
 
 bool send_message(SSL* ssl_handle, const Message& message) {
-    return protocol::send_frame(ssl_handle, serialize(message).dump());
+    const bool sent = protocol::send_frame(ssl_handle, serialize(message).dump());
+    if (!sent) set_error(protocol::last_error());
+    return sent;
 }
 
 bool receive_message(SSL* ssl_handle, Message& message) {
@@ -101,6 +139,10 @@ bool receive_message(SSL* ssl_handle, Message& message) {
             return protocol::recv_frame(ssl_handle, payload);
         },
         message);
+}
+
+std::string last_error() {
+    return g_last_error;
 }
 
 }  // namespace message

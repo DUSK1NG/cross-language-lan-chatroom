@@ -9,25 +9,25 @@ RowLayout {
     property bool online: true
     property bool admin: false
     signal userSelected()
-    height: 38
-    spacing: 8
+    height: 26
+    spacing: 4
 
     Label {
         text: online ? "●" : "○"
         color: online ? Theme.success : Theme.secondaryText
-        font.pixelSize: 12
+        font.pixelSize: 9
     }
     ColumnLayout {
         Layout.fillWidth: true
-        spacing: 1
-        Label { text: displayName; color: Theme.primaryText; font.pixelSize: 13 }
-        Label { text: "#" + userCode; color: Theme.secondaryText; font.pixelSize: 11 }
+        spacing: 0
+        Label { text: displayName; color: Theme.primaryText; font.pixelSize: 11 }
+        Label { text: "#" + userCode; color: Theme.secondaryText; font.pixelSize: 9 }
     }
     Label {
         visible: admin
         text: "ADMIN"
         color: Theme.accent
-        font.pixelSize: 9
+        font.pixelSize: 7
         font.weight: Font.Bold
     }
     MouseArea {

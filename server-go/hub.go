@@ -8,7 +8,9 @@ import (
 	"sync"
 )
 
-const clientSendBufferSize = 16
+// 历史消息、上线提示和用户列表可能在登录后连续到达，缓冲区不能过小，
+// 否则正常的短时消息突发会被误判为慢客户端并强制断开。
+const clientSendBufferSize = 256
 
 var ErrUserCodeAlreadyUsed = errors.New("user code already exists")
 var errRegisterRequestMissingIdentity = errors.New("register request requires user code identity")
@@ -344,15 +346,22 @@ func (h *Hub) removeSlowClient(client *Client) {
 }
 
 func (h *Hub) removeClient(client *Client) {
+	if client == nil {
+		return
+	}
 	delete(h.Clients, client)
 	h.removeFromRoom(client)
 
-	if client == nil || client.NormalizedCode == "" {
+	if client.NormalizedCode == "" {
 		return
 	}
 
 	if activeClient, ok := h.ActiveCodes[client.NormalizedCode]; ok && activeClient == client {
 		delete(h.ActiveCodes, client.NormalizedCode)
+	}
+	// 临时用户代码只在在线期间占用；账号用户的代码由账号数据库持久管理。
+	if !client.AccountBacked {
+		delete(h.UsedCodes, client.NormalizedCode)
 	}
 }
 
@@ -374,7 +383,7 @@ func (h *Hub) broadcastSystemMessageToRoom(room, content string) {
 		return
 	}
 	for client := range h.Rooms[room] {
-		h.deliver(client, Message{Type: "system", Content: content})
+		h.deliver(client, Message{Type: "system", Room: room, Content: content})
 	}
 }
 

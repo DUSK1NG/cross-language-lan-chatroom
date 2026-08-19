@@ -147,7 +147,7 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 			}
 		}
 	}
-	log.Printf("user logged in: %s", client.Username)
+	log.Printf("user logged in: %s (admin=%t)", client.Username, client.IsAdmin)
 
 	shouldUnregister = false
 	client.readPump(hub)

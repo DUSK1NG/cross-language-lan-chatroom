@@ -20,5 +20,6 @@ bool send_all(SSL* ssl_handle, const char* data, std::size_t length);
 bool recv_all(SSL* ssl_handle, char* data, std::size_t length);
 bool send_frame(SSL* ssl_handle, const std::string& payload);
 bool recv_frame(SSL* ssl_handle, std::string& payload);
+std::string last_error();
 
 }  // namespace protocol

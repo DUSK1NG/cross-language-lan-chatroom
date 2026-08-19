@@ -25,7 +25,7 @@ func TestHubRejectsDuplicateUserCodesCaseInsensitively(t *testing.T) {
 	}
 }
 
-func TestHubRejectsReusedUserCodeAfterUnregister(t *testing.T) {
+func TestHubAllowsTemporaryUserCodeAfterUnregister(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
 
@@ -42,10 +42,13 @@ func TestHubRejectsReusedUserCodeAfterUnregister(t *testing.T) {
 	assertChannelClosed(t, first.Send)
 
 	second := newTestClient(t, "Bob", "Alex2026")
-	err := registerForTest(t, hub, second)
-	if !errors.Is(err, ErrUserCodeAlreadyUsed) {
-		t.Fatalf("register second client error = %v, want %v", err, ErrUserCodeAlreadyUsed)
+	if err := registerForTest(t, hub, second); err != nil {
+		t.Fatalf("register second client after reconnect: %v", err)
 	}
+	assertMessageReceived(t, second.Send, Message{
+		Type:    "system",
+		Content: "Bob#Alex2026 joined the chat",
+	})
 }
 
 func TestHubAllowsAccountBackedUserCodeAfterUnregister(t *testing.T) {
@@ -621,6 +624,10 @@ func assertMessageReceived(t *testing.T, messages <-chan Message, want Message) 
 
 	select {
 	case got := <-messages:
+		// 旧测试只关心系统消息内容；房间字段由新协议用于客户端路由。
+		if want.Type == "system" && want.Room == "" {
+			want.Room = got.Room
+		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("received message %+v, want %+v", got, want)
 		}
@@ -679,6 +686,9 @@ func assertMessageFromConn(t *testing.T, conn net.Conn, want Message) {
 	got, err := receiveMessage(conn)
 	if err != nil {
 		t.Fatalf("receive message: %v", err)
+	}
+	if want.Type == "system" && want.Room == "" {
+		want.Room = got.Room
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("received message %+v, want %+v", got, want)

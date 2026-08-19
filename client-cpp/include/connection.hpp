@@ -72,7 +72,7 @@ private:
     mutable bool ready_ = false;
     bool stop_requested_ = false;
     bool registration_completed_ = false;
-    std::string last_error_;
+    mutable std::string last_error_;
 };
 
 }  // namespace connection

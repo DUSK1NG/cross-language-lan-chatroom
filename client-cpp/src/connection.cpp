@@ -225,13 +225,25 @@ bool ConnectionState::receive(message::Message& message) const {
         if (!ready_ || stop_requested_) return false;
         session = session_;
     }
-    return session != nullptr && message::receive_message(session->ssl, message);
+    if (session == nullptr || !message::receive_message(session->ssl, message)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        last_error_ = message::last_error();
+        return false;
+    }
+    return true;
 }
 
 bool ConnectionState::send(const message::Message& message) const {
     const std::lock_guard<std::mutex> lock(mutex_);
-    return ready_ && !stop_requested_ && session_ != nullptr &&
-        message::send_message(session_->ssl, message);
+    if (!ready_ || stop_requested_ || session_ == nullptr) {
+        last_error_ = "connection is not ready";
+        return false;
+    }
+    if (!message::send_message(session_->ssl, message)) {
+        last_error_ = message::last_error();
+        return false;
+    }
+    return true;
 }
 
 void ConnectionState::request_disconnect() const {
