@@ -60,7 +60,26 @@ jobs:
 
       - name: Configure C++ client
         shell: pwsh
-        run: cmake -S client-cpp -B client-cpp/build -G "MinGW Makefiles"
+        run: |
+          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          $opensslRoot = Join-Path $msysRoot 'mingw64'
+          $opensslInclude = Join-Path $opensslRoot 'include'
+          $opensslSsl = Join-Path $opensslRoot 'lib\libssl.dll.a'
+          $opensslCrypto = Join-Path $opensslRoot 'lib\libcrypto.dll.a'
+          if (-not (Test-Path -LiteralPath $opensslInclude)) {
+            throw "OpenSSL include directory was not found: $opensslInclude"
+          }
+          if (-not (Test-Path -LiteralPath $opensslSsl)) {
+            throw "OpenSSL SSL library was not found: $opensslSsl"
+          }
+          if (-not (Test-Path -LiteralPath $opensslCrypto)) {
+            throw "OpenSSL Crypto library was not found: $opensslCrypto"
+          }
+          cmake -S client-cpp -B client-cpp/build -G "MinGW Makefiles" `
+            "-DOPENSSL_ROOT_DIR=$opensslRoot" `
+            "-DOPENSSL_INCLUDE_DIR=$opensslInclude" `
+            "-DOPENSSL_SSL_LIBRARY=$opensslSsl" `
+            "-DOPENSSL_CRYPTO_LIBRARY=$opensslCrypto"
 
       - name: Build C++ client
         shell: pwsh
