@@ -1,33 +1,66 @@
 # GitHub 发布清单
 
-当前本地仓库已经完成 Stage 1–10 的代码和文档准备，但尚未配置 GitHub origin remote。
+当前公开仓库已上线：<https://github.com/DUSK1NG/cross-language-lan-chatroom>
+当前仓库事实：`origin` 指向 `https://github.com/DUSK1NG/cross-language-lan-chatroom.git`；默认发布分支 / 公开仓库主线为 `master`。
 
 ## 发布前检查
 
-- [ ] README、协议文档、架构图和测试记录已更新；
-- [ ] go test ./...、go test -race ./...、go vet ./... 通过；
-- [ ] Go Server 和 C++ Client 构建通过；
-- [ ] 不提交 *.exe、构建缓存、日志和私人截图；
-- [ ] 真实局域网测试截图已脱敏；
-- [ ] GitHub 仓库名和可见性已确认。
+- [ ] README、协议文档、架构图和测试记录已更新
+- [ ] 本地 Go 检查通过：`go test ./...`、`go test -race ./...`、`go vet ./...`
+- [x] 本地构建通过：Go Server、C++ Client，且已完成 CMake / CTest 验证
+- [ ] GitHub Actions 最近一次 Windows job 与 Ubuntu job 均通过
+- [ ] 不提交 `*.exe`、构建缓存、日志、访问令牌、密钥文件或私人截图
+- [ ] 真实局域网测试截图已脱敏
+- [ ] release 说明、版本号和里程碑（当前为 `v1.0.0`）已核对
 
-## 配置远程仓库
+## 当前仓库建议流程
 
-创建 GitHub 仓库后，在项目根目录执行：
+先确认远程地址和分支状态：
 
-~~~powershell
-git remote add origin https://github.com/DUSK1NG/<repository-name>.git
-git push -u origin master
-~~~
+```powershell
+git remote -v
+git branch -vv
+```
 
-如果远程仓库已经存在，先使用 git remote -v 检查地址，避免推送到错误仓库。
+本仓库发布前，建议至少完成以下本地检查：
 
-## 简历展示建议
+```powershell
+cd server-go
+go test ./...
+go test -race ./...
+go vet ./...
+go build -o chat-server.exe .
 
-README 首页应突出：
+cd ..\client-cpp
+g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\command.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
+cmake -S . -B build -G "MinGW Makefiles"
+cmake --build build --config Release
+ctest --test-dir build --output-on-failure
+```
 
-1. Go Server + C++ Client 的跨语言架构；
-2. 4-byte big-endian length + UTF-8 JSON 协议；
-3. goroutine/channel 与 Winsock2/std::thread；
-4. Wi-Fi 与 Ethernet 跨设备测试结果；
-5. 粘包拆包、异常断线和资源清理测试。
+如果更换开发机或重新安装工具链，需要先确认 MinGW / CMake / CTest 可执行文件已加入 `PATH`，再重复上述检查。
+
+## 推送与发布
+
+确认本地检查完成后，再推送 `master`：
+
+```powershell
+git push origin master
+```
+
+推送后立刻到 GitHub 查看 Actions：
+
+- Windows：完整验证 Go + C++（含 CMake / CTest）
+- Ubuntu：只验证 Go Server
+
+未来所有功能变更、文档更新或 release 候选版本，都应先完成本地检查，再等待 GitHub Actions 通过后再发布。不要跳过远程 CI，也不要把未验证的构建产物标记为 release-ready。
+
+## README 首页建议突出内容
+
+README 首页应持续突出：
+
+1. Go Server + C++ Client 的跨语言结构
+2. 4-byte big-endian length + UTF-8 JSON 协议
+3. `goroutine/channel` 与 `Winsock2/std::thread`
+4. Wi-Fi 与 Ethernet 跨设备测试结果
+5. 粘包拆包、异常断线和资源清理测试

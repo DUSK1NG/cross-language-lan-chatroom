@@ -1,0 +1,95 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import LanChatGui
+
+Item {
+    id: root
+    signal backRequested()
+
+    ColumnLayout {
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 64, 560)
+        spacing: 14
+
+        Label {
+            text: "连接 Go TLS Server"
+            color: Theme.primaryText
+            font.pixelSize: 26
+            font.weight: Font.DemiBold
+            Layout.alignment: Qt.AlignHCenter
+        }
+        Label {
+            text: chatController.statusText
+            color: chatController.connected ? Theme.success : Theme.secondaryText
+            Layout.alignment: Qt.AlignHCenter
+        }
+
+        GridLayout {
+            columns: 2
+            Layout.fillWidth: true
+            columnSpacing: 12
+            rowSpacing: 10
+
+            Label { text: "服务器 IP"; color: Theme.primaryText }
+            TextField {
+                id: serverIp
+                Layout.fillWidth: true
+                text: "127.0.0.1"
+                selectByMouse: true
+            }
+
+            Label { text: "端口"; color: Theme.primaryText }
+            TextField {
+                id: serverPort
+                Layout.fillWidth: true
+                text: "8888"
+                validator: IntValidator { bottom: 1; top: 65535 }
+                selectByMouse: true
+            }
+
+            Label { text: "用户名"; color: Theme.primaryText }
+            TextField { id: username; Layout.fillWidth: true; text: "Alice"; selectByMouse: true }
+
+            Label { text: "用户代码"; color: Theme.primaryText }
+            TextField { id: userCode; Layout.fillWidth: true; text: "A001"; selectByMouse: true }
+
+            Label { text: "密码"; color: Theme.primaryText }
+            TextField {
+                id: password
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+                selectByMouse: true
+            }
+
+            Label { text: "CA 文件"; color: Theme.primaryText }
+            TextField {
+                id: caFile
+                Layout.fillWidth: true
+                placeholderText: "留空则使用系统证书"
+                selectByMouse: true
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+            Button { text: "返回"; onClicked: root.backRequested() }
+            Item { Layout.fillWidth: true }
+            Button {
+                text: "连接"
+                enabled: serverIp.text.length > 0 && serverPort.text.length > 0 &&
+                         username.text.length > 0 && userCode.text.length > 0
+                onClicked: {
+                    chatController.connectToServer(serverIp.text,
+                                                   Number(serverPort.text),
+                                                   username.text,
+                                                   userCode.text,
+                                                   password.text,
+                                                   caFile.text,
+                                                   false)
+                }
+            }
+        }
+    }
+}

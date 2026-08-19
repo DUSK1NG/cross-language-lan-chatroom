@@ -4,22 +4,75 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 
+#include "command.hpp"
+#include "auth.hpp"
+#include "connection.hpp"
 #include "message.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace {
 
-constexpr const char* kDefaultServerIp = "127.0.0.1";
-constexpr int kDefaultServerPort = 8888;
-constexpr const char* kDefaultUsername = "Alice";
-constexpr const char* kDefaultUserCode = "ALICE001";
+class HostServerProcess {
+public:
+    bool start(const auth::ClientOptions& options, std::string& error) {
+        std::wstring command = quote(to_wide(options.server_exe)) + L" -cert " +
+            quote(to_wide(options.cert_file)) + L" -key " + quote(to_wide(options.key_file)) +
+            L" -admin-code " + quote(to_wide(options.user_code));
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        std::vector<wchar_t> command_buffer(command.begin(), command.end());
+        command_buffer.push_back(L'\0');
+        if (!CreateProcessW(nullptr, command_buffer.data(), nullptr, nullptr, FALSE,
+                            CREATE_NEW_PROCESS_GROUP, nullptr, nullptr, &startup, &process)) {
+            error = "Failed to start Go server process. Check --server-exe, --cert and --key.";
+            return false;
+        }
+        CloseHandle(process.hThread);
+        process_handle_ = process.hProcess;
+        Sleep(700);
+        return true;
+    }
+
+    void stop() {
+        if (process_handle_ == nullptr) return;
+        TerminateProcess(process_handle_, 0);
+        WaitForSingleObject(process_handle_, 3000);
+        CloseHandle(process_handle_);
+        process_handle_ = nullptr;
+    }
+
+    ~HostServerProcess() { stop(); }
+
+private:
+    static std::wstring to_wide(const std::string& value) {
+        if (value.empty()) return {};
+        const int size = MultiByteToWideChar(CP_UTF8, 0, value.data(),
+                                             static_cast<int>(value.size()), nullptr, 0);
+        std::wstring result(static_cast<std::size_t>(size), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                            result.data(), size);
+        return result;
+    }
+
+    static std::wstring quote(const std::wstring& value) {
+        return L"\"" + value + L"\"";
+    }
+
+    HANDLE process_handle_ = nullptr;
+};
+
 constexpr DWORD kConsolePollIntervalMs = 100;
 constexpr DWORD kInputBufferSize = 256;
 constexpr DWORD kConsoleEventBufferSize = 32;
@@ -30,10 +83,6 @@ enum class InputReadResult {
     kEndOfInput,
     kError,
 };
-
-void print_winsock_error(const char* operation) {
-    std::cerr << operation << " failed. WSA error: " << WSAGetLastError() << '\n';
-}
 
 void print_locked(std::mutex& output_mutex, const std::string& text, std::ostream& stream = std::cout) {
     const std::lock_guard<std::mutex> lock(output_mutex);
@@ -112,6 +161,40 @@ std::string format_identity(const message::Message& incoming_message) {
         return incoming_message.username;
     }
     return incoming_message.username + "#" + incoming_message.user_code;
+}
+
+template <typename MessageType, typename = void>
+struct has_target_user_code : std::false_type {};
+
+template <typename MessageType>
+struct has_target_user_code<
+    MessageType,
+    std::void_t<decltype(std::declval<MessageType&>().target_user_code)>>
+    : std::true_type {};
+
+template <typename MessageType>
+std::string get_target_user_code(const MessageType& message) {
+    if constexpr (has_target_user_code<MessageType>::value) {
+        return message.target_user_code;
+    }
+    return {};
+}
+
+template <typename MessageType>
+void set_target_user_code(MessageType& message, const std::string& target_user_code) {
+    if constexpr (has_target_user_code<MessageType>::value) {
+        message.target_user_code = target_user_code;
+    }
+}
+
+std::string normalize_user_code(const std::string& user_code) {
+    std::string normalized = user_code;
+    for (char& value : normalized) {
+        if (value >= 'A' && value <= 'Z') {
+            value = static_cast<char>(value - 'A' + 'a');
+        }
+    }
+    return normalized;
 }
 
 bool is_console_input(HANDLE input_handle) {
@@ -344,18 +427,19 @@ InputReadResult read_next_input_line(
     return InputReadResult::kLineReady;
 }
 
-void shutdown_socket(SOCKET socket_handle) {
-    if (socket_handle != INVALID_SOCKET) {
-        shutdown(socket_handle, SD_BOTH);
-    }
-}
-
 void print_help(std::mutex& output_mutex) {
     print_locked(
         output_mutex,
         "Commands:\n"
         "/help  Show this help\n"
         "/users Show online users\n"
+        "/rooms Show available rooms\n"
+        "/history [count] Show recent room messages\n"
+        "/kick Name#Code  Kick a user (administrator)\n"
+        "/mute Name#Code  Toggle mute (administrator)\n"
+        "/join room_name  Join or create a room\n"
+        "/leave Return to lobby\n"
+        "/msg Name#Code message  Send a private message\n"
         "/quit  Exit the chat\n");
 }
 
@@ -370,16 +454,67 @@ void print_users_response(const message::Message& incoming_message, std::mutex& 
     print_locked(output_mutex, output);
 }
 
-void receive_loop(SOCKET socket_handle, std::atomic<bool>& running, std::mutex& output_mutex) {
+void print_room_list_response(
+    const message::Message& incoming_message,
+    std::mutex& output_mutex) {
+    std::string output = "Rooms:\n";
+    const auto& rooms = incoming_message.rooms.empty()
+        ? incoming_message.users
+        : incoming_message.rooms;
+    for (std::size_t index = 0; index < rooms.size(); ++index) {
+        output += std::to_string(index + 1) + ". " + rooms[index] + '\n';
+    }
+    print_locked(output_mutex, output);
+}
+
+void receive_loop(
+    connection::ConnectionState& connection_state,
+    std::atomic<bool>& running,
+    std::atomic<bool>& reconnect_enabled,
+    std::mutex& output_mutex,
+    const std::string& local_user_code,
+    std::unordered_map<std::string, std::string>& private_peer_names,
+    std::mutex& private_peer_mutex) {
+    connection::ReconnectBackoff backoff;
     while (running.load()) {
         message::Message incoming_message;
-        if (!message::receive_message(socket_handle, incoming_message)) {
-            if (running.load()) {
-                print_locked(output_mutex, "Connection to server lost.\n", std::cerr);
+        if (!connection_state.receive(incoming_message)) {
+            connection_state.close_current();
+            if (!running.load() || !reconnect_enabled.load()) {
+                return;
             }
-            running.store(false);
-            shutdown_socket(socket_handle);
-            return;
+
+            print_locked(output_mutex, "Connection to server lost.\n", std::cerr);
+            while (running.load() && reconnect_enabled.load()) {
+                print_locked(output_mutex, "Reconnecting...\n");
+                const std::chrono::seconds delay = backoff.next_delay();
+                if (!connection_state.wait_before_retry(
+                        delay, running, reconnect_enabled)) {
+                    return;
+                }
+
+                message::Message login_response;
+                connection::LoginResult login_result =
+                    connection::LoginResult::kRetryableFailure;
+                if (connection_state.connect_and_login(login_response, login_result)) {
+                    backoff.reset();
+                    print_locked(output_mutex, "Reconnected and logged in.\n");
+                    break;
+                }
+
+                if (login_result == connection::LoginResult::kRejected) {
+                    print_locked(
+                        output_mutex,
+                        "Login rejected after reconnect: " +
+                            login_response.content + "\n",
+                        std::cerr);
+                    reconnect_enabled.store(false);
+                    running.store(false);
+                    connection_state.request_stop();
+                    return;
+                }
+            }
+            continue;
         }
 
         if (incoming_message.type == "chat") {
@@ -404,8 +539,65 @@ void receive_loop(SOCKET socket_handle, std::atomic<bool>& running, std::mutex& 
             continue;
         }
 
+        if (incoming_message.type == "history_message") {
+            print_locked(output_mutex, "[History] " + format_identity(incoming_message) + ": " +
+                incoming_message.content + "\n");
+            continue;
+        }
+
+        if (incoming_message.type == "history_end") {
+            print_locked(output_mutex, "[History] " + incoming_message.content + "\n");
+            continue;
+        }
+
         if (incoming_message.type == "users_response") {
             print_users_response(incoming_message, output_mutex);
+            continue;
+        }
+
+        if (incoming_message.type == "room_list_response" ||
+            incoming_message.type == "rooms_response") {
+            print_room_list_response(incoming_message, output_mutex);
+            continue;
+        }
+
+        if (incoming_message.type == "private_chat") {
+            const std::string sender_code = normalize_user_code(incoming_message.user_code);
+            const bool sent_by_local_user =
+                !sender_code.empty() && sender_code == normalize_user_code(local_user_code);
+            std::string peer_identity;
+            if (sent_by_local_user) {
+                const std::string target_code = get_target_user_code(incoming_message);
+                {
+                    const std::lock_guard<std::mutex> lock(private_peer_mutex);
+                    const auto peer = private_peer_names.find(normalize_user_code(target_code));
+                    if (peer != private_peer_names.end()) {
+                        peer_identity = peer->second;
+                    }
+                }
+                if (peer_identity.empty()) {
+                    peer_identity = "#" + target_code;
+                }
+                print_locked(
+                    output_mutex,
+                    "[Private -> " + peer_identity + "] " + incoming_message.content + "\n");
+            } else {
+                peer_identity = format_identity(incoming_message);
+                if (peer_identity.empty()) {
+                    peer_identity = incoming_message.username;
+                }
+                print_locked(
+                    output_mutex,
+                    "[Private from " + peer_identity + "] " + incoming_message.content + "\n");
+            }
+            continue;
+        }
+
+        if (incoming_message.type == "offline_message") {
+            const std::string identity = format_identity(incoming_message);
+            print_locked(output_mutex,
+                "[Offline private from " + (identity.empty() ? incoming_message.username : identity) + "] " +
+                    incoming_message.content + "\n");
             continue;
         }
 
@@ -434,28 +626,33 @@ int wmain(int argc, wchar_t* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
-    const std::string server_ip = argc >= 2 ? utf8_from_wide(argv[1]) : kDefaultServerIp;
-    const std::string username = argc >= 4
-        ? utf8_from_wide(argv[3])
-        : kDefaultUsername;
-    const std::string user_code = argc >= 5
-        ? utf8_from_wide(argv[4])
-        : kDefaultUserCode;
+    std::vector<std::string> arguments;
+    arguments.reserve(argc > 1 ? static_cast<std::size_t>(argc - 1) : 0);
+    for (int index = 1; index < argc; ++index) {
+        arguments.push_back(utf8_from_wide(argv[index]));
+    }
 
-    int server_port = kDefaultServerPort;
-    if (argc >= 3) {
-        const std::string port_text = utf8_from_wide(argv[2]);
-        try {
-            std::size_t parsed_length = 0;
-            server_port = std::stoi(port_text, &parsed_length);
-            if (parsed_length != port_text.size() || server_port < 1 || server_port > 65535) {
-                throw std::invalid_argument("port out of range");
-            }
-        } catch (const std::exception&) {
-            std::cerr << "Invalid port.\n";
+    auth::ClientOptions client_options;
+    std::string argument_error;
+    if (!auth::parse_arguments(arguments, client_options, argument_error)) {
+        std::cerr << argument_error << '\n' << auth::usage() << '\n';
+        return 1;
+    }
+
+    HostServerProcess host_server;
+    if (client_options.host_mode) {
+        std::string host_error;
+        if (!host_server.start(client_options, host_error)) {
+            std::cerr << host_error << '\n';
             return 1;
         }
+        if (client_options.ca_file.empty()) {
+            client_options.ca_file = client_options.cert_file;
+        }
+        std::cout << "本机聊天已启动，其他用户请连接本机局域网 IP。\n";
     }
+
+    const std::string& user_code = client_options.user_code;
 
     WSADATA wsa_data{};
     const int startup_result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
@@ -464,77 +661,59 @@ int wmain(int argc, wchar_t* argv[]) {
         return 1;
     }
 
-    SOCKET socket_handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (socket_handle == INVALID_SOCKET) {
-        print_winsock_error("socket");
-        WSACleanup();
-        return 1;
-    }
-
-    sockaddr_in server_address{};
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(static_cast<u_short>(server_port));
-
-    const int address_result = inet_pton(
-        AF_INET, server_ip.c_str(), &server_address.sin_addr);
-    if (address_result != 1) {
-        if (address_result == 0) {
-            std::cerr << "Invalid IPv4 address: " << server_ip << '\n';
-        } else {
-            print_winsock_error("inet_pton");
-        }
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-
-    if (connect(
-            socket_handle,
-            reinterpret_cast<const sockaddr*>(&server_address),
-            sizeof(server_address)) == SOCKET_ERROR) {
-        print_winsock_error("connect");
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-
-    std::cout << "Connected to " << server_ip << ':' << server_port << '\n';
-
-    const message::Message login{"login", username, user_code, ""};
-    if (!message::send_message(socket_handle, login)) {
-        std::cerr << "Failed to send login message.\n";
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-
+    connection::ConnectionState connection_state(
+        connection::Config{
+            client_options.server_ip,
+            client_options.server_port,
+            client_options.username,
+            client_options.user_code,
+            client_options.ca_file,
+            client_options.password,
+            client_options.register_account});
     message::Message login_response;
-    if (!message::receive_message(socket_handle, login_response)) {
-        std::cerr << "Failed to receive login response.\n";
-        closesocket(socket_handle);
-        WSACleanup();
-        return 1;
-    }
-    if (login_response.type != "login_ok") {
-        std::cerr << "Login failed: " << login_response.content << '\n';
-        closesocket(socket_handle);
+    connection::LoginResult login_result = connection::LoginResult::kRetryableFailure;
+    if (!connection_state.connect_and_login(login_response, login_result)) {
+        if (login_result == connection::LoginResult::kRejected) {
+            std::cerr << "Login failed: " << login_response.content << '\n';
+        } else {
+            std::cerr << "Failed to connect or receive login response: "
+                      << connection_state.last_error() << '\n';
+        }
         WSACleanup();
         return 1;
     }
 
     std::cout << "Logged in as "
-              << format_identity(login_response) << '\n';
+              << format_identity(login_response)
+              << (login_response.is_admin ? " (administrator)" : "") << '\n';
 
     std::atomic<bool> running{true};
+    std::atomic<bool> reconnect_enabled{true};
     std::mutex output_mutex;
+    std::unordered_map<std::string, std::string> private_peer_names;
+    std::mutex private_peer_mutex;
 
     print_help(output_mutex);
 
+    const auto send_or_report = [&](const message::Message& outgoing_message,
+                                    const char* error_text) {
+        if (connection_state.send(outgoing_message)) {
+            return true;
+        }
+        print_locked(output_mutex, std::string(error_text) + "\n", std::cerr);
+        connection_state.request_disconnect();
+        return false;
+    };
+
     std::thread receiver_thread(
         receive_loop,
-        socket_handle,
+        std::ref(connection_state),
         std::ref(running),
-        std::ref(output_mutex));
+        std::ref(reconnect_enabled),
+        std::ref(output_mutex),
+        std::cref(user_code),
+        std::ref(private_peer_names),
+        std::ref(private_peer_mutex));
 
     const HANDLE input_handle = GetStdHandle(STD_INPUT_HANDLE);
     const HANDLE output_handle = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -543,13 +722,11 @@ int wmain(int argc, wchar_t* argv[]) {
     const bool console_input_ready = !use_console_input || console_input_mode.activate(input_handle);
     std::wstring console_input;
     std::string redirected_input;
-    bool shutdown_requested = false;
-
     if (!console_input_ready) {
         print_locked(output_mutex, "Failed to configure console input.\n", std::cerr);
+        reconnect_enabled.store(false);
         running.store(false);
-        shutdown_socket(socket_handle);
-        shutdown_requested = true;
+        connection_state.request_stop();
     }
 
     while (console_input_ready && running.load()) {
@@ -570,16 +747,16 @@ int wmain(int argc, wchar_t* argv[]) {
 
         if (read_result == InputReadResult::kError) {
             print_locked(output_mutex, "Failed to read input.\n", std::cerr);
+            reconnect_enabled.store(false);
             running.store(false);
-            shutdown_socket(socket_handle);
-            shutdown_requested = true;
+            connection_state.request_stop();
             break;
         }
 
         if (read_result == InputReadResult::kEndOfInput) {
+            reconnect_enabled.store(false);
             running.store(false);
-            shutdown_socket(socket_handle);
-            shutdown_requested = true;
+            connection_state.request_stop();
             break;
         }
 
@@ -596,55 +773,130 @@ int wmain(int argc, wchar_t* argv[]) {
             continue;
         }
 
+        if (input_line == "/history" || input_line.rfind("/history ", 0) == 0) {
+            int limit = 20;
+            if (input_line.size() > 9) {
+                try {
+                    std::size_t consumed = 0;
+                    limit = std::stoi(input_line.substr(9), &consumed);
+                    if (consumed != input_line.size() - 9 || limit < 1 || limit > 100) {
+                        throw std::invalid_argument("invalid history limit");
+                    }
+                } catch (const std::exception&) {
+                    print_locked(output_mutex, "Usage: /history [1-100]\n", std::cerr);
+                    continue;
+                }
+            }
+            message::Message history_request{
+                "history_request", "", "", "", {}, "", "", {}, "", limit};
+            send_or_report(history_request, "Failed to request message history.");
+            continue;
+        }
+
+        if (input_line.rfind("/kick ", 0) == 0 || input_line.rfind("/mute ", 0) == 0) {
+            const std::string action = input_line.substr(1, 4);
+            const std::string target = input_line.substr(6);
+            const std::size_t separator = target.find('#');
+            if (separator == std::string::npos || separator == 0 || separator + 1 >= target.size() ||
+                target.find_first_of(" \t\r\n", separator + 1) != std::string::npos) {
+                print_locked(output_mutex, "Usage: /" + action + " Name#Code\n", std::cerr);
+                continue;
+            }
+            message::Message admin_request{
+                "admin_action", "", "", action, {}, target.substr(separator + 1)};
+            send_or_report(admin_request, "Failed to send administrator command.");
+            continue;
+        }
+
         if (!input_line.empty() && input_line.front() == '/') {
             if (input_line == "/users") {
-                const message::Message users_request{"users_request", "", "", ""};
-                if (!message::send_message(socket_handle, users_request)) {
-                    print_locked(output_mutex, "Failed to request online users.\n", std::cerr);
-                    running.store(false);
-                    shutdown_socket(socket_handle);
-                    shutdown_requested = true;
-                    break;
+                const message::Message users_request{"users_request", "", "", "", {}, ""};
+                send_or_report(users_request, "Failed to request online users.");
+                continue;
+            }
+
+            if (input_line == "/rooms") {
+                const message::Message rooms_request{"rooms_request", "", "", "", {}, ""};
+                send_or_report(rooms_request, "Failed to request rooms.");
+                continue;
+            }
+
+            if (input_line == "/leave") {
+                const message::Message leave_message{"room_leave", "", "", "", {}, ""};
+                send_or_report(leave_message, "Failed to leave room.");
+                continue;
+            }
+
+            if (command::is_join_command(input_line)) {
+                command::RoomCommand room_command;
+                if (!command::parse_join_command(input_line, room_command)) {
+                    print_locked(
+                        output_mutex,
+                        "Invalid room name. Use ASCII letters, digits, or underscore; length 1-32.\n",
+                        std::cerr);
+                    continue;
                 }
+                message::Message join_message{
+                    "room_join", "", "", room_command.room_name, {}, ""};
+                join_message.room = room_command.room_name;
+                send_or_report(join_message, "Failed to join room.");
                 continue;
             }
 
             if (input_line == "/quit") {
-                const message::Message quit_message{"quit", "", "", ""};
-                if (!message::send_message(socket_handle, quit_message)) {
+                const message::Message quit_message{"quit", "", "", "", {}, ""};
+                if (!connection_state.send(quit_message)) {
                     print_locked(output_mutex, "Failed to send quit message.\n", std::cerr);
                 }
+                reconnect_enabled.store(false);
                 running.store(false);
-                shutdown_socket(socket_handle);
-                shutdown_requested = true;
+                connection_state.request_stop();
                 break;
+            }
+
+            if (command::is_private_message_command(input_line)) {
+                command::PrivateMessageCommand private_command;
+                if (!command::parse_private_message(input_line, private_command)) {
+                    print_locked(
+                        output_mutex,
+                        "Invalid private message. Use: /msg Name#Code message\n",
+                        std::cerr);
+                    continue;
+                }
+
+                message::Message private_message{
+                    "private_chat", "", "", private_command.content, {},
+                    private_command.target_user_code};
+
+                {
+                    const std::lock_guard<std::mutex> lock(private_peer_mutex);
+                    private_peer_names[normalize_user_code(private_command.target_user_code)] =
+                        private_command.target_name + "#" + private_command.target_user_code;
+                }
+                set_target_user_code(private_message, private_command.target_user_code);
+                send_or_report(private_message, "Failed to send private message.");
+
+                continue;
             }
 
             print_locked(output_mutex, "Unknown command. Type /help for help.\n", std::cerr);
             continue;
         }
 
-        const message::Message chat_message{"chat", "", "", input_line};
-        if (!message::send_message(socket_handle, chat_message)) {
-            print_locked(output_mutex, "Failed to send chat message.\n", std::cerr);
-            running.store(false);
-            shutdown_socket(socket_handle);
-            shutdown_requested = true;
-            break;
-        }
+        const message::Message chat_message{"chat", "", "", input_line, {}, ""};
+        send_or_report(chat_message, "Failed to send chat message.");
     }
 
     console_input_mode.restore();
+    reconnect_enabled.store(false);
     running.store(false);
-    if (!shutdown_requested) {
-        shutdown_socket(socket_handle);
-    }
+    connection_state.request_stop();
 
     if (receiver_thread.joinable()) {
         receiver_thread.join();
     }
 
-    closesocket(socket_handle);
+    connection_state.close_current();
     WSACleanup();
     return 0;
 }

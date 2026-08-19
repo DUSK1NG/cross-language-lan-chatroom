@@ -217,6 +217,58 @@ func TestHandleConnectionUsesBoundIdentity(t *testing.T) {
 	}
 }
 
+func TestHandleConnectionPrivateChatUsesBoundIdentity(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	firstServer, firstClient := net.Pipe()
+	firstDone := make(chan struct{})
+	go func() {
+		handleConnection(firstServer, hub)
+		close(firstDone)
+	}()
+
+	secondServer, secondClient := net.Pipe()
+	secondDone := make(chan struct{})
+	go func() {
+		handleConnection(secondServer, hub)
+		close(secondDone)
+	}()
+
+	loginAndDrainJoinMessage(t, firstClient, "Alice", "A001")
+	loginAndDrainJoinJoinerView(t, secondClient, "Bob", "Bob01")
+	drainExpectedSystemMessage(t, firstClient, "Bob#Bob01 joined the chat")
+
+	if err := sendMessage(firstClient, Message{
+		Type:           "private_chat",
+		Username:       "Fake",
+		UserCode:       "FAKE01",
+		TargetUserCode: "bOb01",
+		Content:        "只有 Alice 身份才应被转发",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := Message{
+		Type:           "private_chat",
+		Username:       "Alice",
+		UserCode:       "A001",
+		TargetUserCode: "Bob01",
+		Content:        "只有 Alice 身份才应被转发",
+	}
+	if got := receiveClientTestMessage(t, firstClient); !reflect.DeepEqual(got, want) {
+		t.Fatalf("sender private message = %+v, want %+v", got, want)
+	}
+	if got := receiveClientTestMessage(t, secondClient); !reflect.DeepEqual(got, want) {
+		t.Fatalf("target private message = %+v, want %+v", got, want)
+	}
+
+	_ = firstClient.Close()
+	_ = secondClient.Close()
+	waitForHandler(t, firstDone, "first private chat handler")
+	waitForHandler(t, secondDone, "second private chat handler")
+}
+
 func TestHandleConnectionReturnsDuplicateCodeError(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
@@ -306,7 +358,7 @@ func TestHandleConnectionUsersRequest(t *testing.T) {
 	usersResponse := receiveClientTestMessage(t, firstClient)
 	want := Message{
 		Type:  "users_response",
-		Users: []string{"Alex#A001", "Zoe#Z001"},
+		Users: []string{"Alex#A001@lobby", "Zoe#Z001@lobby"},
 	}
 	if !reflect.DeepEqual(usersResponse, want) {
 		t.Fatalf("users response = %+v, want %+v", usersResponse, want)

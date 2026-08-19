@@ -1,182 +1,165 @@
-# Go + C++ LAN Chat
+# Go + C++ 跨语言局域网聊天室
 
-一个面向 Windows 11 的跨语言局域网多人聊天室：Go 负责 TCP Server，C++ 负责 Winsock2 Client。项目使用自定义的应用层 framing 和 JSON 协议，适合学习 TCP 字节流、并发、跨语言协议和异常清理。
+一个适合本科生学习和展示的 Windows 局域网聊天室项目：Go 负责服务端，C++/Qt 6 负责客户端 GUI，使用 TCP、TLS 和自定义长度头 + JSON 协议实现跨语言通信。
 
-## 项目特点
+## 功能
 
-- Go Server：net、goroutine、channel；监听 0.0.0.0:8888。
-- C++ Client：C++17、Winsock2、std::thread、std::atomic。
-- TCP 多客户端群聊，支持 Wi-Fi 与 Ethernet 在同一局域网内互通。
-- 中文消息统一使用 UTF-8。
-- 用户名可以重复；用户通过自定义的 ASCII 字母/数字 user_code 区分身份。
-- user_code 大小写不敏感，服务端在当前进程内保证唯一，并显示为 username#user_code。
-- 支持 /help、/users、/quit。
-- 支持长度头、半包、粘包、非法 JSON、非法 UTF-8、超长帧和异常断线处理。
+- Go TCP/TLS Server，监听 `0.0.0.0:8888`
+- C++20/Qt 6 Windows GUI Client
+- 多客户端群聊和 UTF-8 中文消息
+- 用户名可以重复，用户代码必须唯一且不区分大小写
+- 频道、私聊、在线成员列表
+- 离线消息和历史消息
+- 未读消息数量提示
+- 成员、频道和私聊列表自动刷新
+- Alice 本地 Host 模式：当前电脑直接启动 Go Server
+- Wi-Fi 与以太网设备互通
+- TCP 粘包、拆包、半包和超长消息处理
+- Windows 防火墙和异常断线处理
 
-## Architecture
+## 架构
 
-~~~text
-C++ Client A ─┐
-C++ Client B ─┼── TCP: 4-byte big-endian length + UTF-8 JSON ── Go Server
-C++ Client C ─┘                                      0.0.0.0:8888
-~~~
+```text
+C++/Qt Client A ─┐
+C++/Qt Client B ─┼── TLS/TCP ── Go Server
+C++/Qt Client C ─┘              0.0.0.0:8888
+```
 
-Go Server 使用一个 Hub goroutine 管理客户端 map、注册、注销、广播和定向响应。每个已登录客户端有读取路径和写入路径；Client.Send 只由 Hub 写入和关闭，避免多个 goroutine 同时操作共享 map 或触发 send on closed channel。
+Go 服务端使用 goroutine、channel 和 Hub 模型管理客户端。每个客户端有独立的读取和写入流程，Hub 统一管理注册、注销、房间和广播。
 
-完整架构图见 [docs/architecture.md](docs/architecture.md)。
+## 通信协议
 
-## 目录结构
+每条 TCP 应用层消息使用：
 
-~~~text
-server-go/                 Go TCP Server
-client-cpp/                C++17 Windows Client
-docs/protocol.md           framing 和 JSON 协议
-docs/testing.md             构建、异常测试和局域网测试
-docs/architecture.md       Mermaid 架构图
-docs/github-publishing.md  GitHub 发布清单
-screenshots/                局域网测试截图
-docs/superpowers/           设计、实现计划和任务记录
-~~~
+```text
+4 字节无符号大端长度
++
+UTF-8 JSON Payload
+```
 
-## Protocol 简介
+长度表示 JSON 的字节数，不是字符数。允许的 Payload 大小为 1 到 64 KiB。详细定义见 [docs/protocol.md](docs/protocol.md)。
 
-每条 TCP 应用层消息都是：
+## 目录
 
-~~~text
-4-byte unsigned length header, big-endian
-        +
-UTF-8 JSON payload
-~~~
-
-长度表示 JSON payload 的字节数，不是字符数。payload 必须满足 1 <= length <= 64 KiB。接收端先读取完整 4 字节 header，再读取完整 payload；因此 TCP 的粘包和拆包不会改变消息边界。
-
-支持的主要消息类型包括：login、login_ok、login_error、chat、system、users_request、users_response、quit、error。完整字段和异常行为见 [docs/protocol.md](docs/protocol.md)。
+```text
+server-go/                 Go 服务端
+client-cpp/                C++ Socket 客户端和 Qt GUI
+client-cpp/gui/            Qt 6 GUI 工程
+docs/protocol.md           跨语言通信协议
+docs/architecture.md       架构图
+docs/testing.md             测试说明
+screenshots/               项目截图
+```
 
 ## Windows 环境
 
-推荐环境：
-
 - Windows 11
-- Go 1.20 或更高版本
-- MinGW-w64 g++，支持 C++17
-- Windows Terminal 或 PowerShell，并使用 UTF-8 code page
-- C++ 依赖：client-cpp/third_party/json.hpp（nlohmann/json 单头文件）
+- Go 1.22 或更高版本
+- Qt 6.11.x MinGW 64-bit
+- MinGW-w64 或 Visual Studio
+- CMake 和 Ninja
+- OpenSSL 3.x 运行库
 
-## Build Server
+## 构建 Go Server
 
-PowerShell：
-
-~~~powershell
+```powershell
 cd server-go
-$env:Path = 'C:\Users\jking1\go-sdk\go\bin;' + $env:Path
-$env:GO111MODULE = 'off'
+go test ./...
 go build -o chat-server.exe .
-~~~
+```
 
-如果 Go 已经在系统 PATH 中，也可以直接运行：
+启动 TLS Server：
 
-~~~powershell
-go build -o chat-server.exe .
-~~~
+```powershell
+.\chat-server.exe -cert .\certs\server-lan.crt -key .\certs\server-lan.key -db .\chat.db
+```
 
-## Build Client
+## 构建 Qt GUI
 
-在 client-cpp 目录执行：
+```powershell
+cd client-cpp\gui
+cmake --build build --config Release --parallel 2
+```
 
-~~~powershell
-g++ -std=c++17 -Wall -Wextra -pedantic src\main.cpp src\message.cpp src\protocol.cpp -Iinclude -Ithird_party -o chat-client.exe -municode -lws2_32
-~~~
+生成文件：
 
-使用 Visual Studio Developer PowerShell 时，可使用等价的 MSVC 构建方式：
+```text
+client-cpp\gui\build\lan-chat-gui.exe
+```
 
-~~~powershell
-cl /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE src\main.cpp src\message.cpp src\protocol.cpp /Iinclude /Ithird_party ws2_32.lib /Fe:chat-client.exe
-~~~
+## 运行 GUI
 
-## Run：localhost
+Bob 作为客户端运行：
 
-先启动 Server：
+```powershell
+cd C:\Users\jking1\Desktop\LANChatClient_Alice_Bob_v8
+.\lan-chat-gui.exe
+```
 
-~~~powershell
-cd server-go
-.\chat-server.exe
-~~~
+Alice 作为本地 Host 运行：
 
-另开 PowerShell 启动 Client：
+```powershell
+cd C:\Users\jking1\Desktop\LANChatHost_Alice_v8\client-cpp\gui\build
+.\lan-chat-gui.exe
+```
 
-~~~powershell
-cd client-cpp
-.\chat-client.exe 127.0.0.1 8888 Alice ALICE001
-~~~
+Alice Host 页面使用：
 
-启动第二个客户端时必须使用不同的 user_code，例如：
+```text
+用户名：Alice
+用户代码：A001
+Go Server：server-go\chat-server.exe
+证书：certs\server-lan.crt
+私钥：certs\server-lan.key
+```
 
-~~~powershell
-.\chat-client.exe 127.0.0.1 8888 Bob BOB001
-~~~
+Bob 连接时填写 Alice 电脑的局域网 IPv4 地址、端口 `8888` 和 CA 文件 `certs\server-lan.crt`。
 
-登录后可以输入：
+## 局域网测试
 
-~~~text
-/help
-/users
-你好，这是 Go 和 C++ 的跨语言聊天。
-/quit
-~~~
+在 Alice 电脑查看 IPv4：
 
-## Run：LAN
+```powershell
+ipconfig
+```
 
-服务端必须监听所有网卡，而不是只监听 127.0.0.1。当前 Server 使用：
+在 Bob 电脑测试 TCP 端口：
 
-~~~text
-0.0.0.0:8888
-~~~
+```powershell
+Test-NetConnection 192.168.1.100 -Port 8888
+```
 
-在服务端电脑执行 ipconfig，找到 Ethernet 或 Wi-Fi 网卡的 IPv4，例如 192.168.1.100。客户端使用该地址：
+如果失败，检查 Windows Private Network 防火墙入站规则、路由器 AP Isolation、VLAN 和设备是否处于同一网段。不要关闭整个 Windows Defender Firewall。
 
-~~~powershell
-.\chat-client.exe 192.168.1.100 8888 Alice ALICE001
-~~~
+## 已完成验收
 
-Wi-Fi 和 Ethernet 可以互通，因为 TCP 建立在 IP 之上；只要两台设备路由可达即可。若连接失败，检查 Windows Private Network 防火墙、TCP 8888 入站规则、路由器 AP Isolation / Client Isolation、VLAN 和设备是否在同一网段。不要为了测试而关闭整个 Windows Defender Firewall。
-
-详细测试流程见 [docs/testing.md](docs/testing.md)。
-
-实际 Stage 9 局域网验证已通过：Ethernet 服务端 `192.168.0.3` 与 Wi-Fi 客户端 `192.168.0.108` 成功建立 TCP 连接，Alice/Bob 完成多人中文聊天和断线清理测试。
-
-## Screenshots
-
-测试截图说明见 [screenshots/README.md](screenshots/README.md)，建议展示 Server 监听、多个客户端中文聊天、`/users` 和 Ethernet/Wi-Fi 拓扑。
-
-## Stage 8 稳定性行为
-
-- 长度头不足 4 字节、payload 截断、长度为 0 或超过 64 KiB：拒绝当前 frame。
-- 非法 UTF-8、malformed JSON、缺少 type、字段类型错误：拒绝当前消息；协议错误会终止当前连接。
-- 客户端 EOF、connection reset、recv == 0、SOCKET_ERROR：清理当前连接，不影响 Server 和其他客户端。
-- Server 突然关闭，或 C++ Client 在登录成功后的接收线程中遇到 frame/JSON 接收解析失败：C++ Client 统一显示 Connection to server lost.，设置 running = false，shutdown socket，等待接收线程 join，最后关闭 socket。登录阶段接收失败会显示对应的登录错误。
-- Go Server 的 Send channel 由 Hub 统一写入和关闭；异常客户端不会使整个 Server 崩溃。
-- C++ 不执行远程消息中的命令，不使用 system()、shell 或远程代码执行。
+- localhost 双向通信
+- 三个客户端群聊协议测试
+- 中文消息测试
+- 快速连续发送测试
+- 重复用户代码测试
+- 客户端异常退出和重新连接测试
+- Ethernet Server + Wi-Fi Client 局域网测试
+- Alice Host + Bob Client GUI 测试
+- 频道、私聊、未读提示和自动刷新测试
 
 ## 当前限制
 
-第一版明确不包含：
-
-- 自动重连；
-- TLS；
-- 账号密码和持久化数据库；
-- 私聊、聊天室房间、文件/图片/音视频传输；
-- GUI。
-
-Stage 8 的 C++ 连接失败路径、协议防御代码审查和严格编译路径已经覆盖；当前没有独立的 C++ 非法帧自动化测试工具。C++ 交互式控制台“自然输入退出”的完整自动化证明仍未完成，不能将其标记为自动化通过。相关项目可按 [docs/testing.md](docs/testing.md) 手工或使用辅助工具复核。
+- 主要面向 Windows
+- 当前没有公网 NAT 穿透
+- 没有文件、图片、语音和视频传输
+- 管理员功能仍需继续完善
+- 证书为局域网学习项目使用的自签名证书
 
 ## 后续方向
 
-私聊、聊天室房间、Qt GUI、SQLite 聊天记录、TLS，以及 Android/Web 客户端。
+- 完善管理员菜单、禁言和踢出功能
+- 房间权限和密码
+- Qt 设置页和主题完善
+- SQLite 聊天记录管理
+- 正式 CA 或生产环境证书
+- Linux、Android 或 Web 客户端
 
-## Resume 项目描述
+## 简历描述
 
-独立开发基于 Go 与 C++ 的跨语言局域网多人聊天室，使用 TCP Socket 和 4-byte big-endian length + UTF-8 JSON 应用层协议处理粘包与拆包；Go Server 采用 goroutine/channel 管理并发客户端和广播，C++ Client 基于 Winsock2 与 std::thread 实现异步收发，并完成协议异常、断线清理和局域网通信设计。
-
-## GitHub 发布
-
-当前本地仓库尚未配置 `origin`，发布步骤见 [docs/github-publishing.md](docs/github-publishing.md)；配置远程仓库前请确认仓库名称和可见性。
+独立开发基于 Go 与 C++ 的跨语言局域网多人聊天室，使用 TLS/TCP Socket 和 4 字节大端长度头 + UTF-8 JSON 协议解决跨语言通信与 TCP 粘包拆包问题；Go 服务端采用 goroutine/channel 管理并发客户端、房间和消息广播，C++/Qt 客户端基于 OpenSSL、Winsock2 与 std::thread 实现异步收发，并完成 Wi-Fi 与以太网跨设备通信测试。

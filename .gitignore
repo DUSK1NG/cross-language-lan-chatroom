@@ -1,6 +1,25 @@
 # Local Go build cache
 .go-build-cache/
+server-go/.gocache*/
 
 # Stage build outputs
 server-go/chat-server.exe
 client-cpp/chat-client.exe
+client-cpp/protocol-tests.exe
+client-cpp/*-direct.exe
+client-cpp/build/
+client-cpp/gui/build/
+client-cpp/build-direct/
+
+# Generic local verification outputs
+.cache/
+*.test
+coverage.out
+server-go/chat.db
+server-go/*.log
+server-go/certs/
+*.key
+*.pem
+
+# Local implementation worktrees
+.worktrees/

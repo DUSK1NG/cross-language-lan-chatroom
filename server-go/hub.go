@@ -8,10 +8,14 @@ import (
 	"sync"
 )
 
-const clientSendBufferSize = 16
+// 历史消息、上线提示和用户列表可能在登录后连续到达，缓冲区不能过小，
+// 否则正常的短时消息突发会被误判为慢客户端并强制断开。
+const clientSendBufferSize = 256
 
 var ErrUserCodeAlreadyUsed = errors.New("user code already exists")
 var errRegisterRequestMissingIdentity = errors.New("register request requires user code identity")
+
+const defaultRoomName = "lobby"
 
 type RegisterRequest struct {
 	Client *Client
@@ -23,12 +27,40 @@ type OutboundMessage struct {
 	Message Message
 }
 
+// PrivateMessageRequest 是客户端提交给 Hub 的私聊请求。
+// Sender 由当前 TCP 连接绑定，不能由客户端消息中的身份字段替代。
+type PrivateMessageRequest struct {
+	Sender     *Client
+	TargetCode string
+	Content    string
+}
+
+type RoomRequest struct {
+	Client *Client
+	Room   string
+}
+
+type HistoryRequest struct {
+	Client *Client
+	Limit  int
+}
+
+type AdminActionRequest struct {
+	Sender     *Client
+	Action     string
+	TargetCode string
+}
+
 // Client 表示一个已经完成登录的客户端连接。
 type Client struct {
 	Conn           net.Conn
 	Username       string
 	UserCode       string
 	NormalizedCode string
+	AccountBacked  bool
+	IsAdmin        bool
+	Muted          bool
+	Room           string
 	Send           chan Message
 
 	closeOnce     sync.Once
@@ -41,6 +73,7 @@ func newClient(conn net.Conn, username, userCode, normalizedCode string) *Client
 		Username:       username,
 		UserCode:       userCode,
 		NormalizedCode: normalizedCode,
+		Room:           defaultRoomName,
 		Send:           make(chan Message, clientSendBufferSize),
 	}
 }
@@ -68,26 +101,43 @@ func (c *Client) closeSend() {
 // Hub 是聊天室中客户端集合和广播消息的唯一管理者。
 // Clients、ActiveCodes 和 UsedCodes 只能由 Run goroutine 访问。
 type Hub struct {
-	Clients      map[*Client]bool
-	Register     chan RegisterRequest
-	Unregister   chan *Client
-	Broadcast    chan Message
-	Outbound     chan OutboundMessage
-	RequestUsers chan *Client
-	ActiveCodes  map[string]*Client
-	UsedCodes    map[string]struct{}
+	Clients        map[*Client]bool
+	Register       chan RegisterRequest
+	Unregister     chan *Client
+	Broadcast      chan Message
+	Outbound       chan OutboundMessage
+	RequestUsers   chan *Client
+	Private        chan PrivateMessageRequest
+	RoomJoin       chan RoomRequest
+	RoomLeave      chan *Client
+	RequestRooms   chan *Client
+	RequestHistory chan HistoryRequest
+	AdminAction    chan AdminActionRequest
+	ActiveCodes    map[string]*Client
+	UsedCodes      map[string]struct{}
+	Rooms          map[string]map[*Client]bool
+	OfflineStore   *AuthStore
+	HistoryStore   *AuthStore
+	AdminCode      string
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		Clients:      make(map[*Client]bool),
-		Register:     make(chan RegisterRequest),
-		Unregister:   make(chan *Client),
-		Broadcast:    make(chan Message),
-		Outbound:     make(chan OutboundMessage),
-		RequestUsers: make(chan *Client),
-		ActiveCodes:  make(map[string]*Client),
-		UsedCodes:    make(map[string]struct{}),
+		Clients:        make(map[*Client]bool),
+		Register:       make(chan RegisterRequest),
+		Unregister:     make(chan *Client),
+		Broadcast:      make(chan Message),
+		Outbound:       make(chan OutboundMessage),
+		RequestUsers:   make(chan *Client),
+		Private:        make(chan PrivateMessageRequest),
+		RoomJoin:       make(chan RoomRequest),
+		RoomLeave:      make(chan *Client),
+		RequestRooms:   make(chan *Client),
+		RequestHistory: make(chan HistoryRequest),
+		AdminAction:    make(chan AdminActionRequest),
+		ActiveCodes:    make(map[string]*Client),
+		UsedCodes:      make(map[string]struct{}),
+		Rooms:          make(map[string]map[*Client]bool),
 	}
 }
 
@@ -109,6 +159,24 @@ func (h *Hub) Run() {
 
 		case client := <-h.RequestUsers:
 			h.handleRequestUsers(client)
+
+		case request := <-h.Private:
+			h.handlePrivateMessage(request)
+
+		case request := <-h.RoomJoin:
+			h.handleRoomJoin(request)
+
+		case client := <-h.RoomLeave:
+			h.handleRoomLeave(client)
+
+		case client := <-h.RequestRooms:
+			h.handleRequestRooms(client)
+
+		case request := <-h.RequestHistory:
+			h.handleRequestHistory(request)
+
+		case request := <-h.AdminAction:
+			h.handleAdminAction(request)
 		}
 	}
 }
@@ -124,18 +192,71 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 		h.respondRegister(request.Result, errRegisterRequestMissingIdentity)
 		return
 	}
+	if client.Room == "" {
+		client.Room = defaultRoomName
+	}
+	if err := validateRoomName(client.Room); err != nil {
+		h.respondRegister(request.Result, err)
+		return
+	}
 
-	if _, used := h.UsedCodes[client.NormalizedCode]; used {
+	if _, active := h.ActiveCodes[client.NormalizedCode]; active {
 		h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
 		return
+	}
+	if !client.AccountBacked {
+		if _, used := h.UsedCodes[client.NormalizedCode]; used {
+			h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
+			return
+		}
 	}
 
 	h.UsedCodes[client.NormalizedCode] = struct{}{}
 	h.ActiveCodes[client.NormalizedCode] = client
+	if h.AdminCode != "" && client.NormalizedCode == h.AdminCode {
+		client.IsAdmin = true
+	}
 	h.Clients[client] = true
-	h.broadcastSystemMessage(presenceMessage(client, "joined the chat"))
+	h.addToRoom(client, client.Room)
+	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined the chat"))
 	log.Printf("client registered: %s", client.Username)
 	h.respondRegister(request.Result, nil)
+}
+
+func (h *Hub) handleAdminAction(request AdminActionRequest) {
+	sender := request.Sender
+	if sender == nil || !sender.IsAdmin {
+		if sender != nil {
+			h.deliverError(sender, "Administrator permission required")
+		}
+		return
+	}
+	targetCode, err := normalizeUserCode(request.TargetCode)
+	if err != nil {
+		h.deliverError(sender, "Invalid target user code")
+		return
+	}
+	target, ok := h.ActiveCodes[targetCode]
+	if !ok || target == sender {
+		h.deliverError(sender, "Target user not found")
+		return
+	}
+	switch request.Action {
+	case "kick":
+		h.deliver(target, Message{Type: "system", Content: "You were kicked by the administrator"})
+		h.unregisterClient(target, true)
+		h.deliver(sender, Message{Type: "system", Content: target.Username + "#" + target.UserCode + " was kicked"})
+	case "mute":
+		target.Muted = !target.Muted
+		status := "muted"
+		if !target.Muted {
+			status = "unmuted"
+		}
+		h.deliver(target, Message{Type: "system", Content: "You were " + status + " by the administrator"})
+		h.deliver(sender, Message{Type: "system", Content: target.Username + "#" + target.UserCode + " is " + status})
+	default:
+		h.deliverError(sender, "Unsupported administrator action")
+	}
 }
 
 func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {
@@ -148,7 +269,7 @@ func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {
 
 	h.removeClient(client)
 	if broadcastLeave {
-		h.broadcastSystemMessage(presenceMessage(client, "left the chat"))
+		h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "left the chat"))
 	}
 	client.closeSend()
 	client.closeConnection()
@@ -156,9 +277,48 @@ func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {
 }
 
 func (h *Hub) broadcastMessage(message Message) {
-	for client := range h.Clients {
+	room := ""
+	if message.UserCode != "" {
+		if normalized, err := normalizeUserCode(message.UserCode); err == nil {
+			if sender, ok := h.ActiveCodes[normalized]; ok {
+				room = sender.Room
+			}
+		}
+	}
+	if message.Type == "chat" && h.HistoryStore != nil {
+		if err := h.HistoryStore.SaveHistoryMessage(room, message); err != nil {
+			log.Printf("failed to save chat history: %v", err)
+		}
+	}
+	for client := range h.roomClients(room) {
 		h.deliver(client, message)
 	}
+}
+
+func (h *Hub) handleRequestHistory(request HistoryRequest) {
+	client := request.Client
+	if client == nil || h.HistoryStore == nil {
+		return
+	}
+	if _, ok := h.Clients[client]; !ok {
+		return
+	}
+	messages, err := h.HistoryStore.ListHistory(client.Room, request.Limit)
+	if err != nil {
+		h.deliverError(client, "Failed to load message history")
+		return
+	}
+	for _, message := range messages {
+		h.deliver(client, message)
+	}
+	h.deliver(client, Message{Type: "history_end", Content: "History loaded", Room: client.Room})
+}
+
+func (h *Hub) roomClients(room string) map[*Client]bool {
+	if room == "" {
+		return h.Clients
+	}
+	return h.Rooms[room]
 }
 
 func (h *Hub) deliver(client *Client, message Message) bool {
@@ -186,14 +346,22 @@ func (h *Hub) removeSlowClient(client *Client) {
 }
 
 func (h *Hub) removeClient(client *Client) {
+	if client == nil {
+		return
+	}
 	delete(h.Clients, client)
+	h.removeFromRoom(client)
 
-	if client == nil || client.NormalizedCode == "" {
+	if client.NormalizedCode == "" {
 		return
 	}
 
 	if activeClient, ok := h.ActiveCodes[client.NormalizedCode]; ok && activeClient == client {
 		delete(h.ActiveCodes, client.NormalizedCode)
+	}
+	// 临时用户代码只在在线期间占用；账号用户的代码由账号数据库持久管理。
+	if !client.AccountBacked {
+		delete(h.UsedCodes, client.NormalizedCode)
 	}
 }
 
@@ -210,6 +378,15 @@ func (h *Hub) broadcastSystemMessage(content string) {
 	h.broadcastMessage(message)
 }
 
+func (h *Hub) broadcastSystemMessageToRoom(room, content string) {
+	if content == "" {
+		return
+	}
+	for client := range h.Rooms[room] {
+		h.deliver(client, Message{Type: "system", Room: room, Content: content})
+	}
+}
+
 func (h *Hub) handleRequestUsers(requester *Client) {
 	if requester == nil {
 		return
@@ -220,13 +397,158 @@ func (h *Hub) handleRequestUsers(requester *Client) {
 
 	users := make([]string, 0, len(h.Clients))
 	for client := range h.Clients {
-		users = append(users, client.Username+"#"+client.UserCode)
+		users = append(users, client.Username+"#"+client.UserCode+"@"+client.Room)
 	}
 	sort.Strings(users)
 
 	h.deliver(requester, Message{
 		Type:  "users_response",
 		Users: users,
+	})
+}
+
+func (h *Hub) handleRequestRooms(requester *Client) {
+	if requester == nil {
+		return
+	}
+	if _, ok := h.Clients[requester]; !ok {
+		return
+	}
+	rooms := make([]string, 0, len(h.Rooms))
+	for room := range h.Rooms {
+		rooms = append(rooms, room)
+	}
+	sort.Strings(rooms)
+	h.deliver(requester, Message{Type: "rooms_response", Rooms: rooms, Room: requester.Room})
+}
+
+func (h *Hub) handleRoomJoin(request RoomRequest) {
+	client := request.Client
+	if client == nil {
+		return
+	}
+	if _, ok := h.Clients[client]; !ok {
+		return
+	}
+	if err := validateRoomName(request.Room); err != nil {
+		h.deliverError(client, "Invalid room name")
+		return
+	}
+	if request.Room == client.Room {
+		h.deliver(client, Message{Type: "system", Content: "Already in room " + client.Room})
+		return
+	}
+	oldRoom := client.Room
+	h.broadcastSystemMessageToRoom(oldRoom, presenceMessage(client, "left room "+oldRoom))
+	h.removeFromRoom(client)
+	client.Room = request.Room
+	h.addToRoom(client, client.Room)
+	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined room "+client.Room))
+}
+
+func (h *Hub) handleRoomLeave(client *Client) {
+	if client == nil {
+		return
+	}
+	if _, ok := h.Clients[client]; !ok {
+		return
+	}
+	if client.Room == defaultRoomName {
+		h.deliver(client, Message{Type: "system", Content: "Already in room " + defaultRoomName})
+		return
+	}
+	oldRoom := client.Room
+	h.broadcastSystemMessageToRoom(oldRoom, presenceMessage(client, "left room "+oldRoom))
+	h.removeFromRoom(client)
+	client.Room = defaultRoomName
+	h.addToRoom(client, client.Room)
+	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined room "+defaultRoomName))
+}
+
+func (h *Hub) addToRoom(client *Client, room string) {
+	if h.Rooms[room] == nil {
+		h.Rooms[room] = make(map[*Client]bool)
+	}
+	h.Rooms[room][client] = true
+}
+
+func (h *Hub) removeFromRoom(client *Client) {
+	if client == nil || client.Room == "" {
+		return
+	}
+	if members, ok := h.Rooms[client.Room]; ok {
+		delete(members, client)
+		if len(members) == 0 && client.Room != defaultRoomName {
+			delete(h.Rooms, client.Room)
+		}
+	}
+}
+
+func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
+	sender := request.Sender
+	if sender == nil {
+		return
+	}
+	if _, ok := h.Clients[sender]; !ok {
+		return
+	}
+
+	targetCode, err := normalizeUserCode(request.TargetCode)
+	if err != nil {
+		h.deliverError(sender, "Invalid target user code")
+		return
+	}
+	if err := validateTextContent("private chat", request.Content); err != nil {
+		h.deliverError(sender, "Invalid private chat content")
+		return
+	}
+
+	target, ok := h.ActiveCodes[targetCode]
+	if !ok {
+		if h.OfflineStore == nil {
+			h.deliverError(sender, "Target user not found")
+			return
+		}
+		exists, err := h.OfflineStore.HasUserCode(targetCode)
+		if err != nil || !exists {
+			h.deliverError(sender, "Target user not found")
+			return
+		}
+		message := Message{Type: "private_chat", Username: sender.Username,
+			UserCode: sender.UserCode, TargetUserCode: request.TargetCode, Content: request.Content}
+		if err := h.OfflineStore.SaveOfflineMessage(targetCode, message); err != nil {
+			h.deliverError(sender, "Failed to save offline message")
+			return
+		}
+		h.deliver(sender, message)
+		h.deliver(sender, Message{Type: "system", Content: "Private message saved for offline user"})
+		return
+	}
+	if target == sender {
+		h.deliverError(sender, "Cannot send private message to yourself")
+		return
+	}
+
+	message := Message{
+		Type:           "private_chat",
+		Username:       sender.Username,
+		UserCode:       sender.UserCode,
+		TargetUserCode: target.UserCode,
+		Content:        request.Content,
+	}
+	if !h.deliver(sender, message) {
+		return
+	}
+	h.deliver(target, message)
+}
+
+func (h *Hub) deliverError(client *Client, content string) {
+	if content == "" {
+		return
+	}
+	h.deliver(client, Message{
+		Type:    "error",
+		Content: content,
 	})
 }
 

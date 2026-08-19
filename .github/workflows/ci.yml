@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+
+      - name: Prepare MinGW toolchain
+        id: msys2
+        uses: msys2/setup-msys2@v2.32.0
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-toolchain mingw-w64-x86_64-openssl
+
+      - name: Add prepared MinGW to PATH
+        shell: pwsh
+        run: |
+          $mingwBin = Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'mingw64\bin'
+          if (-not (Test-Path -LiteralPath $mingwBin)) {
+            throw "Prepared MinGW directory was not found: $mingwBin"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $mingwBin
+
+      - name: Verify CMake and MinGW
+        shell: pwsh
+        run: |
+          cmake --version
+          mingw32-make --version
+
+      - name: Test Go server
+        shell: pwsh
+        run: cd server-go && go test ./...
+
+      - name: Test Go server with race detector
+        shell: pwsh
+        run: cd server-go && go test -race ./...
+
+      - name: Vet Go server
+        shell: pwsh
+        run: cd server-go && go vet ./...
+
+      - name: Build Go server
+        shell: pwsh
+        run: cd server-go && go build -o chat-server.exe .
+
+      - name: Configure C++ client
+        shell: pwsh
+        run: |
+          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          $opensslRoot = Join-Path $msysRoot 'mingw64'
+          $opensslInclude = Join-Path $opensslRoot 'include'
+          $opensslSsl = Join-Path $opensslRoot 'lib\libssl.dll.a'
+          $opensslCrypto = Join-Path $opensslRoot 'lib\libcrypto.dll.a'
+          if (-not (Test-Path -LiteralPath $opensslInclude)) {
+            throw "OpenSSL include directory was not found: $opensslInclude"
+          }
+          if (-not (Test-Path -LiteralPath $opensslSsl)) {
+            throw "OpenSSL SSL library was not found: $opensslSsl"
+          }
+          if (-not (Test-Path -LiteralPath $opensslCrypto)) {
+            throw "OpenSSL Crypto library was not found: $opensslCrypto"
+          }
+          cmake -S client-cpp -B client-cpp/build -G "MinGW Makefiles" `
+            "-DOPENSSL_ROOT_DIR=$opensslRoot" `
+            "-DOPENSSL_INCLUDE_DIR=$opensslInclude" `
+            "-DOPENSSL_SSL_LIBRARY=$opensslSsl" `
+            "-DOPENSSL_CRYPTO_LIBRARY=$opensslCrypto"
+
+      - name: Build C++ client
+        shell: pwsh
+        run: cmake --build client-cpp/build --config Release
+
+      - name: Test C++ client
+        shell: pwsh
+        run: ctest --test-dir client-cpp/build --output-on-failure
+
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+
+      - name: Test Go server
+        run: cd server-go && go test ./...
+
+      - name: Test Go server with race detector
+        run: cd server-go && go test -race ./...
+
+      - name: Vet Go server
+        run: cd server-go && go vet ./...
+
+      - name: Build Go server
+        run: cd server-go && go build -o chat-server .
