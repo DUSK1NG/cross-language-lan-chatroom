@@ -18,8 +18,7 @@ struct Message {
         std::string target_user_code_value = {},
         std::string room_value = {},
         std::vector<std::string> rooms_value = {},
-        std::string password_value = {},
-        int history_limit_value = 0)
+        std::string password_value = {})
         : type(std::move(type_value)),
           username(std::move(username_value)),
           user_code(std::move(user_code_value)),
@@ -28,8 +27,7 @@ struct Message {
           target_user_code(std::move(target_user_code_value)),
           room(std::move(room_value)),
           rooms(std::move(rooms_value)),
-          password(std::move(password_value)),
-          history_limit(history_limit_value) {}
+          password(std::move(password_value)) {}
 
     std::string type;
     std::string username;
@@ -40,7 +38,6 @@ struct Message {
     std::string room;
     std::vector<std::string> rooms{};
     std::string password;
-    int history_limit = 0;
     bool is_admin = false;
 };
 

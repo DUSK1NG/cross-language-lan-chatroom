@@ -113,7 +113,7 @@ void GuiConnectionWorker::sendChatToRoom(const QString& content, const QString& 
         return;
     }
     const message::Message message{
-        "chat", "", "", content.trimmed().toStdString(), {}, "", room.toStdString(), {}, "", 0};
+        "chat", "", "", content.trimmed().toStdString(), {}, "", room.toStdString(), {}, ""};
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
@@ -125,7 +125,7 @@ void GuiConnectionWorker::sendPrivate(const QString& content, const QString& tar
     }
     const message::Message message{
         "private_chat", "", "", content.trimmed().toStdString(), {},
-        targetUserCode.toStdString(), "", {}, "", 0};
+        targetUserCode.toStdString(), "", {}, ""};
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
@@ -136,7 +136,7 @@ void GuiConnectionWorker::joinRoom(const QString& room) {
         return;
     }
     const message::Message message{"room_join", "", "", "", {}, "",
-                                  room.trimmed().toStdString(), {}, "", 0};
+                                  room.trimmed().toStdString(), {}, ""};
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
@@ -146,7 +146,7 @@ void GuiConnectionWorker::requestUsers() {
     if (!connection_ || !connection_->is_ready()) {
         return;
     }
-    const message::Message message{"users_request", "", "", "", {}, "", "", {}, "", 0};
+    const message::Message message{"users_request", "", "", "", {}, "", "", {}, ""};
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
@@ -154,7 +154,7 @@ void GuiConnectionWorker::requestUsers() {
 
 void GuiConnectionWorker::requestRooms() {
     if (!connection_ || !connection_->is_ready()) return;
-    const message::Message message{"rooms_request", "", "", "", {}, "", "", {}, "", 0};
+    const message::Message message{"rooms_request", "", "", "", {}, "", "", {}, ""};
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
@@ -167,7 +167,7 @@ void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& 
     }
     const message::Message message{
         "admin_action", "", "", action.trimmed().toStdString(), {},
-        targetUserCode.trimmed().toStdString(), "", {}, "", 0};
+        targetUserCode.trimmed().toStdString(), "", {}, ""};
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }

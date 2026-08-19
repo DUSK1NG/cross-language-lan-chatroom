@@ -434,7 +434,6 @@ void print_help(std::mutex& output_mutex) {
         "/help  Show this help\n"
         "/users Show online users\n"
         "/rooms Show available rooms\n"
-        "/history [count] Show recent room messages\n"
         "/kick Name#Code  Kick a user (administrator)\n"
         "/mute Name#Code  Toggle mute (administrator)\n"
         "/join room_name  Join or create a room\n"
@@ -536,17 +535,6 @@ void receive_loop(
             } else {
                 print_locked(output_mutex, "[System] " + incoming_message.content + "\n");
             }
-            continue;
-        }
-
-        if (incoming_message.type == "history_message") {
-            print_locked(output_mutex, "[History] " + format_identity(incoming_message) + ": " +
-                incoming_message.content + "\n");
-            continue;
-        }
-
-        if (incoming_message.type == "history_end") {
-            print_locked(output_mutex, "[History] " + incoming_message.content + "\n");
             continue;
         }
 
@@ -770,26 +758,6 @@ int wmain(int argc, wchar_t* argv[]) {
 
         if (input_line == "/help") {
             print_help(output_mutex);
-            continue;
-        }
-
-        if (input_line == "/history" || input_line.rfind("/history ", 0) == 0) {
-            int limit = 20;
-            if (input_line.size() > 9) {
-                try {
-                    std::size_t consumed = 0;
-                    limit = std::stoi(input_line.substr(9), &consumed);
-                    if (consumed != input_line.size() - 9 || limit < 1 || limit > 100) {
-                        throw std::invalid_argument("invalid history limit");
-                    }
-                } catch (const std::exception&) {
-                    print_locked(output_mutex, "Usage: /history [1-100]\n", std::cerr);
-                    continue;
-                }
-            }
-            message::Message history_request{
-                "history_request", "", "", "", {}, "", "", {}, "", limit};
-            send_or_report(history_request, "Failed to request message history.");
             continue;
         }
 
