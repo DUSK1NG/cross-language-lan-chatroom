@@ -1,5 +1,9 @@
 #include "chat_model.hpp"
 
+namespace {
+constexpr int kMaxRowsPerModel = 1000;
+}
+
 ChatListModel::ChatListModel(QStringList roleNames, QObject* parent)
     : QAbstractListModel(parent) {
     int role = Qt::UserRole + 1;
@@ -42,6 +46,12 @@ void ChatListModel::append(const QVariantMap& row) {
     beginInsertRows({}, newRow, newRow);
     rows_.append(row);
     endInsertRows();
+
+    if (rows_.size() > kMaxRowsPerModel) {
+        beginRemoveRows({}, 0, 0);
+        rows_.removeFirst();
+        endRemoveRows();
+    }
 }
 
 int ChatListModel::findRow(const QByteArray& roleName, const QVariant& value) const {

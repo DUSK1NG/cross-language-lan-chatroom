@@ -9,18 +9,20 @@ RowLayout {
     property bool online: true
     property bool admin: false
     signal userSelected()
-    height: 26
-    spacing: 4
+    height: 34
+    spacing: 7
+    scale: mouse.pressed ? 0.985 : 1.0
+    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
     Label {
         text: online ? "●" : "○"
         color: online ? Theme.success : Theme.secondaryText
-        font.pixelSize: 9
+        font.pixelSize: 10
     }
     ColumnLayout {
         Layout.fillWidth: true
         spacing: 0
-        Label { text: displayName; color: Theme.primaryText; font.pixelSize: 11 }
+        Label { text: displayName; color: Theme.primaryText; font.pixelSize: 12; font.weight: Font.Medium }
         Label { text: "#" + userCode; color: Theme.secondaryText; font.pixelSize: 9 }
     }
     Label {

@@ -1,9 +1,10 @@
 import QtQuick
 import QtQuick.Controls
+import LanChatGui
 
 Rectangle {
     id: root
-    color: "#20232b"
+    color: Theme.surface
     signal closeRequested()
 
     Row {

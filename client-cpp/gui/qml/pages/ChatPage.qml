@@ -57,14 +57,14 @@ Item {
         spacing: 0
 
         Rectangle {
-            Layout.preferredWidth: 250
+            Layout.preferredWidth: 264
             Layout.fillHeight: true
             color: Theme.surface
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 14
-                spacing: 10
+                anchors.margins: 16
+                spacing: 12
 
                 Label { text: "LAN CHAT"; color: Theme.primaryText; font.pixelSize: 16; font.weight: Font.DemiBold }
                 Button { Layout.fillWidth: true; text: "新建频道"; onClicked: createRoomDialog.open() }
@@ -123,8 +123,8 @@ Item {
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 18
-                spacing: 12
+                anchors.margins: 22
+                spacing: 14
 
                 ChatHeader {
                     Layout.fillWidth: true
@@ -135,7 +135,7 @@ Item {
                               : (chatController.connected ? "私聊 · Go TLS Server" : "私聊 · Mock 数据")
                 }
 
-                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
+                Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderSoft }
 
                 ListView {
                     id: messageList
@@ -143,6 +143,8 @@ Item {
                     Layout.fillHeight: true
                     spacing: 8
                     clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    cacheBuffer: 640
                     model: root.messageModel
                     delegate: MessageDelegate {
                         width: messageList.width
@@ -153,6 +155,7 @@ Item {
                         selfMessage: model.selfMessage
                         systemMessage: model.systemMessage
                     }
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 }
 
                 MessageComposer {
@@ -164,14 +167,14 @@ Item {
         }
 
         Rectangle {
-            Layout.preferredWidth: 230
+            Layout.preferredWidth: 248
             Layout.fillHeight: true
             color: Theme.surface
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 10
-                spacing: 5
+                anchors.margins: 14
+                spacing: 8
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
@@ -190,7 +193,9 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    spacing: 2
+                    spacing: 3
+                    boundsBehavior: Flickable.StopAtBounds
+                    cacheBuffer: 320
                     model: root.memberModel
                     delegate: MemberItem {
                         Layout.fillWidth: true
@@ -200,6 +205,7 @@ Item {
                         admin: model.admin
                         onUserSelected: root.showProfile(displayName, userCode, admin)
                     }
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 }
             }
         }
