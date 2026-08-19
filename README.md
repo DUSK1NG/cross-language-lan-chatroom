@@ -9,7 +9,7 @@
 - 多客户端群聊和 UTF-8 中文消息
 - 用户名可以重复，用户代码必须唯一且不区分大小写
 - 频道、私聊、在线成员列表
-- 离线消息和历史消息
+- 离线消息
 - 未读消息数量提示
 - 成员、频道和私聊列表自动刷新
 - Alice 本地 Host 模式：当前电脑直接启动 Go Server
@@ -142,6 +142,22 @@ Test-NetConnection 192.168.1.100 -Port 8888
 - Ethernet Server + Wi-Fi Client 局域网测试
 - Alice Host + Bob Client GUI 测试
 - 频道、私聊、未读提示和自动刷新测试
+
+## 截图
+
+以下截图来自 v11 测试包，展示真实 Go TLS Server 连接、频道聊天和私聊界面。
+
+### Alice 与 Bob 频道聊天
+
+![Alice 与 Bob 频道聊天](screenshots/v11-room-alice-bob.png)
+
+### Alice 频道界面
+
+![Alice 频道界面](screenshots/v11-room-alice.png)
+
+### 私聊界面
+
+![私聊界面](screenshots/v11-private-chat.png)
 
 ## 当前限制
 

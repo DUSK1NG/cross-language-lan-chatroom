@@ -160,14 +160,6 @@ void GuiConnectionWorker::requestRooms() {
     }
 }
 
-void GuiConnectionWorker::requestHistory(int limit) {
-    if (!connection_ || !connection_->is_ready()) return;
-    const message::Message message{"history_request", "", "", "", {}, "", "", {}, "", limit};
-    if (!connection_->send(message)) {
-        emit connectionLost(QString::fromStdString(connection_->last_error()));
-    }
-}
-
 void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& targetUserCode) {
     if (!connection_ || !connection_->is_ready() || action.trimmed().isEmpty() ||
         targetUserCode.trimmed().isEmpty()) {

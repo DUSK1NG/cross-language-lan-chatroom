@@ -60,7 +60,10 @@ void GuiChatController::connectToServer(const QString& serverIp, int serverPort,
                                         const QString& username, const QString& userCode,
                                         const QString& password, const QString& caFile,
                                         bool registerAccount) {
+    const bool identityChanged = localUserName_ != username || localUserCode_ != userCode;
+    localUserName_ = username;
     localUserCode_ = userCode;
+    if (identityChanged) emit localIdentityChanged();
     setStatus(QStringLiteral("正在连接..."));
     QMetaObject::invokeMethod(worker_, "connectToServer", Qt::QueuedConnection,
                               Q_ARG(QString, serverIp), Q_ARG(int, serverPort),
@@ -75,7 +78,10 @@ void GuiChatController::connectToLocalHost(const QString& serverExe,
                                             const QString& dbFile,
                                             const QString& username,
                                             const QString& userCode) {
+    const bool identityChanged = localUserName_ != username || localUserCode_ != userCode;
+    localUserName_ = username;
     localUserCode_ = userCode;
+    if (identityChanged) emit localIdentityChanged();
     setStatus(QStringLiteral("正在启动本地 Server..."));
     QMetaObject::invokeMethod(worker_, "connectToLocalHost", Qt::QueuedConnection,
                               Q_ARG(QString, serverExe), Q_ARG(QString, certFile),
@@ -127,10 +133,6 @@ void GuiChatController::requestRooms() {
     QMetaObject::invokeMethod(worker_, "requestRooms", Qt::QueuedConnection);
 }
 
-void GuiChatController::requestHistory(int limit) {
-    QMetaObject::invokeMethod(worker_, "requestHistory", Qt::QueuedConnection, Q_ARG(int, limit));
-}
-
 void GuiChatController::selectRoom(const QString& room) {
     const QString key = "room:" + room;
     messageModel_ = ensureConversationModel(key);
@@ -139,8 +141,10 @@ void GuiChatController::selectRoom(const QString& room) {
     if (row >= 0) roomModel_->updateRow(row, {{"unreadCount", 0}});
     emit activeMessageModelChanged();
     if (connected_) {
-        QMetaObject::invokeMethod(worker_, "joinRoom", Qt::QueuedConnection, Q_ARG(QString, room));
-        QMetaObject::invokeMethod(worker_, "requestHistory", Qt::QueuedConnection, Q_ARG(int, 50));
+        if (joinedRoom_.compare(room, Qt::CaseInsensitive) != 0) {
+            QMetaObject::invokeMethod(worker_, "joinRoom", Qt::QueuedConnection, Q_ARG(QString, room));
+            joinedRoom_ = room;
+        }
     }
 }
 
@@ -187,6 +191,7 @@ void GuiChatController::sendAdminAction(const QString& action, const QString& ta
 }
 
 void GuiChatController::handleConnected(bool isAdmin) {
+    clearMockDataForRealSession();
     connected_ = true;
     if (admin_ != isAdmin) {
         admin_ = isAdmin;
@@ -197,7 +202,22 @@ void GuiChatController::handleConnected(bool isAdmin) {
     setStatus(isAdmin ? QStringLiteral("已连接（管理员）") : QStringLiteral("已连接"));
     requestRooms();
     requestUsers();
-    requestHistory(50);
+}
+
+void GuiChatController::clearMockDataForRealSession() {
+    roomModel_->clear();
+    roomModel_->append({{"roomName", "lobby"}, {"memberCount", 0}, {"unreadCount", 0}});
+    directMessageModel_->clear();
+    memberModel_->clear();
+    for (ChatListModel* model : conversationModels_) {
+        model->clear();
+    }
+    activeConversationKey_ = QStringLiteral("room:lobby");
+    joinedRoom_ = QStringLiteral("lobby");
+    messageModel_ = conversationModels_.value(activeConversationKey_);
+    onlineMemberCount_ = 0;
+    emit onlineMemberCountChanged();
+    emit activeMessageModelChanged();
 }
 
 void GuiChatController::handleConnectionFailed(const QString& reason) {
@@ -266,6 +286,10 @@ void GuiChatController::handleMessage(const QString& type, const QString& userna
         for (int row = 0; row < roomModel_->rowCount(); ++row) {
             const QString roomName = roomModel_->valueAt(row, "roomName").toString();
             roomModel_->updateRow(row, {{"memberCount", roomMemberCounts_.value(roomName, 0)}});
+        }
+        if (onlineMemberCount_ != memberModel_->rowCount()) {
+            onlineMemberCount_ = memberModel_->rowCount();
+            emit onlineMemberCountChanged();
         }
         return;
     }

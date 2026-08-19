@@ -37,7 +37,6 @@ public slots:
     void joinRoom(const QString& room);
     void requestUsers();
     void requestRooms();
-    void requestHistory(int limit);
     void sendAdminAction(const QString& action, const QString& targetUserCode);
 
 signals:

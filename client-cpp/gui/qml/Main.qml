@@ -21,8 +21,14 @@ ApplicationWindow {
         currentPage = "chat"
     }
 
-    function openRemoteSetup() { currentPage = "connect" }
-    function openHostSetup() { currentPage = "host" }
+    function openRemoteSetup(mode) {
+        selectedMode = mode
+        currentPage = "connect"
+    }
+    function openHostSetup() {
+        selectedMode = "Local Host"
+        currentPage = "host"
+    }
 
     function openSettings() { currentPage = "settings" }
     function returnToChat() { currentPage = "chat" }
@@ -50,8 +56,8 @@ ApplicationWindow {
             if (!item) return
             if (currentPage === "mode") {
                 item.modeSelected.connect(function(mode) {
-                    if (mode === "Remote Server") {
-                        window.openRemoteSetup()
+                    if (mode === "Remote Server" || mode === "Guest") {
+                        window.openRemoteSetup(mode)
                     } else if (mode === "Local Host") {
                         window.openHostSetup()
                     } else {
@@ -64,6 +70,7 @@ ApplicationWindow {
             } else if (currentPage === "settings") {
                 item.backRequested.connect(window.returnToChat)
             } else if (currentPage === "connect") {
+                item.modeName = window.selectedMode
                 item.backRequested.connect(function() { window.currentPage = "mode" })
             } else if (currentPage === "host") {
                 item.backRequested.connect(function() { window.currentPage = "mode" })
@@ -74,7 +81,7 @@ ApplicationWindow {
     Connections {
         target: chatController
         function onConnectedChanged() {
-            if (chatController.connected) window.openChat("Remote Server")
+            if (chatController.connected) window.openChat(window.selectedMode)
         }
     }
 }

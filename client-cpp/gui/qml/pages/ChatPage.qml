@@ -96,8 +96,18 @@ Item {
                 }
 
                 Item { Layout.fillHeight: true }
-                Label { text: modeName; color: Theme.accent; font.pixelSize: 12 }
-                Label { text: "Mock User#A001"; color: Theme.primaryText; font.pixelSize: 13 }
+                Label {
+                    text: chatController.connected ? "Go TLS Server" : modeName
+                    color: Theme.accent
+                    font.pixelSize: 12
+                }
+                Label {
+                    text: chatController.connected
+                          ? chatController.localUserName + "#" + chatController.localUserCode
+                          : "Mock User#A001"
+                    color: Theme.primaryText
+                    font.pixelSize: 13
+                }
                 Label {
                     text: chatController.admin ? "在线 · 管理员" : "在线"
                     color: chatController.admin ? Theme.accent : Theme.success
@@ -120,7 +130,9 @@ Item {
                     Layout.fillWidth: true
                     onSettingsRequested: root.settingsRequested()
                     title: root.headerTitle
-                    subtitle: root.activeDirectMessage === "" ? "学习交流 · Mock 数据" : "私聊 · Mock 数据"
+                    subtitle: root.activeDirectMessage === ""
+                              ? (chatController.connected ? "学习交流 · Go TLS Server" : "学习交流 · Mock 数据")
+                              : (chatController.connected ? "私聊 · Go TLS Server" : "私聊 · Mock 数据")
                 }
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
@@ -163,7 +175,7 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
-                        text: "在线成员 · " + root.memberModel.count
+                        text: "在线成员 · " + chatController.onlineMemberCount
                         color: Theme.primaryText
                         font.pixelSize: 13
                         font.weight: Font.DemiBold
