@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QDir>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -20,6 +21,16 @@ int main(int argc, char* argv[]) {
     GuiChatController chatController;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("chatController", &chatController);
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QString packageRoot = QDir::cleanPath(appDir.filePath("../../.."));
+    engine.rootContext()->setContextProperty(
+        "hostServerExe", QDir::cleanPath(QDir(packageRoot).filePath("server-go/chat-server.exe")));
+    engine.rootContext()->setContextProperty(
+        "hostCertFile", QDir::cleanPath(QDir(packageRoot).filePath("certs/server-lan.crt")));
+    engine.rootContext()->setContextProperty(
+        "hostKeyFile", QDir::cleanPath(QDir(packageRoot).filePath("certs/server-lan.key")));
+    engine.rootContext()->setContextProperty(
+        "hostDbFile", QDir::cleanPath(QDir(packageRoot).filePath("server-go/chat.db")));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, [] { QCoreApplication::exit(-1); },
                      Qt::QueuedConnection);
