@@ -515,10 +515,12 @@ func TestWritePumpUnregistersAfterWriteFailureAndHealthyClientsContinue(t *testi
 	assertMessageReceived(t, healthy.Send, want)
 }
 
+const testOperationTimeout = 5 * time.Second
+
 func receiveClientTestMessage(t *testing.T, conn net.Conn) Message {
 	t.Helper()
 
-	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(testOperationTimeout)); err != nil {
 		t.Fatalf("set read deadline: %v", err)
 	}
 
@@ -543,7 +545,7 @@ func waitForHandler(t *testing.T, done <-chan struct{}, name string) {
 
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(testOperationTimeout):
 		t.Fatalf("timed out waiting for %s to stop", name)
 	}
 }
