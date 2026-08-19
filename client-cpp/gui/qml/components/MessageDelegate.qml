@@ -12,14 +12,15 @@ Item {
     property bool selfMessage: false
     property bool systemMessage: false
     property bool hovered: hoverArea.containsMouse
-    height: systemMessage ? 28 : messageColumn.implicitHeight + 4
+    height: systemMessage ? 34 : messageColumn.implicitHeight + 10
 
     Label {
         anchors.centerIn: parent
         visible: root.systemMessage
         text: root.content
         color: Theme.secondaryText
-        font.pixelSize: 12
+        font.pixelSize: 11
+        font.italic: true
     }
 
     Column {
@@ -27,31 +28,34 @@ Item {
         visible: !root.systemMessage
         anchors.left: root.selfMessage ? undefined : parent.left
         anchors.right: root.selfMessage ? parent.right : undefined
-        width: Math.min(parent.width * 0.84, 760)
-        spacing: 3
+        width: Math.min(parent.width * 0.82, 720)
+        spacing: 5
 
         Row {
             anchors.right: root.selfMessage ? parent.right : undefined
-            spacing: 8
+            spacing: 7
             Label { text: root.sender; color: root.selfMessage ? Theme.accent : Theme.primaryText; font.pixelSize: 13; font.weight: Font.DemiBold }
             Label { text: "#" + root.userCode + "  " + root.time; color: Theme.secondaryText; font.pixelSize: 11 }
         }
         Rectangle {
             anchors.right: root.selfMessage ? parent.right : undefined
-            width: Math.min(messageText.implicitWidth + 24, messageColumn.width)
-            height: messageText.implicitHeight + 18
-            radius: 8
-            color: root.selfMessage ? Theme.accentPressed : Theme.surface
-            border.color: Theme.border
+            width: Math.min(messageText.implicitWidth + 28, messageColumn.width)
+            height: messageText.implicitHeight + 20
+            radius: 11
+            color: root.selfMessage ? Theme.selfBubble : Theme.otherBubble
+            border.color: root.selfMessage ? Theme.accent : Theme.border
+            border.width: root.selfMessage ? 0 : 1
+            opacity: root.hovered ? 1.0 : 0.97
+            Behavior on opacity { NumberAnimation { duration: 140 } }
             Text {
                 id: messageText
                 anchors.centerIn: parent
-                width: Math.min(implicitWidth, messageColumn.width - 24)
+                width: Math.min(implicitWidth, messageColumn.width - 28)
                 text: root.content
                 wrapMode: Text.Wrap
                 horizontalAlignment: root.selfMessage ? Text.AlignRight : Text.AlignLeft
                 color: Theme.primaryText
-                font.pixelSize: 14
+                font.pixelSize: 13
             }
         }
         Row {

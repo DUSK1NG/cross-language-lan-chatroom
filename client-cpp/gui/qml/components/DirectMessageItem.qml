@@ -9,13 +9,16 @@ Rectangle {
     property int unreadCount: 0
     property bool selected: false
     signal itemSelected()
-    height: 38
-    radius: 6
-    color: selected ? Theme.surfaceRaised : mouse.containsMouse ? "#252a34" : "transparent"
+    height: 42
+    radius: 8
+    color: selected ? Theme.accentSoft : mouse.containsMouse ? Theme.surfaceHover : "transparent"
+    scale: mouse.pressed ? 0.985 : 1.0
+    Behavior on color { ColorAnimation { duration: 160 } }
+    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
     Label {
         anchors.left: parent.left
-        anchors.leftMargin: 10
+        anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         text: "●  " + root.displayName
         color: Theme.primaryText
@@ -23,7 +26,7 @@ Rectangle {
     }
     Label {
         anchors.right: parent.right
-        anchors.rightMargin: 10
+        anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         text: root.unreadCount > 0 ? root.unreadCount : ""
         color: Theme.accent
