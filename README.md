@@ -54,7 +54,7 @@ screenshots/               项目截图
 ## Windows 环境
 
 - Windows 11
-- Go 1.20 或更高版本
+- Go 1.22 或更高版本
 - Qt 6.11.x MinGW 64-bit
 - MinGW-w64 或 Visual Studio
 - CMake 和 Ninja
