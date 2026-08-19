@@ -92,14 +92,14 @@ client-cpp\gui\build\lan-chat-gui.exe
 Bob 作为客户端运行：
 
 ```powershell
-cd .\LANChatClient_Alice_Bob_v8
+cd .\client-cpp\gui\build
 .\lan-chat-gui.exe
 ```
 
 Alice 作为本地 Host 运行：
 
 ```powershell
-cd .\LANChatHost_Alice_v8\client-cpp\gui\build
+cd .\client-cpp\gui\build
 .\lan-chat-gui.exe
 ```
 

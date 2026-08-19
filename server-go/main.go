@@ -37,7 +37,6 @@ func main() {
 	}
 	defer store.Close()
 	hub.OfflineStore = store
-	hub.HistoryStore = store
 	log.Printf("account database: %s", resolveDBPath(*dbPath))
 	if hub.AdminCode != "" {
 		log.Printf("administrator code configured: %s", hub.AdminCode)

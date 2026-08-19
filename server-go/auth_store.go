@@ -19,7 +19,6 @@ const (
 	minPasswordBytes          = 8
 	maxPasswordBytes          = 72
 	maxOfflineMessagesPerUser = 100
-	maxHistoryMessages        = 100
 )
 
 var (
@@ -84,16 +83,7 @@ CREATE TABLE IF NOT EXISTS offline_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_offline_messages_target
     ON offline_messages(target_code, id);
-CREATE TABLE IF NOT EXISTS message_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    room TEXT NOT NULL,
-    sender_username TEXT NOT NULL,
-    sender_code TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_message_history_room
-    ON message_history(room, id);`
+`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("initialize auth database: %w", err)
 	}
@@ -270,57 +260,4 @@ WHERE normalized_username = ? OR normalized_code = ?`, normalizeUsername(usernam
 		return false, fmt.Errorf("query account identity: %w", err)
 	}
 	return count > 0, nil
-}
-
-func (s *AuthStore) SaveHistoryMessage(room string, message Message) error {
-	if s == nil || s.db == nil {
-		return errors.New("auth store is not initialized")
-	}
-	if room == "" || message.Type != "chat" {
-		return errors.New("invalid history message")
-	}
-	if err := validateTextContent("history message", message.Content); err != nil {
-		return err
-	}
-	_, err := s.db.Exec(`INSERT INTO message_history
-        (room, sender_username, sender_code, content, created_at)
-        VALUES (?, ?, ?, ?, ?)`, room, message.Username, message.UserCode,
-		message.Content, time.Now().UTC().Format(time.RFC3339Nano))
-	return err
-}
-
-func (s *AuthStore) ListHistory(room string, limit int) ([]Message, error) {
-	if s == nil || s.db == nil {
-		return nil, errors.New("auth store is not initialized")
-	}
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > maxHistoryMessages {
-		limit = maxHistoryMessages
-	}
-	rows, err := s.db.Query(`SELECT sender_username, sender_code, content
-        FROM message_history WHERE room = ? ORDER BY id DESC LIMIT ?`, room, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var newestFirst []Message
-	for rows.Next() {
-		var message Message
-		if err := rows.Scan(&message.Username, &message.UserCode, &message.Content); err != nil {
-			return nil, err
-		}
-		message.Type = "history_message"
-		message.Room = room
-		newestFirst = append(newestFirst, message)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	history := make([]Message, len(newestFirst))
-	for index := range newestFirst {
-		history[len(newestFirst)-index-1] = newestFirst[index]
-	}
-	return history, nil
 }

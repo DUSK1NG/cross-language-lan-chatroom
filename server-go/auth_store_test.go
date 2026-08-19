@@ -191,21 +191,3 @@ func TestAuthStoreStoresAndTakesOfflineMessages(t *testing.T) {
 		t.Fatalf("offline messages were not removed: %#v, %v", remaining, err)
 	}
 }
-
-func TestAuthStoreListsRoomHistoryInChronologicalOrder(t *testing.T) {
-	store, _ := newTestAuthStore(t)
-	for _, content := range []string{"第一条", "第二条", "第三条"} {
-		if err := store.SaveHistoryMessage("lobby", Message{
-			Type: "chat", Username: "Alice", UserCode: "A001", Content: content,
-		}); err != nil {
-			t.Fatalf("save history %q: %v", content, err)
-		}
-	}
-	history, err := store.ListHistory("lobby", 2)
-	if err != nil || len(history) != 2 {
-		t.Fatalf("list history = %#v, %v", history, err)
-	}
-	if history[0].Content != "第二条" || history[1].Content != "第三条" {
-		t.Fatalf("history order = %#v", history)
-	}
-}

@@ -336,8 +336,7 @@ void GuiChatController::handleMessage(const QString& type, const QString& userna
     } else if (type == QStringLiteral("system") && !room.isEmpty()) {
         // 系统提示属于服务端广播时所在的房间，不能跟随当前打开的私聊窗口。
         appendSystemMessageToModel(ensureConversationModel("room:" + room), content);
-    } else if (type == QStringLiteral("system") || type == QStringLiteral("error") ||
-               type == QStringLiteral("history_response")) {
+    } else if (type == QStringLiteral("system") || type == QStringLiteral("error")) {
         appendSystemMessage(content);
     }
 
