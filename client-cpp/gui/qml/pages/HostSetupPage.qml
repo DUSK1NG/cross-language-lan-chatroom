@@ -22,13 +22,13 @@ Item {
             Label { text: "用户代码"; color: Theme.primaryText }
             TextField { id: userCode; Layout.fillWidth: true; text: "A001" }
             Label { text: "Go Server"; color: Theme.primaryText }
-            TextField { id: serverExe; Layout.fillWidth: true; text: "..\\..\\..\\server-go\\chat-server.exe" }
+            TextField { id: serverExe; Layout.fillWidth: true; text: hostServerExe }
             Label { text: "证书"; color: Theme.primaryText }
-            TextField { id: certFile; Layout.fillWidth: true; text: "..\\..\\..\\server-go\\certs\\server-lan.crt" }
+            TextField { id: certFile; Layout.fillWidth: true; text: hostCertFile }
             Label { text: "私钥"; color: Theme.primaryText }
-            TextField { id: keyFile; Layout.fillWidth: true; text: "..\\..\\..\\server-go\\certs\\server-lan.key" }
+            TextField { id: keyFile; Layout.fillWidth: true; text: hostKeyFile }
             Label { text: "数据库"; color: Theme.primaryText }
-            TextField { id: dbFile; Layout.fillWidth: true; text: "..\\..\\..\\server-go\\chat.db" }
+            TextField { id: dbFile; Layout.fillWidth: true; text: hostDbFile }
         }
 
         RowLayout {
