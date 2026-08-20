@@ -11,7 +11,9 @@ Rectangle {
     signal itemSelected()
     height: 42
     radius: 8
-    color: selected ? Theme.accentSoft : mouse.containsMouse ? Theme.surfaceHover : "transparent"
+    color: selected ? Theme.accentSoft : mouse.containsMouse ? Theme.surfaceHover : Qt.rgba(1, 1, 1, 0.015)
+    border.color: selected ? Theme.glassHighlight : "transparent"
+    border.width: selected ? 1 : 0
     scale: mouse.pressed ? 0.985 : 1.0
     Behavior on color { ColorAnimation { duration: 160 } }
     Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }

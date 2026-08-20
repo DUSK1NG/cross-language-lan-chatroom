@@ -1,5 +1,6 @@
 #include <QGuiApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -22,7 +23,11 @@ int main(int argc, char* argv[]) {
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("chatController", &chatController);
     const QDir appDir(QCoreApplication::applicationDirPath());
-    const QString packageRoot = QDir::cleanPath(appDir.filePath("../../.."));
+    QString packageRoot = QDir::cleanPath(appDir.filePath("../../.."));
+    const QString nestedServer = QDir(packageRoot).filePath("server-go/chat-server.exe");
+    if (!QFileInfo::exists(nestedServer)) {
+        packageRoot = appDir.absolutePath();
+    }
     engine.rootContext()->setContextProperty(
         "hostServerExe", QDir::cleanPath(QDir(packageRoot).filePath("server-go/chat-server.exe")));
     engine.rootContext()->setContextProperty(

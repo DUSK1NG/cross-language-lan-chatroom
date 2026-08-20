@@ -19,30 +19,26 @@ RowLayout {
         selectByMouse: true
         background: Rectangle {
             radius: 12
-            color: Theme.card
+            color: Qt.rgba(0.10, 0.14, 0.20, 0.92)
             border.color: input.activeFocus ? Theme.accent : Theme.borderSoft
             border.width: input.activeFocus ? 2 : 1
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 1
+                radius: 1
+                color: input.activeFocus ? Theme.glassHighlight : "transparent"
+            }
             Behavior on border.color { ColorAnimation { duration: 160 } }
         }
         onAccepted: root.sendRequested()
     }
-    Button {
+    GlassButton {
+        accent: true
+        compact: true
         text: "发送"
         enabled: input.text.trim().length > 0
-        background: Rectangle {
-            radius: 10
-            color: !enabled ? Theme.surfaceRaised : pressed ? Theme.accentPressed : hovered ? Theme.accent : Theme.surfaceRaised
-            Behavior on color { ColorAnimation { duration: 160 } }
-        }
-        contentItem: Text {
-            text: parent.text
-            color: parent.enabled ? Theme.primaryText : Theme.secondaryText
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            font.weight: Font.DemiBold
-        }
-        scale: pressed ? 0.97 : 1.0
-        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         onClicked: root.sendRequested()
     }
 }

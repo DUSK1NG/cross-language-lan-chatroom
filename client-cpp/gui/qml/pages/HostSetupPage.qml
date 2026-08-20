@@ -33,9 +33,10 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Button { text: "返回"; onClicked: root.backRequested() }
+            GlassButton { text: "返回"; onClicked: root.backRequested() }
             Item { Layout.fillWidth: true }
-            Button {
+            GlassButton {
+                accent: true
                 text: "启动本地聊天室"
                 enabled: !chatController.connected && username.text.length > 0 && userCode.text.length > 0
                 onClicked: chatController.connectToLocalHost(serverExe.text, certFile.text, keyFile.text, dbFile.text, username.text, userCode.text)

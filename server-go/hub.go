@@ -110,6 +110,7 @@ type Hub struct {
 	ActiveCodes  map[string]*Client
 	UsedCodes    map[string]struct{}
 	Rooms        map[string]map[*Client]bool
+	RoomNames    map[string]struct{}
 	OfflineStore *AuthStore
 	AdminCode    string
 }
@@ -130,6 +131,7 @@ func NewHub() *Hub {
 		ActiveCodes:  make(map[string]*Client),
 		UsedCodes:    make(map[string]struct{}),
 		Rooms:        make(map[string]map[*Client]bool),
+		RoomNames:    map[string]struct{}{defaultRoomName: {}},
 	}
 }
 
@@ -379,8 +381,8 @@ func (h *Hub) handleRequestRooms(requester *Client) {
 	if _, ok := h.Clients[requester]; !ok {
 		return
 	}
-	rooms := make([]string, 0, len(h.Rooms))
-	for room := range h.Rooms {
+	rooms := make([]string, 0, len(h.RoomNames))
+	for room := range h.RoomNames {
 		rooms = append(rooms, room)
 	}
 	sort.Strings(rooms)
@@ -399,6 +401,7 @@ func (h *Hub) handleRoomJoin(request RoomRequest) {
 		h.deliverError(client, "Invalid room name")
 		return
 	}
+	h.RoomNames[request.Room] = struct{}{}
 	if request.Room == client.Room {
 		h.deliver(client, Message{Type: "system", Content: "Already in room " + client.Room})
 		return

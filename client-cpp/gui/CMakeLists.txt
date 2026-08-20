@@ -40,6 +40,7 @@ qt_add_qml_module(lan-chat-gui
         qml/Main.qml
         qml/theme/Theme.qml
         qml/components/TitleBar.qml
+        qml/components/GlassButton.qml
         qml/components/RoomItem.qml
         qml/components/DirectMessageItem.qml
         qml/components/ChatHeader.qml

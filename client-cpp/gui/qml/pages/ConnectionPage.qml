@@ -85,9 +85,10 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: 10
-            Button { text: "返回"; onClicked: root.backRequested() }
+            GlassButton { text: "返回"; onClicked: root.backRequested() }
             Item { Layout.fillWidth: true }
-            Button {
+            GlassButton {
+                accent: true
                 text: "连接"
                 enabled: serverIp.text.length > 0 && serverPort.text.length > 0 &&
                          username.text.length > 0 && userCode.text.length > 0

@@ -33,6 +33,38 @@ ApplicationWindow {
     function openSettings() { currentPage = "settings" }
     function returnToChat() { currentPage = "chat" }
 
+    Rectangle {
+        anchors.fill: parent
+        z: -2
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#15191f" }
+            GradientStop { position: 0.52; color: "#101419" }
+            GradientStop { position: 1.0; color: "#0d1014" }
+        }
+    }
+
+    Rectangle {
+        width: 420
+        height: 260
+        radius: 180
+        x: -120
+        y: 80
+        z: -1
+        color: Theme.glowBlue
+        opacity: 0.75
+    }
+
+    Rectangle {
+        width: 360
+        height: 240
+        radius: 170
+        anchors.right: parent.right
+        y: 90
+        z: -1
+        color: Theme.glowViolet
+        opacity: 0.70
+    }
+
     TitleBar {
         id: titleBar
         anchors.top: parent.top

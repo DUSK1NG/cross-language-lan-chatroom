@@ -22,7 +22,7 @@ Item {
 
         Label {
             Layout.alignment: Qt.AlignHCenter
-            text: "Phase 1 · UI 骨架 · 当前使用 Mock 数据"
+            text: "安全、稳定的 Go + Qt 局域网聊天"
             color: Theme.secondaryText
             font.pixelSize: 13
         }

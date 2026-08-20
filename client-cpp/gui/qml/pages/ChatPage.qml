@@ -5,7 +5,7 @@ import LanChatGui
 
 Item {
     id: root
-    property string modeName: "Mock Mode"
+    property string modeName: "LAN Chat"
     property string activeRoom: "lobby"
     property string activeDirectMessage: ""
     property string headerTitle: "# lobby"
@@ -28,7 +28,7 @@ Item {
         chatController.selectDirectMessage(code)
     }
 
-    function appendMockMessage() {
+    function appendMessage() {
         if (composer.text.trim().length === 0) return
         if (chatController.connected) {
             if (root.activeDirectMessage === "") {
@@ -59,7 +59,21 @@ Item {
         Rectangle {
             Layout.preferredWidth: 264
             Layout.fillHeight: true
-            color: Theme.surface
+            color: Theme.panel
+            border.color: Theme.borderSoft
+            border.width: 1
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 150
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Theme.glassHighlight }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.28
+            }
 
             ColumnLayout {
                 anchors.fill: parent
@@ -67,7 +81,7 @@ Item {
                 spacing: 12
 
                 Label { text: "LAN CHAT"; color: Theme.primaryText; font.pixelSize: 16; font.weight: Font.DemiBold }
-                Button { Layout.fillWidth: true; text: "新建频道"; onClicked: createRoomDialog.open() }
+                GlassButton { Layout.fillWidth: true; accent: true; text: "新建频道"; onClicked: createRoomDialog.open() }
                 Label { text: "房间"; color: Theme.secondaryText; font.pixelSize: 12 }
 
                 Repeater {
@@ -104,7 +118,7 @@ Item {
                 Label {
                     text: chatController.connected
                           ? chatController.localUserName + "#" + chatController.localUserCode
-                          : "Mock User#A001"
+                          : "未连接"
                     color: Theme.primaryText
                     font.pixelSize: 13
                 }
@@ -119,7 +133,21 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: Theme.background
+            color: Qt.rgba(0.05, 0.07, 0.11, 0.66)
+            border.color: Theme.borderSoft
+            border.width: 1
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 180
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Theme.glassHighlight }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.16
+            }
 
             ColumnLayout {
                 anchors.fill: parent
@@ -131,8 +159,8 @@ Item {
                     onSettingsRequested: root.settingsRequested()
                     title: root.headerTitle
                     subtitle: root.activeDirectMessage === ""
-                              ? (chatController.connected ? "学习交流 · Go TLS Server" : "学习交流 · Mock 数据")
-                              : (chatController.connected ? "私聊 · Go TLS Server" : "私聊 · Mock 数据")
+                              ? (chatController.connected ? "学习交流 · Go TLS Server" : "学习交流 · 未连接")
+                              : (chatController.connected ? "私聊 · Go TLS Server" : "私聊 · 未连接")
                 }
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.borderSoft }
@@ -161,7 +189,7 @@ Item {
                 MessageComposer {
                     id: composer
                     Layout.fillWidth: true
-                    onSendRequested: root.appendMockMessage()
+                    onSendRequested: root.appendMessage()
                 }
             }
         }
@@ -169,7 +197,21 @@ Item {
         Rectangle {
             Layout.preferredWidth: 248
             Layout.fillHeight: true
-            color: Theme.surface
+            color: Theme.panel
+            border.color: Theme.borderSoft
+            border.width: 1
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 150
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Theme.glassHighlight }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.24
+            }
 
             ColumnLayout {
                 anchors.fill: parent
@@ -184,7 +226,8 @@ Item {
                         font.weight: Font.DemiBold
                         Layout.fillWidth: true
                     }
-                    Button {
+                    GlassButton {
+                        compact: true
                         text: "刷新"
                         onClicked: { chatController.requestUsers(); chatController.requestRooms() }
                     }
@@ -224,13 +267,48 @@ Item {
         id: createRoomDialog
         title: "新建频道"
         modal: true
+        width: 520
+        padding: 16
         anchors.centerIn: Overlay.overlay
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        footer: RowLayout {
+            width: createRoomDialog.width - createRoomDialog.leftPadding - createRoomDialog.rightPadding
+            spacing: 8
+            GlassButton {
+                compact: true
+                text: "取消"
+                onClicked: createRoomDialog.reject()
+            }
+            GlassButton {
+                compact: true
+                accent: true
+                text: "确定"
+                enabled: roomNameInput.text.trim().length > 0
+                onClicked: createRoomDialog.accept()
+            }
+        }
+
+        enter: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "scale"; from: 0.96; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
+            }
+        }
+        exit: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.InCubic }
+                NumberAnimation { property: "scale"; from: 1.0; to: 0.98; duration: 110; easing.type: Easing.InCubic }
+            }
+        }
 
         ColumnLayout {
-            width: 300
+            width: createRoomDialog.width - createRoomDialog.leftPadding - createRoomDialog.rightPadding
             spacing: 8
-            Label { text: "频道名只能使用字母、数字和下划线"; color: Theme.secondaryText; wrapMode: Text.WordWrap }
+            Label {
+                Layout.fillWidth: true
+                text: "频道名只能使用字母、数字和下划线"
+                color: Theme.secondaryText
+                wrapMode: Text.WordWrap
+            }
             TextField {
                 id: roomNameInput
                 Layout.fillWidth: true
