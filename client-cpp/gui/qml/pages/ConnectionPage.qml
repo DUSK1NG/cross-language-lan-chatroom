@@ -45,7 +45,7 @@ Item {
             AppTextField {
                 id: serverIp
                 Layout.fillWidth: true
-                text: "127.0.0.1"
+                text: chatController.savedServerIp
                 placeholderText: "Alice 电脑 IPv4，例如 192.168.0.3"
                 selectByMouse: true
             }
@@ -54,16 +54,28 @@ Item {
             AppTextField {
                 id: serverPort
                 Layout.fillWidth: true
-                text: "8888"
+                text: String(chatController.savedServerPort)
                 validator: IntValidator { bottom: 1; top: 65535 }
                 selectByMouse: true
             }
 
             Label { text: "用户名"; color: Theme.primaryText }
-            AppTextField { id: username; Layout.fillWidth: true; text: root.modeName === "Guest" ? "Bob" : "Alice" }
+            AppTextField {
+                id: username
+                Layout.fillWidth: true
+                text: chatController.savedUsername.length > 0
+                      ? chatController.savedUsername
+                      : (root.modeName === "Guest" ? "Bob" : "Alice")
+            }
 
             Label { text: "用户代码"; color: Theme.primaryText }
-            AppTextField { id: userCode; Layout.fillWidth: true; text: root.modeName === "Guest" ? "B001" : "A001" }
+            AppTextField {
+                id: userCode
+                Layout.fillWidth: true
+                text: chatController.savedUserCode.length > 0
+                      ? chatController.savedUserCode
+                      : (root.modeName === "Guest" ? "B001" : "A001")
+            }
 
             Label { text: "密码"; color: Theme.primaryText }
             AppTextField {
@@ -77,7 +89,8 @@ Item {
             AppTextField {
                 id: caFile
                 Layout.fillWidth: true
-                placeholderText: "留空则使用系统证书"
+                text: chatController.savedCaFile
+                placeholderText: "将 server-lan.crt 放入 certs 文件夹，或填写完整路径"
                 selectByMouse: true
             }
         }

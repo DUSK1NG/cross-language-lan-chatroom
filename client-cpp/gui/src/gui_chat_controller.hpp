@@ -24,6 +24,11 @@ class GuiChatController final : public QObject {
     Q_PROPERTY(int onlineMemberCount READ onlineMemberCount NOTIFY onlineMemberCountChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
     Q_PROPERTY(bool activeRoomCanManage READ activeRoomCanManage NOTIFY activeRoomCanManageChanged)
+    Q_PROPERTY(QString savedServerIp READ savedServerIp CONSTANT)
+    Q_PROPERTY(int savedServerPort READ savedServerPort CONSTANT)
+    Q_PROPERTY(QString savedUsername READ savedUsername CONSTANT)
+    Q_PROPERTY(QString savedUserCode READ savedUserCode CONSTANT)
+    Q_PROPERTY(QString savedCaFile READ savedCaFile NOTIFY savedConnectionChanged)
 
 public:
     explicit GuiChatController(QObject* parent = nullptr);
@@ -41,6 +46,12 @@ public:
     int onlineMemberCount() const { return onlineMemberCount_; }
     QString statusText() const { return statusText_; }
     bool activeRoomCanManage() const { return activeRoomCanManage_; }
+    QString savedServerIp() const;
+    int savedServerPort() const;
+    QString savedUsername() const;
+    QString savedUserCode() const;
+    QString savedCaFile() const;
+    void setBundledCaFile(const QString& path);
 
     Q_INVOKABLE void connectToServer(const QString& serverIp, int serverPort,
                                      const QString& username, const QString& userCode,
@@ -76,6 +87,7 @@ signals:
     void statusTextChanged();
     void activeMessageModelChanged();
     void activeRoomCanManageChanged();
+    void savedConnectionChanged();
 
 private slots:
     void handleConnected(bool isAdmin);
@@ -96,6 +108,9 @@ private:
                                         const QString& userCode);
     ChatListModel* ensureConversationModel(const QString& key);
     void resetSessionData();
+    void saveConnectionPreferences(const QString& serverIp, int serverPort,
+                                   const QString& username, const QString& userCode,
+                                   const QString& caFile);
 
     ChatListModel* roomModel_;
     ChatListModel* directMessageModel_;
@@ -114,6 +129,7 @@ private:
     QString statusText_ = QStringLiteral("未连接");
     QString localUserCode_ = QStringLiteral("A001");
     QString joinedRoom_ = QStringLiteral("lobby");
+    QString bundledCaFile_;
     int onlineMemberCount_ = 0;
     int localMessageCounter_ = 0;
 };

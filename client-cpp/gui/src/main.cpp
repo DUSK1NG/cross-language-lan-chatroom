@@ -36,6 +36,8 @@ int main(int argc, char* argv[]) {
         "hostKeyFile", QDir::cleanPath(QDir(packageRoot).filePath("certs/server-lan.key")));
     engine.rootContext()->setContextProperty(
         "hostDbFile", QDir::cleanPath(QDir(packageRoot).filePath("server-go/chat.db")));
+    chatController.setBundledCaFile(
+        QDir::cleanPath(QDir(packageRoot).filePath("certs/server-lan.crt")));
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, [] { QCoreApplication::exit(-1); },
                      Qt::QueuedConnection);

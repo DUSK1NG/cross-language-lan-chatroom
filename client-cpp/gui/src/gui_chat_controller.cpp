@@ -5,10 +5,22 @@
 #include <QDateTime>
 #include <QGuiApplication>
 #include <QClipboard>
+#include <QFileInfo>
+#include <QSettings>
 #include <QVariantMap>
 
 namespace {
 const QStringList kMessageRoles = {"messageId", "displayName", "userCode", "time", "content", "selfMessage", "systemMessage"};
+constexpr auto kConnectionGroup = "connection";
+constexpr auto kServerIpKey = "serverIp";
+constexpr auto kServerPortKey = "serverPort";
+constexpr auto kUsernameKey = "username";
+constexpr auto kUserCodeKey = "userCode";
+constexpr auto kCaFileKey = "caFile";
+
+QSettings connectionSettings() {
+    return QSettings();
+}
 }
 
 GuiChatController::GuiChatController(QObject* parent)
@@ -57,6 +69,9 @@ void GuiChatController::connectToServer(const QString& serverIp, int serverPort,
                                         const QString& username, const QString& userCode,
                                         const QString& password, const QString& caFile,
                                         bool registerAccount) {
+    if (!registerAccount) {
+        saveConnectionPreferences(serverIp, serverPort, username, userCode, caFile);
+    }
     const bool identityChanged = localUserName_ != username || localUserCode_ != userCode;
     localUserName_ = username;
     localUserCode_ = userCode;
@@ -75,6 +90,7 @@ void GuiChatController::connectToLocalHost(const QString& serverExe,
                                             const QString& dbFile,
                                             const QString& username,
                                             const QString& userCode) {
+    saveConnectionPreferences(QStringLiteral("127.0.0.1"), 8888, username, userCode, certFile);
     const bool identityChanged = localUserName_ != username || localUserCode_ != userCode;
     localUserName_ = username;
     localUserCode_ = userCode;
@@ -84,6 +100,76 @@ void GuiChatController::connectToLocalHost(const QString& serverExe,
                               Q_ARG(QString, serverExe), Q_ARG(QString, certFile),
                               Q_ARG(QString, keyFile), Q_ARG(QString, dbFile),
                               Q_ARG(QString, username), Q_ARG(QString, userCode));
+}
+
+QString GuiChatController::savedServerIp() const {
+    QSettings settings = connectionSettings();
+    settings.beginGroup(QLatin1String(kConnectionGroup));
+    const QString value = settings.value(QLatin1String(kServerIpKey), QStringLiteral("127.0.0.1")).toString().trimmed();
+    settings.endGroup();
+    return value.isEmpty() ? QStringLiteral("127.0.0.1") : value;
+}
+
+int GuiChatController::savedServerPort() const {
+    QSettings settings = connectionSettings();
+    settings.beginGroup(QLatin1String(kConnectionGroup));
+    const int value = settings.value(QLatin1String(kServerPortKey), 8888).toInt();
+    settings.endGroup();
+    return value >= 1 && value <= 65535 ? value : 8888;
+}
+
+QString GuiChatController::savedUsername() const {
+    QSettings settings = connectionSettings();
+    settings.beginGroup(QLatin1String(kConnectionGroup));
+    const QString value = settings.value(QLatin1String(kUsernameKey)).toString().trimmed();
+    settings.endGroup();
+    return value;
+}
+
+QString GuiChatController::savedUserCode() const {
+    QSettings settings = connectionSettings();
+    settings.beginGroup(QLatin1String(kConnectionGroup));
+    const QString value = settings.value(QLatin1String(kUserCodeKey)).toString().trimmed();
+    settings.endGroup();
+    return value;
+}
+
+QString GuiChatController::savedCaFile() const {
+    QSettings settings = connectionSettings();
+    settings.beginGroup(QLatin1String(kConnectionGroup));
+    const QString savedPath = settings.value(QLatin1String(kCaFileKey)).toString().trimmed();
+    settings.endGroup();
+    if (!savedPath.isEmpty() && QFileInfo::exists(savedPath)) {
+        return QFileInfo(savedPath).absoluteFilePath();
+    }
+    if (!bundledCaFile_.isEmpty() && QFileInfo::exists(bundledCaFile_)) {
+        return QFileInfo(bundledCaFile_).absoluteFilePath();
+    }
+    return {};
+}
+
+void GuiChatController::setBundledCaFile(const QString& path) {
+    bundledCaFile_ = QFileInfo(path).absoluteFilePath();
+    emit savedConnectionChanged();
+}
+
+void GuiChatController::saveConnectionPreferences(const QString& serverIp, int serverPort,
+                                                   const QString& username, const QString& userCode,
+                                                   const QString& caFile) {
+    QSettings settings = connectionSettings();
+    settings.beginGroup(QLatin1String(kConnectionGroup));
+    settings.setValue(QLatin1String(kServerIpKey), serverIp.trimmed());
+    settings.setValue(QLatin1String(kServerPortKey), serverPort);
+    settings.setValue(QLatin1String(kUsernameKey), username.trimmed());
+    settings.setValue(QLatin1String(kUserCodeKey), userCode.trimmed());
+    if (caFile.trimmed().isEmpty()) {
+        settings.remove(QLatin1String(kCaFileKey));
+    } else if (QFileInfo::exists(caFile)) {
+        settings.setValue(QLatin1String(kCaFileKey), QFileInfo(caFile).absoluteFilePath());
+    }
+    settings.endGroup();
+    settings.sync();
+    emit savedConnectionChanged();
 }
 
 void GuiChatController::disconnectFromServer() {
