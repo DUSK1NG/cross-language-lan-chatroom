@@ -94,9 +94,15 @@ cmake --build build --parallel 2
 
 本机测试时填写 `127.0.0.1:8888`。局域网测试时，客户端应填写运行 Go Server 那台电脑的 IPv4 地址与端口 `8888`，并选择同一份 `server-lan.crt` 作为 CA 文件；客户端不需要、也不应获得私钥。
 
-## 正式发布包部署
+## 正式发布包：房主与成员使用同一个程序
 
-公开发布包不会包含证书、私钥、数据库或聊天记录。Alice Host 应在自己的电脑生成包含实际 IPv4 地址的 TLS 证书，再把**仅公钥证书** `server-lan.crt` 分发给 Bob Client；完整的 PowerShell 步骤见 [docs/release-setup.md](docs/release-setup.md)。
+正式版提供单一 Windows 包：`LANChat-v1.0.1-Windows-x64.zip`。解压后运行 `lan-chat-gui.exe`，在首页按角色选择：
+
+- **创建本地聊天室（房主）**：本机启动包内的 Go TLS Server；生成并保管证书、私钥和数据库。
+- **加入局域网聊天室（成员）**：填写房主电脑的 IPv4 与端口 `8888`，仅使用房主提供的公开证书 `server-lan.crt`。
+- **远程服务器**：连接已经部署好的 Go TLS Server。
+
+公开包不会包含证书、私钥、数据库或聊天记录。私钥 `server-lan.key` 只能留在房主电脑，成员绝不能获取。完整的中文步骤、PowerShell 命令和局域网排错方式见 [docs/release-setup.md](docs/release-setup.md)。
 
 ## 局域网测试
 
