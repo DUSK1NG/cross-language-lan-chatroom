@@ -13,6 +13,7 @@ const maxRoomNameSize = 32
 
 type Message struct {
 	Type           string   `json:"type"`
+	MessageID      string   `json:"message_id,omitempty"`
 	Username       string   `json:"username,omitempty"`
 	UserCode       string   `json:"user_code,omitempty"`
 	TargetUserCode string   `json:"target_user_code,omitempty"`
@@ -125,11 +126,22 @@ func validateMessage(message Message) error {
 	case "users_request", "quit":
 		return nil
 	case "admin_action":
+		if message.Content == "recall" {
+			if message.MessageID == "" {
+				return fmt.Errorf("message id is required")
+			}
+			return nil
+		}
 		if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
 			return fmt.Errorf("invalid admin target: %w", err)
 		}
 		if message.Content != "kick" && message.Content != "mute" {
 			return fmt.Errorf("unsupported admin action")
+		}
+		return nil
+	case "message_recalled":
+		if message.MessageID == "" {
+			return fmt.Errorf("message id is required")
 		}
 		return nil
 	case "users_response":

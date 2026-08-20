@@ -10,46 +10,46 @@ Item {
     ColumnLayout {
         anchors.centerIn: parent
         width: Math.min(parent.width - 64, 920)
-        spacing: 12
+        spacing: Theme.spacingM
 
         Label {
             Layout.alignment: Qt.AlignHCenter
             text: "选择聊天方式"
             color: Theme.primaryText
-            font.pixelSize: 28
+            font.pixelSize: Theme.fontHeading
             font.weight: Font.DemiBold
         }
 
         Label {
             Layout.alignment: Qt.AlignHCenter
-            text: "Phase 1 · UI 骨架 · 当前使用 Mock 数据"
+            text: "安全、稳定的 Go + Qt 局域网聊天"
             color: Theme.secondaryText
-            font.pixelSize: 13
+            font.pixelSize: Theme.fontBody
         }
 
         RowLayout {
-            Layout.topMargin: 20
+            Layout.topMargin: Theme.spacingL
             Layout.fillWidth: true
-            spacing: 14
+            spacing: Theme.spacingM
 
             ModeCard {
                 title: "远程服务器"
                 subtitle: "连接已经部署的 Go Server"
-                symbol: "▣"
+                iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/server.svg"
                 onClicked: root.modeSelected("Remote Server")
             }
 
             ModeCard {
                 title: "创建本地聊天室"
                 subtitle: "当前电脑作为 Host"
-                symbol: "⌂"
+                iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/network.svg"
                 onClicked: root.modeSelected("Local Host")
             }
 
             ModeCard {
                 title: "加入局域网聊天室"
                 subtitle: "作为 Guest 加入房主"
-                symbol: "⇢"
+                iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/users.svg"
                 onClicked: root.modeSelected("Guest")
             }
         }
@@ -59,38 +59,42 @@ Item {
         id: card
         property string title: ""
         property string subtitle: ""
-        property string symbol: ""
+        property string iconSource: ""
         signal clicked()
         Layout.fillWidth: true
-        Layout.preferredHeight: 190
-        radius: 12
+        Layout.preferredHeight: 196
+        radius: Theme.radiusLarge
         color: mouse.containsMouse ? Theme.surfaceRaised : Theme.surface
         border.color: mouse.containsMouse ? Theme.accent : Theme.border
         border.width: 1
+        scale: mouse.pressed ? 0.985 : mouse.containsMouse ? 1.01 : 1.0
+        Behavior on color { ColorAnimation { duration: Theme.animationNormal } }
+        Behavior on border.color { ColorAnimation { duration: Theme.animationNormal } }
+        Behavior on scale { NumberAnimation { duration: Theme.animationFast; easing.type: Easing.OutCubic } }
 
         Column {
             anchors.centerIn: parent
             width: parent.width - 32
-            spacing: 10
+            spacing: Theme.spacingM
 
-            Label {
+            Image {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: card.symbol
-                color: Theme.accent
-                font.pixelSize: 38
+                source: card.iconSource
+                sourceSize.width: 42
+                sourceSize.height: 42
             }
             Label {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: card.title
                 color: Theme.primaryText
-                font.pixelSize: 16
+                font.pixelSize: Theme.fontBodyLarge
                 font.weight: Font.DemiBold
             }
             Label {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: card.subtitle
                 color: Theme.secondaryText
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontCaption
             }
         }
 

@@ -37,13 +37,14 @@ public slots:
     void joinRoom(const QString& room);
     void requestUsers();
     void requestRooms();
-    void sendAdminAction(const QString& action, const QString& targetUserCode);
+    void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {});
 
 signals:
     void connected(bool isAdmin);
     void connectionFailed(const QString& reason);
     void connectionLost(const QString& reason);
     void messageReceived(const QString& type,
+                         const QString& messageId,
                          const QString& username,
                          const QString& userCode,
                          const QString& content,

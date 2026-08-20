@@ -160,14 +160,14 @@ void GuiConnectionWorker::requestRooms() {
     }
 }
 
-void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& targetUserCode) {
+void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId) {
     if (!connection_ || !connection_->is_ready() || action.trimmed().isEmpty() ||
-        targetUserCode.trimmed().isEmpty()) {
+        (action.trimmed() != QStringLiteral("recall") && targetUserCode.trimmed().isEmpty())) {
         return;
     }
     const message::Message message{
         "admin_action", "", "", action.trimmed().toStdString(), {},
-        targetUserCode.trimmed().toStdString(), "", {}, ""};
+        targetUserCode.trimmed().toStdString(), "", {}, "", messageId.trimmed().toStdString()};
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
@@ -193,6 +193,7 @@ void GuiConnectionWorker::receiveLoop() {
         }
 
         emit messageReceived(QString::fromStdString(incoming.type),
+                             QString::fromStdString(incoming.message_id),
                              QString::fromStdString(incoming.username),
                              QString::fromStdString(incoming.user_code),
                              QString::fromStdString(incoming.content),

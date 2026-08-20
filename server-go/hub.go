@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -44,6 +45,7 @@ type AdminActionRequest struct {
 	Sender     *Client
 	Action     string
 	TargetCode string
+	MessageID  string
 }
 
 // Client 表示一个已经完成登录的客户端连接。
@@ -96,22 +98,24 @@ func (c *Client) closeSend() {
 // Hub 是聊天室中客户端集合和广播消息的唯一管理者。
 // Clients、ActiveCodes 和 UsedCodes 只能由 Run goroutine 访问。
 type Hub struct {
-	Clients      map[*Client]bool
-	Register     chan RegisterRequest
-	Unregister   chan *Client
-	Broadcast    chan Message
-	Outbound     chan OutboundMessage
-	RequestUsers chan *Client
-	Private      chan PrivateMessageRequest
-	RoomJoin     chan RoomRequest
-	RoomLeave    chan *Client
-	RequestRooms chan *Client
-	AdminAction  chan AdminActionRequest
-	ActiveCodes  map[string]*Client
-	UsedCodes    map[string]struct{}
-	Rooms        map[string]map[*Client]bool
-	OfflineStore *AuthStore
-	AdminCode    string
+	Clients       map[*Client]bool
+	Register      chan RegisterRequest
+	Unregister    chan *Client
+	Broadcast     chan Message
+	Outbound      chan OutboundMessage
+	RequestUsers  chan *Client
+	Private       chan PrivateMessageRequest
+	RoomJoin      chan RoomRequest
+	RoomLeave     chan *Client
+	RequestRooms  chan *Client
+	AdminAction   chan AdminActionRequest
+	ActiveCodes   map[string]*Client
+	UsedCodes     map[string]struct{}
+	Rooms         map[string]map[*Client]bool
+	RoomNames     map[string]struct{}
+	OfflineStore  *AuthStore
+	AdminCode     string
+	NextMessageID uint64
 }
 
 func NewHub() *Hub {
@@ -130,6 +134,7 @@ func NewHub() *Hub {
 		ActiveCodes:  make(map[string]*Client),
 		UsedCodes:    make(map[string]struct{}),
 		Rooms:        make(map[string]map[*Client]bool),
+		RoomNames:    map[string]struct{}{defaultRoomName: {}},
 	}
 }
 
@@ -220,6 +225,14 @@ func (h *Hub) handleAdminAction(request AdminActionRequest) {
 		}
 		return
 	}
+	if request.Action == "recall" {
+		if request.MessageID == "" {
+			h.deliverError(sender, "Message not found")
+			return
+		}
+		h.broadcastMessage(Message{Type: "message_recalled", MessageID: request.MessageID})
+		return
+	}
 	targetCode, err := normalizeUserCode(request.TargetCode)
 	if err != nil {
 		h.deliverError(sender, "Invalid target user code")
@@ -266,6 +279,10 @@ func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {
 }
 
 func (h *Hub) broadcastMessage(message Message) {
+	if message.MessageID == "" && message.Type != "message_recalled" {
+		h.NextMessageID++
+		message.MessageID = strconv.FormatUint(h.NextMessageID, 10)
+	}
 	room := ""
 	if message.UserCode != "" {
 		if normalized, err := normalizeUserCode(message.UserCode); err == nil {
@@ -379,8 +396,8 @@ func (h *Hub) handleRequestRooms(requester *Client) {
 	if _, ok := h.Clients[requester]; !ok {
 		return
 	}
-	rooms := make([]string, 0, len(h.Rooms))
-	for room := range h.Rooms {
+	rooms := make([]string, 0, len(h.RoomNames))
+	for room := range h.RoomNames {
 		rooms = append(rooms, room)
 	}
 	sort.Strings(rooms)
@@ -399,6 +416,7 @@ func (h *Hub) handleRoomJoin(request RoomRequest) {
 		h.deliverError(client, "Invalid room name")
 		return
 	}
+	h.RoomNames[request.Room] = struct{}{}
 	if request.Room == client.Room {
 		h.deliver(client, Message{Type: "system", Content: "Already in room " + client.Room})
 		return
@@ -481,6 +499,8 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 		}
 		message := Message{Type: "private_chat", Username: sender.Username,
 			UserCode: sender.UserCode, TargetUserCode: request.TargetCode, Content: request.Content}
+		h.NextMessageID++
+		message.MessageID = strconv.FormatUint(h.NextMessageID, 10)
 		if err := h.OfflineStore.SaveOfflineMessage(targetCode, message); err != nil {
 			h.deliverError(sender, "Failed to save offline message")
 			return
@@ -501,6 +521,8 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 		TargetUserCode: target.UserCode,
 		Content:        request.Content,
 	}
+	h.NextMessageID++
+	message.MessageID = strconv.FormatUint(h.NextMessageID, 10)
 	if !h.deliver(sender, message) {
 		return
 	}

@@ -75,6 +75,19 @@ void ChatListModel::updateRow(int row, const QVariantMap& values) {
     emit dataChanged(index(row, 0), index(row, 0));
 }
 
+void ChatListModel::removeRow(int row) {
+    if (row < 0 || row >= rows_.size()) return;
+    beginRemoveRows({}, row, row);
+    rows_.removeAt(row);
+    endRemoveRows();
+}
+
+void ChatListModel::removeRowsByValue(const QByteArray& roleName, const QVariant& value) {
+    for (int row = rows_.size() - 1; row >= 0; --row) {
+        if (rows_.at(row).value(QString::fromUtf8(roleName)) == value) removeRow(row);
+    }
+}
+
 void ChatListModel::clear() {
     if (rows_.isEmpty()) {
         return;

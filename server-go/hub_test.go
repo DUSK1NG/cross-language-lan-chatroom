@@ -171,9 +171,10 @@ func TestHubBroadcastsToAllRegisteredClients(t *testing.T) {
 	})
 
 	want := Message{
-		Type:     "chat",
-		Username: "Alice",
-		Content:  "你好，大家好",
+		Type:      "chat",
+		MessageID: "1",
+		Username:  "Alice",
+		Content:   "你好，大家好",
 	}
 	hub.Broadcast <- want
 
@@ -214,6 +215,7 @@ func TestHubRoutesPrivateMessageOnlyToSenderAndTarget(t *testing.T) {
 
 	want := Message{
 		Type:           "private_chat",
+		MessageID:      "1",
 		Username:       "Alice",
 		UserCode:       "A001",
 		TargetUserCode: "Bob01",
@@ -720,13 +722,13 @@ func TestHubKeepsGroupChatInsideRoom(t *testing.T) {
 	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Bob#B002 left room lobby"})
 	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Bob#B002 joined room dev_room"})
 
-	groupMessage := Message{Type: "chat", Username: "Alice", UserCode: "A001", Content: "lobby only"}
+	groupMessage := Message{Type: "chat", MessageID: "1", Username: "Alice", UserCode: "A001", Content: "lobby only"}
 	hub.Broadcast <- groupMessage
 	assertMessageReceived(t, alice.Send, groupMessage)
 	assertMessageReceived(t, charlie.Send, groupMessage)
 	assertNoMessageReceived(t, bob.Send)
 
-	privateRoomMessage := Message{Type: "chat", Username: "Bob", UserCode: "B002", Content: "dev only"}
+	privateRoomMessage := Message{Type: "chat", MessageID: "2", Username: "Bob", UserCode: "B002", Content: "dev only"}
 	hub.Broadcast <- privateRoomMessage
 	assertMessageReceived(t, bob.Send, privateRoomMessage)
 	assertNoMessageReceived(t, alice.Send)

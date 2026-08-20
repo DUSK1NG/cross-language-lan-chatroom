@@ -18,8 +18,10 @@ coverage.out
 server-go/chat.db
 server-go/*.log
 server-go/certs/
+certs/
 *.key
 *.pem
+release/
 
 # Local implementation worktrees
 .worktrees/

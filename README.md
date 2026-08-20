@@ -1,66 +1,65 @@
-# Go + C++ 跨语言局域网聊天室
+# Cross-Language LAN Chatroom
 
-一个适合本科生学习和展示的 Windows 局域网聊天室项目：Go 负责服务端，C++/Qt 6 负责客户端 GUI，使用 TCP、TLS 和自定义长度头 + JSON 协议实现跨语言通信。
+一个面向 Windows 局域网的跨语言多人聊天室：Go 负责 TLS/TCP 服务端，C++20 + Qt 6 负责桌面客户端。项目使用自定义的“4 字节大端长度头 + UTF-8 JSON”应用层协议，避免 TCP 字节流产生的粘包、拆包和半包问题。
 
-## 功能
+> 适合学习 TCP Socket、跨语言协议、Go 并发、Windows 网络开发与 Qt Quick 桌面界面设计。
 
-- Go TCP/TLS Server，监听 `0.0.0.0:8888`
-- C++20/Qt 6 Windows GUI Client
-- 多客户端群聊和 UTF-8 中文消息
-- 用户名可以重复，用户代码必须唯一且不区分大小写
-- 频道、私聊、在线成员列表
-- 离线消息
-- 未读消息数量提示
-- 成员、频道和私聊列表自动刷新
-- Alice 本地 Host 模式：当前电脑直接启动 Go Server
-- Wi-Fi 与以太网设备互通
-- TCP 粘包、拆包、半包和超长消息处理
-- Windows 防火墙和异常断线处理
+## 项目亮点
+
+- Go TLS Server：监听 `0.0.0.0:8888`，支持 Wi-Fi 与以太网设备互通。
+- C++/Qt 6 GUI Client：独立接收线程与 QML 界面线程分离，收消息不会阻塞输入。
+- 多客户端群聊：用户名可重复，但“用户代码”忽略大小写且全局唯一，例如 `Alice#A001`。
+- 频道与私聊：创建频道、切换频道、在线成员列表、自动刷新和未读提示。
+- 可靠协议：4-byte Big-Endian 长度头、UTF-8 JSON、`send_all` / `recv_all` 与 64 KiB 上限。
+- 安全连接：Go 服务端与 C++ 客户端通过 TLS 通信；私钥只保存在运行服务端的主机。
+- 消息体验：发送者名称、代码与时间；自己消息靠右、他人消息靠左；支持 Emoji、复制、引用和本地删除。
+
+## 界面展示
+
+私聊：双方消息各自显示发送者、用户代码和时间，自己发送的消息右对齐。
+
+![Alice 与 Bob 的私聊界面](screenshots/v1-private-chat.png)
+
+创建频道：频道名称只允许字母、数字和下划线。
+
+![创建频道对话框](screenshots/v1-channel-dialog.png)
+
+频道群聊：不同客户端可加入同一频道并实时收发消息。
+
+![频道群聊](screenshots/v1-channel-chat.png)
 
 ## 架构
 
 ```text
-C++/Qt Client A ─┐
-C++/Qt Client B ─┼── TLS/TCP ── Go Server
-C++/Qt Client C ─┘              0.0.0.0:8888
+Qt 6 Client A ─┐
+Qt 6 Client B ─┼── TLS / TCP :8888 ── Go Server
+Qt 6 Client C ─┘
 ```
 
-Go 服务端使用 goroutine、channel 和 Hub 模型管理客户端。每个客户端有独立的读取和写入流程，Hub 统一管理注册、注销、房间和广播。
+服务端采用 Hub 模型：Hub goroutine 串行管理客户端、注册、注销和广播；每位客户端分别拥有读写流程。客户端使用 Winsock2/OpenSSL 处理网络与 TLS，Qt Worker Thread 处理收发，QML 只负责界面呈现。
 
 ## 通信协议
 
-每条 TCP 应用层消息使用：
-
 ```text
-4 字节无符号大端长度
-+
-UTF-8 JSON Payload
+┌──────────────────────┬──────────────────────────┐
+│ 4-byte payload size  │ UTF-8 JSON payload       │
+│ uint32, big-endian   │ {"type":"chat", ...}   │
+└──────────────────────┴──────────────────────────┘
 ```
 
-长度表示 JSON 的字节数，不是字符数。允许的 Payload 大小为 1 到 64 KiB。详细定义见 [docs/protocol.md](docs/protocol.md)。
+长度字段表示 JSON 的**字节数**，而不是字符数量；最大消息体为 64 KiB。完整字段与消息类型见 [docs/protocol.md](docs/protocol.md)。
 
-## 目录
-
-```text
-server-go/                 Go 服务端
-client-cpp/                C++ Socket 客户端和 Qt GUI
-client-cpp/gui/            Qt 6 GUI 工程
-docs/protocol.md           跨语言通信协议
-docs/architecture.md       架构图
-docs/testing.md             测试说明
-screenshots/               项目截图
-```
-
-## Windows 环境
+## 环境要求
 
 - Windows 11
-- Go 1.22 或更高版本
-- Qt 6.11.x MinGW 64-bit
-- MinGW-w64 或 Visual Studio
-- CMake 和 Ninja
+- Go 1.25 或更高版本
+- Qt 6.11 MinGW 64-bit
+- CMake 3.21+、Ninja
 - OpenSSL 3.x 运行库
 
-## 构建 Go Server
+## 本机构建
+
+构建并测试 Go 服务端：
 
 ```powershell
 cd server-go
@@ -68,114 +67,84 @@ go test ./...
 go build -o chat-server.exe .
 ```
 
-启动 TLS Server：
-
-```powershell
-.\chat-server.exe -cert .\certs\server-lan.crt -key .\certs\server-lan.key -db .\chat.db
-```
-
-## 构建 Qt GUI
+构建 Qt GUI：
 
 ```powershell
 cd client-cpp\gui
-cmake --build build --config Release --parallel 2
+cmake -S . -B build -G Ninja
+cmake --build build --parallel 2
 ```
 
-生成文件：
+## 运行方式
 
-```text
-client-cpp\gui\build\lan-chat-gui.exe
-```
-
-## 运行 GUI
-
-Bob 作为客户端运行：
+先启动服务端。证书和私钥只应位于服务端主机的本地目录，且不能提交到 GitHub。
 
 ```powershell
-cd .\client-cpp\gui\build
-.\lan-chat-gui.exe
+.\server-go\chat-server.exe -addr 0.0.0.0:8888 `
+  -cert .\certs\server-lan.crt `
+  -key .\certs\server-lan.key `
+  -db .\server-go\chat.db
 ```
 
-Alice 作为本地 Host 运行：
+然后启动 GUI：
 
 ```powershell
-cd .\client-cpp\gui\build
-.\lan-chat-gui.exe
+.\client-cpp\gui\build\lan-chat-gui.exe
 ```
 
-Alice Host 页面使用：
-
-```text
-用户名：Alice
-用户代码：A001
-Go Server：server-go\chat-server.exe
-证书：certs\server-lan.crt
-私钥：certs\server-lan.key
-```
-
-Bob 连接时填写 Alice 电脑的局域网 IPv4 地址、端口 `8888` 和 CA 文件 `certs\server-lan.crt`。
+本机测试时填写 `127.0.0.1:8888`。局域网测试时，客户端应填写运行 Go Server 那台电脑的 IPv4 地址与端口 `8888`，并选择同一份 `server-lan.crt` 作为 CA 文件；客户端不需要、也不应获得私钥。
 
 ## 局域网测试
 
-在 Alice 电脑查看 IPv4：
+在服务端主机查看 IPv4：
 
 ```powershell
 ipconfig
 ```
 
-在 Bob 电脑测试 TCP 端口：
+在另一台电脑测试 TCP 可达性：
 
 ```powershell
-Test-NetConnection 192.168.1.100 -Port 8888
+Test-NetConnection <服务端IPv4> -Port 8888
 ```
 
-如果失败，检查 Windows Private Network 防火墙入站规则、路由器 AP Isolation、VLAN 和设备是否处于同一网段。不要关闭整个 Windows Defender Firewall。
+若连接失败，请检查 Windows 防火墙的 Private Network 入站规则、路由器 AP/Client Isolation、VLAN 和网络是否允许设备互访；不要关闭整个防火墙。
 
-## 已完成验收
+## 项目结构
 
-- localhost 双向通信
-- 三个客户端群聊协议测试
-- 中文消息测试
-- 快速连续发送测试
-- 重复用户代码测试
-- 客户端异常退出和重新连接测试
-- Ethernet Server + Wi-Fi Client 局域网测试
-- Alice Host + Bob Client GUI 测试
-- 频道、私聊、未读提示和自动刷新测试
+```text
+server-go/          Go TLS/TCP 服务端、Hub、协议与账户存储
+client-cpp/         C++ Socket/TLS 协议客户端
+client-cpp/gui/     Qt 6 / QML 桌面客户端
+docs/               协议、架构、局域网测试与设计文档
+scripts/            PowerShell 构建、启动与打包脚本
+screenshots/        README 使用的真实测试截图
+```
 
-## 截图
+## 已验证内容
 
-以下截图来自 v11 测试包，展示真实 Go TLS Server 连接、频道聊天和私聊界面。
-
-### Alice 与 Bob 频道聊天
-
-![Alice 与 Bob 频道聊天](screenshots/v11-room-alice-bob.png)
-
-### Alice 频道界面
-
-![Alice 频道界面](screenshots/v11-room-alice.png)
-
-### 私聊界面
-
-![私聊界面](screenshots/v11-private-chat.png)
+- localhost 双客户端登录、群聊、私聊与 UTF-8 中文消息
+- 自定义频道创建、切换和成员列表刷新
+- Alice 主机与 Bob 客户端的 TLS 连接
+- 发送者名称、用户代码、时间与左右消息布局
+- Wi-Fi 客户端连接以太网服务端的局域网测试
+- Go 服务端单元测试与 Qt/CMake 构建
 
 ## 当前限制
 
-- 主要面向 Windows
-- 当前没有公网 NAT 穿透
-- 没有文件、图片、语音和视频传输
-- 管理员功能仍需继续完善
-- 证书为局域网学习项目使用的自签名证书
+- 仅支持群聊和一对一私聊；无公网 NAT 穿透。
+- 无文件、图片、语音或视频传输。
+- 消息历史查询功能暂未提供。
+- 服务端的管理员撤回协议已保留，但完整的管理员可视化菜单仍在后续计划中。
+- 局域网环境使用自签名证书；更换服务端 IP 后需重新签发包含该 IP 的证书。
 
 ## 后续方向
 
-- 完善管理员菜单、禁言和踢出功能
-- 房间权限和密码
-- Qt 设置页和主题完善
-- SQLite 聊天记录管理
-- 正式 CA 或生产环境证书
-- Linux、Android 或 Web 客户端
+- 完善管理员菜单与频道权限。
+- 增加可检索的本地历史记录。
+- 增加房间密码、TLS 证书管理与正式部署配置。
+- 探索 Linux、Android 或 Web 客户端。
 
-## 简历描述
+## 简历描述参考
 
-独立开发基于 Go 与 C++ 的跨语言局域网多人聊天室，使用 TLS/TCP Socket 和 4 字节大端长度头 + UTF-8 JSON 协议解决跨语言通信与 TCP 粘包拆包问题；Go 服务端采用 goroutine/channel 管理并发客户端、房间和消息广播，C++/Qt 客户端基于 OpenSSL、Winsock2 与 std::thread 实现异步收发，并完成 Wi-Fi 与以太网跨设备通信测试。
+独立开发 Go 与 C++ 跨语言局域网多人聊天室，基于 TCP Socket 设计 4 字节长度头 + JSON 协议解决粘包与拆包；Go 服务端利用 goroutine/channel 管理并发连接与广播，C++ 客户端使用 Winsock2、OpenSSL 与 Qt 6 实现 TLS 异步收发、频道和私聊，并完成跨 Wi-Fi/以太网设备通信验证。
