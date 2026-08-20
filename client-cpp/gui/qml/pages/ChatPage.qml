@@ -13,6 +13,8 @@ Item {
     property var directMessageModel: chatController.directMessageModel
     property var messageModel: chatController.activeMessageModel
     property var memberModel: chatController.memberModel
+    property string sidebarQuery: ""
+    property bool compactLayout: width < 1200
     signal settingsRequested()
 
     function selectRoom(roomName) {
@@ -37,10 +39,14 @@ Item {
                 chatController.sendPrivateMessage(composer.text, root.activeDirectMessage)
             }
         } else {
-            chatController.sendMockMessage(composer.text)
+            return
         }
         composer.text = ""
         messageList.positionViewAtEnd()
+    }
+
+    function quoteMessage(sender, content) {
+        composer.text = "> " + sender + "：" + content + "\n"
     }
 
     function showProfile(name, code, isAdmin) {
@@ -80,9 +86,15 @@ Item {
                 anchors.margins: 16
                 spacing: 12
 
-                Label { text: "LAN CHAT"; color: Theme.primaryText; font.pixelSize: 16; font.weight: Font.DemiBold }
-                GlassButton { Layout.fillWidth: true; accent: true; text: "新建频道"; onClicked: createRoomDialog.open() }
-                Label { text: "房间"; color: Theme.secondaryText; font.pixelSize: 12 }
+                Label { text: "LAN CHAT"; color: Theme.primaryText; font.pixelSize: Theme.fontBodyLarge; font.weight: Font.DemiBold }
+                AppTextField {
+                    Layout.fillWidth: true
+                    iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/search.svg"
+                    placeholderText: "搜索频道或私聊"
+                    onTextChanged: root.sidebarQuery = text.trim().toLowerCase()
+                }
+                AppButton { Layout.fillWidth: true; variant: "primary"; iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/plus.svg"; text: "新建频道"; onClicked: createRoomDialog.open() }
+                Label { text: "CHANNELS"; color: Theme.secondaryText; font.pixelSize: Theme.fontCaption; font.weight: Font.DemiBold }
 
                 Repeater {
                     model: root.roomModel
@@ -91,12 +103,13 @@ Item {
                         roomName: model.roomName
                         memberCount: model.memberCount
                         unreadCount: model.unreadCount
+                        visible: root.sidebarQuery.length === 0 || model.roomName.toLowerCase().indexOf(root.sidebarQuery) >= 0
                         selected: root.activeRoom === model.roomName && root.activeDirectMessage === ""
                         onItemSelected: root.selectRoom(roomName)
                     }
                 }
 
-                Label { text: "私聊"; color: Theme.secondaryText; font.pixelSize: 12; Layout.topMargin: 8 }
+                Label { text: "DIRECT MESSAGES"; color: Theme.secondaryText; font.pixelSize: Theme.fontCaption; font.weight: Font.DemiBold; Layout.topMargin: Theme.spacingS }
                 Repeater {
                     model: root.directMessageModel
                     delegate: DirectMessageItem {
@@ -104,6 +117,7 @@ Item {
                         displayName: model.displayName
                         userCode: model.userCode
                         unreadCount: model.unreadCount
+                        visible: root.sidebarQuery.length === 0 || model.displayName.toLowerCase().indexOf(root.sidebarQuery) >= 0 || model.userCode.toLowerCase().indexOf(root.sidebarQuery) >= 0
                         selected: root.activeDirectMessage === model.userCode
                         onItemSelected: root.selectDirectMessage(displayName, userCode)
                     }
@@ -157,6 +171,8 @@ Item {
                 ChatHeader {
                     Layout.fillWidth: true
                     onSettingsRequested: root.settingsRequested()
+                    onMembersRequested: memberPopup.open()
+                    showMembersButton: root.compactLayout
                     title: root.headerTitle
                     subtitle: root.activeDirectMessage === ""
                               ? (chatController.connected ? "学习交流 · Go TLS Server" : "学习交流 · 未连接")
@@ -176,14 +192,21 @@ Item {
                     model: root.messageModel
                     delegate: MessageDelegate {
                         width: messageList.width
-                        sender: model.sender
+                        messageId: model.messageId
+                        displayName: model.displayName
                         userCode: model.userCode
                         time: model.time
                         content: model.content
                         selfMessage: model.selfMessage
                         systemMessage: model.systemMessage
+                        canRecall: chatController.admin && messageId.length > 0
+                        onCopyRequested: chatController.copyText(content)
+                        onQuoteRequested: function(senderName, messageContent) { root.quoteMessage(senderName, messageContent) }
+                        onLocalDeleteRequested: chatController.removeLocalMessage(messageId)
+                        onRecallRequested: chatController.recallMessage(messageId)
+                        onProfileRequested: root.showProfile(displayName, userCode, false)
                     }
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    ScrollBar.vertical: AppScrollBar { }
                 }
 
                 MessageComposer {
@@ -197,6 +220,7 @@ Item {
         Rectangle {
             Layout.preferredWidth: 248
             Layout.fillHeight: true
+            visible: !root.compactLayout
             color: Theme.panel
             border.color: Theme.borderSoft
             border.width: 1
@@ -226,8 +250,9 @@ Item {
                         font.weight: Font.DemiBold
                         Layout.fillWidth: true
                     }
-                    GlassButton {
+                    AppButton {
                         compact: true
+                        iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/refresh.svg"
                         text: "刷新"
                         onClicked: { chatController.requestUsers(); chatController.requestRooms() }
                     }
@@ -248,7 +273,7 @@ Item {
                         admin: model.admin
                         onUserSelected: root.showProfile(displayName, userCode, admin)
                     }
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    ScrollBar.vertical: AppScrollBar { }
                 }
             }
         }
@@ -263,7 +288,63 @@ Item {
         }
     }
 
-    Dialog {
+    Popup {
+        id: memberPopup
+        width: 280
+        height: Math.min(root.height - 48, 520)
+        modal: true
+        focus: true
+        anchors.centerIn: Overlay.overlay
+        padding: Theme.spacingM
+
+        background: Rectangle {
+            radius: Theme.radiusLarge
+            color: Qt.rgba(0.12, 0.14, 0.17, 0.97)
+            border.color: Theme.border
+            border.width: 1
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: Theme.spacingS
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "在线成员 · " + chatController.onlineMemberCount
+                    color: Theme.primaryText
+                    font.pixelSize: Theme.fontBodyLarge
+                    font.weight: Font.DemiBold
+                    Layout.fillWidth: true
+                }
+                IconButton {
+                    iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/close.svg"
+                    tooltipText: "关闭"
+                    onClicked: memberPopup.close()
+                }
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: Theme.spacingXS
+                model: root.memberModel
+                delegate: MemberItem {
+                    width: memberPopup.width - Theme.spacingXL
+                    displayName: model.displayName
+                    userCode: model.userCode
+                    online: model.online
+                    admin: model.admin
+                    onUserSelected: {
+                        root.showProfile(displayName, userCode, admin)
+                        memberPopup.close()
+                    }
+                }
+                ScrollBar.vertical: AppScrollBar { }
+            }
+        }
+    }
+
+    AppDialog {
         id: createRoomDialog
         title: "新建频道"
         modal: true
@@ -273,12 +354,12 @@ Item {
         footer: RowLayout {
             width: createRoomDialog.width - createRoomDialog.leftPadding - createRoomDialog.rightPadding
             spacing: 8
-            GlassButton {
+            AppButton {
                 compact: true
                 text: "取消"
                 onClicked: createRoomDialog.reject()
             }
-            GlassButton {
+            AppButton {
                 compact: true
                 accent: true
                 text: "确定"
@@ -309,7 +390,7 @@ Item {
                 color: Theme.secondaryText
                 wrapMode: Text.WordWrap
             }
-            TextField {
+            AppTextField {
                 id: roomNameInput
                 Layout.fillWidth: true
                 placeholderText: "例如 study_group"

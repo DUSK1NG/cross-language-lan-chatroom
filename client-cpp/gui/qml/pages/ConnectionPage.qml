@@ -42,7 +42,7 @@ Item {
             rowSpacing: 10
 
             Label { text: "服务器 IP"; color: Theme.primaryText }
-            TextField {
+            AppTextField {
                 id: serverIp
                 Layout.fillWidth: true
                 text: "127.0.0.1"
@@ -51,7 +51,7 @@ Item {
             }
 
             Label { text: "端口"; color: Theme.primaryText }
-            TextField {
+            AppTextField {
                 id: serverPort
                 Layout.fillWidth: true
                 text: "8888"
@@ -60,13 +60,13 @@ Item {
             }
 
             Label { text: "用户名"; color: Theme.primaryText }
-            TextField { id: username; Layout.fillWidth: true; text: root.modeName === "Guest" ? "Bob" : "Alice"; selectByMouse: true }
+            AppTextField { id: username; Layout.fillWidth: true; text: root.modeName === "Guest" ? "Bob" : "Alice" }
 
             Label { text: "用户代码"; color: Theme.primaryText }
-            TextField { id: userCode; Layout.fillWidth: true; text: root.modeName === "Guest" ? "B001" : "A001"; selectByMouse: true }
+            AppTextField { id: userCode; Layout.fillWidth: true; text: root.modeName === "Guest" ? "B001" : "A001" }
 
             Label { text: "密码"; color: Theme.primaryText }
-            TextField {
+            AppTextField {
                 id: password
                 Layout.fillWidth: true
                 echoMode: TextInput.Password
@@ -74,7 +74,7 @@ Item {
             }
 
             Label { text: "CA 文件"; color: Theme.primaryText }
-            TextField {
+            AppTextField {
                 id: caFile
                 Layout.fillWidth: true
                 placeholderText: "留空则使用系统证书"
@@ -85,9 +85,10 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: 10
-            GlassButton { text: "返回"; onClicked: root.backRequested() }
+            AppButton { text: "返回"; onClicked: root.backRequested() }
             Item { Layout.fillWidth: true }
-            GlassButton {
+            AppButton {
+                variant: "primary"
                 accent: true
                 text: "连接"
                 enabled: serverIp.text.length > 0 && serverPort.text.length > 0 &&

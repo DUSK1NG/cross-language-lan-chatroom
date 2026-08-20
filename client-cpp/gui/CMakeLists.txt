@@ -17,8 +17,6 @@ qt_add_executable(lan-chat-gui
     src/main.cpp
     src/chat_model.cpp
     src/chat_model.hpp
-    src/mock_chat_controller.cpp
-    src/mock_chat_controller.hpp
     src/gui_connection_worker.cpp
     src/gui_connection_worker.hpp
     src/gui_chat_controller.cpp
@@ -39,6 +37,13 @@ qt_add_qml_module(lan-chat-gui
     QML_FILES
         qml/Main.qml
         qml/theme/Theme.qml
+        qml/controls/AppButton.qml
+        qml/controls/IconButton.qml
+        qml/controls/AppTextField.qml
+        qml/controls/AppDialog.qml
+        qml/controls/AppScrollBar.qml
+        qml/controls/Avatar.qml
+        qml/controls/Badge.qml
         qml/components/TitleBar.qml
         qml/components/GlassButton.qml
         qml/components/RoomItem.qml
@@ -47,12 +52,27 @@ qt_add_qml_module(lan-chat-gui
         qml/components/MessageDelegate.qml
         qml/components/MemberItem.qml
         qml/components/MessageComposer.qml
+        qml/components/EmojiPicker.qml
         qml/components/UserProfilePopup.qml
         qml/pages/ModeSelectionPage.qml
         qml/pages/ConnectionPage.qml
         qml/pages/HostSetupPage.qml
         qml/pages/ChatPage.qml
         qml/pages/SettingsPage.qml
+    RESOURCES
+        qml/icons/server.svg
+        qml/icons/network.svg
+        qml/icons/users.svg
+        qml/icons/settings.svg
+        qml/icons/search.svg
+        qml/icons/send.svg
+        qml/icons/plus.svg
+        qml/icons/refresh.svg
+        qml/icons/close.svg
+        qml/icons/minimize.svg
+        qml/icons/maximize.svg
+        qml/icons/restore.svg
+        qml/icons/emoji.svg
 )
 
 target_link_libraries(lan-chat-gui PRIVATE

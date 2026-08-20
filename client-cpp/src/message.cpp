@@ -15,6 +15,7 @@ void set_error(const std::string& error) {
 
 nlohmann::json serialize(const Message& message) {
     nlohmann::json object = nlohmann::json{{"type", message.type}};
+    if (!message.message_id.empty()) object["message_id"] = message.message_id;
     if (!message.username.empty()) object["username"] = message.username;
     if (!message.user_code.empty()) object["user_code"] = message.user_code;
     if (!message.target_user_code.empty()) object["target_user_code"] = message.target_user_code;
@@ -52,6 +53,7 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             return true;
         };
         if (!read_string("username", parsed.username) ||
+            !read_string("message_id", parsed.message_id) ||
             !read_string("user_code", parsed.user_code) ||
             !read_string("target_user_code", parsed.target_user_code) ||
             !read_string("room", parsed.room) ||

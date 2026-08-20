@@ -7,7 +7,9 @@ Rectangle {
     id: root
     property string title: "# lobby"
     property string subtitle: ""
+    property bool showMembersButton: false
     signal settingsRequested()
+    signal membersRequested()
     radius: 14
     color: Theme.panel
     border.color: Theme.border
@@ -42,22 +44,15 @@ Rectangle {
             Layout.leftMargin: 4
         }
         Item { Layout.fillWidth: true }
-        ToolButton {
-            text: "⚙"
-            background: Rectangle {
-                radius: 9
-                color: parent.hovered ? Theme.surfaceHover : Qt.rgba(1, 1, 1, 0.02)
-                border.color: parent.hovered ? Theme.glassHighlight : "transparent"
-                border.width: 1
-            }
+        IconButton {
+            visible: root.showMembersButton
+            iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/users.svg"
+            tooltipText: "在线成员"
+            onClicked: root.membersRequested()
+        }
+        IconButton {
+            iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/settings.svg"
             onClicked: root.settingsRequested()
-            contentItem: Text {
-                text: parent.text
-                color: parent.hovered ? Theme.primaryText : Theme.secondaryText
-                font.pixelSize: 18
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
         }
     }
 }

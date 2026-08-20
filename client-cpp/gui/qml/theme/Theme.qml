@@ -3,6 +3,7 @@ import QtQuick
 import QtQml
 
 QtObject {
+    // Color tokens
     readonly property color background: "#101318"
     readonly property color surface: Qt.rgba(0.14, 0.16, 0.19, 0.82)
     readonly property color panel: Qt.rgba(0.16, 0.18, 0.22, 0.78)
@@ -24,4 +25,30 @@ QtObject {
     readonly property color selfBubble: Qt.rgba(0.68, 0.76, 0.86, 0.30)
     readonly property color success: "#5bd49a"
     readonly property color danger: "#ef7d8a"
+
+    // Spacing tokens
+    readonly property int spacingXS: 4
+    readonly property int spacingS: 8
+    readonly property int spacingM: 12
+    readonly property int spacingL: 16
+    readonly property int spacingXL: 24
+    readonly property int spacingXXL: 32
+
+    // Radius tokens
+    readonly property int radiusSmall: 6
+    readonly property int radiusMedium: 10
+    readonly property int radiusLarge: 16
+    readonly property int radiusRound: 999
+
+    // Typography tokens
+    readonly property int fontCaption: 12
+    readonly property int fontBody: 13
+    readonly property int fontBodyLarge: 15
+    readonly property int fontTitle: 20
+    readonly property int fontHeading: 28
+
+    // Animation tokens
+    readonly property int animationFast: 100
+    readonly property int animationNormal: 180
+    readonly property int animationSlow: 260
 }

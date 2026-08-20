@@ -245,7 +245,7 @@ func (c *Client) readPump(hub *Hub) {
 				}
 				continue
 			}
-			hub.AdminAction <- AdminActionRequest{Sender: c, Action: message.Content, TargetCode: message.TargetUserCode}
+			hub.AdminAction <- AdminActionRequest{Sender: c, Action: message.Content, TargetCode: message.TargetUserCode, MessageID: message.MessageID}
 
 		case "quit":
 			hub.Unregister <- c

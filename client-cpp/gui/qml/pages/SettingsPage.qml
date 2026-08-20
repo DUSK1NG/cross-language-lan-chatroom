@@ -14,7 +14,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            GlassButton { text: "‹ 返回"; onClicked: root.backRequested() }
+            AppButton { text: "‹ 返回"; onClicked: root.backRequested() }
             Label { text: "设置"; color: Theme.primaryText; font.pixelSize: 24; font.weight: Font.DemiBold }
         }
 

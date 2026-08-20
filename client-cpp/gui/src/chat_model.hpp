@@ -20,6 +20,8 @@ public:
     int findRow(const QByteArray& roleName, const QVariant& value) const;
     QVariant valueAt(int row, const QByteArray& roleName) const;
     void updateRow(int row, const QVariantMap& values);
+    void removeRow(int row);
+    void removeRowsByValue(const QByteArray& roleName, const QVariant& value);
     void clear();
 
 private:

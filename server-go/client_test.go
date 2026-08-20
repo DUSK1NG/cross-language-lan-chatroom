@@ -251,6 +251,7 @@ func TestHandleConnectionPrivateChatUsesBoundIdentity(t *testing.T) {
 
 	want := Message{
 		Type:           "private_chat",
+		MessageID:      "1",
 		Username:       "Alice",
 		UserCode:       "A001",
 		TargetUserCode: "Bob01",
@@ -510,7 +511,7 @@ func TestWritePumpUnregistersAfterWriteFailureAndHealthyClientsContinue(t *testi
 		Content: "Failing#Failing01 left the chat",
 	})
 
-	want := Message{Type: "chat", Username: "Healthy", Content: "healthy client still receives"}
+	want := Message{Type: "chat", MessageID: "1", Username: "Healthy", Content: "healthy client still receives"}
 	hub.Broadcast <- want
 	assertMessageReceived(t, healthy.Send, want)
 }

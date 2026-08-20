@@ -18,24 +18,25 @@ Item {
         GridLayout {
             columns: 2; Layout.fillWidth: true; columnSpacing: 12; rowSpacing: 10
             Label { text: "用户名"; color: Theme.primaryText }
-            TextField { id: username; Layout.fillWidth: true; text: "Alice" }
+            AppTextField { id: username; Layout.fillWidth: true; text: "Alice" }
             Label { text: "用户代码"; color: Theme.primaryText }
-            TextField { id: userCode; Layout.fillWidth: true; text: "A001" }
+            AppTextField { id: userCode; Layout.fillWidth: true; text: "A001" }
             Label { text: "Go Server"; color: Theme.primaryText }
-            TextField { id: serverExe; Layout.fillWidth: true; text: hostServerExe }
+            AppTextField { id: serverExe; Layout.fillWidth: true; text: hostServerExe }
             Label { text: "证书"; color: Theme.primaryText }
-            TextField { id: certFile; Layout.fillWidth: true; text: hostCertFile }
+            AppTextField { id: certFile; Layout.fillWidth: true; text: hostCertFile }
             Label { text: "私钥"; color: Theme.primaryText }
-            TextField { id: keyFile; Layout.fillWidth: true; text: hostKeyFile }
+            AppTextField { id: keyFile; Layout.fillWidth: true; text: hostKeyFile }
             Label { text: "数据库"; color: Theme.primaryText }
-            TextField { id: dbFile; Layout.fillWidth: true; text: hostDbFile }
+            AppTextField { id: dbFile; Layout.fillWidth: true; text: hostDbFile }
         }
 
         RowLayout {
             Layout.fillWidth: true
-            GlassButton { text: "返回"; onClicked: root.backRequested() }
+            AppButton { text: "返回"; onClicked: root.backRequested() }
             Item { Layout.fillWidth: true }
-            GlassButton {
+            AppButton {
+                variant: "primary"
                 accent: true
                 text: "启动本地聊天室"
                 enabled: !chatController.connected && username.text.length > 0 && userCode.text.length > 0

@@ -10,7 +10,7 @@ Rectangle {
     property bool selected: false
     signal itemSelected()
     height: 42
-    radius: 8
+    radius: Theme.radiusMedium
     color: selected ? Theme.accentSoft : mouse.containsMouse ? Theme.surfaceHover : Qt.rgba(1, 1, 1, 0.015)
     border.color: selected ? Theme.glassHighlight : "transparent"
     border.width: selected ? 1 : 0
@@ -20,19 +20,19 @@ Rectangle {
 
     Label {
         anchors.left: parent.left
-        anchors.leftMargin: 12
+        anchors.leftMargin: Theme.spacingM
         anchors.verticalCenter: parent.verticalCenter
         text: "●  " + root.displayName
         color: Theme.primaryText
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontBody
     }
     Label {
         anchors.right: parent.right
-        anchors.rightMargin: 12
+        anchors.rightMargin: Theme.spacingM
         anchors.verticalCenter: parent.verticalCenter
         text: root.unreadCount > 0 ? root.unreadCount : ""
         color: Theme.accent
-        font.pixelSize: 11
+        font.pixelSize: Theme.fontCaption
     }
     MouseArea {
         id: mouse

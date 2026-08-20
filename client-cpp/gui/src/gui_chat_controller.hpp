@@ -53,13 +53,15 @@ public:
     Q_INVOKABLE void sendChatMessage(const QString& content);
     Q_INVOKABLE void sendRoomMessage(const QString& content, const QString& room);
     Q_INVOKABLE void sendPrivateMessage(const QString& content, const QString& targetUserCode);
-    Q_INVOKABLE void sendMockMessage(const QString& content);
     Q_INVOKABLE void requestUsers();
     Q_INVOKABLE void requestRooms();
     Q_INVOKABLE void selectRoom(const QString& room);
     Q_INVOKABLE void selectDirectMessage(const QString& userCode);
     Q_INVOKABLE void openPrivateChat(const QString& displayName, const QString& userCode);
-    Q_INVOKABLE void sendAdminAction(const QString& action, const QString& targetUserCode);
+    Q_INVOKABLE void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {});
+    Q_INVOKABLE void copyText(const QString& text);
+    Q_INVOKABLE void removeLocalMessage(const QString& messageId);
+    Q_INVOKABLE void recallMessage(const QString& messageId);
 
 signals:
     void connectedChanged();
@@ -73,7 +75,7 @@ private slots:
     void handleConnected(bool isAdmin);
     void handleConnectionFailed(const QString& reason);
     void handleConnectionLost(const QString& reason);
-    void handleMessage(const QString& type, const QString& username,
+    void handleMessage(const QString& type, const QString& messageId, const QString& username,
                        const QString& userCode, const QString& content,
                        const QString& room, const QString& targetUserCode,
                        const QStringList& users, const QStringList& rooms, bool isAdmin);
@@ -85,7 +87,7 @@ private:
     void incrementUnreadForConversation(const QString& key, const QString& username,
                                         const QString& userCode);
     ChatListModel* ensureConversationModel(const QString& key);
-    void clearMockDataForRealSession();
+    void resetSessionData();
 
     ChatListModel* roomModel_;
     ChatListModel* directMessageModel_;
@@ -104,4 +106,5 @@ private:
     QString localUserCode_ = QStringLiteral("A001");
     QString joinedRoom_ = QStringLiteral("lobby");
     int onlineMemberCount_ = 0;
+    int localMessageCounter_ = 0;
 };

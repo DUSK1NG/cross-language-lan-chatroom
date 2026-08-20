@@ -3,9 +3,11 @@
 #include "gui_connection_worker.hpp"
 
 #include <QDateTime>
+#include <QGuiApplication>
+#include <QClipboard>
 
 namespace {
-const QStringList kMessageRoles = {"sender", "userCode", "time", "content", "selfMessage", "systemMessage"};
+const QStringList kMessageRoles = {"messageId", "displayName", "userCode", "time", "content", "selfMessage", "systemMessage"};
 }
 
 GuiChatController::GuiChatController(QObject* parent)
@@ -17,22 +19,16 @@ GuiChatController::GuiChatController(QObject* parent)
       worker_(new GuiConnectionWorker) {
     conversationModels_.insert("room:lobby", messageModel_);
 
-    roomModel_->append({{"roomName", "lobby"}, {"memberCount", 3}, {"unreadCount", 0}});
-    roomModel_->append({{"roomName", "study"}, {"memberCount", 5}, {"unreadCount", 2}});
-    roomModel_->append({{"roomName", "gaming"}, {"memberCount", 4}, {"unreadCount", 0}});
-    directMessageModel_->append({{"displayName", "Bob"}, {"userCode", "B002"}, {"unreadCount", 2}});
-    directMessageModel_->append({{"displayName", "Chen"}, {"userCode", "C003"}, {"unreadCount", 0}});
 
-    messageModel_->append({{"sender", "Alice"}, {"userCode", "A001"}, {"time", "18:24"},
+    #if 0
+    messageModel_->append({{"messageId", "legacy-1"}, {"displayName", "Alice"}, {"userCode", "A001"}, {"time", "18:24"},
                            {"content", "今天的学习资料整理好了吗？"}, {"selfMessage", false}, {"systemMessage", false}});
-    messageModel_->append({{"sender", "Bob"}, {"userCode", "B002"}, {"time", "18:25"},
+    messageModel_->append({{"messageId", "legacy-2"}, {"displayName", "Bob"}, {"userCode", "B002"}, {"time", "18:25"},
                            {"content", "我已经完成了，可以发到这里。"}, {"selfMessage", false}, {"systemMessage", false}});
-    messageModel_->append({{"sender", "Mock User"}, {"userCode", "A001"}, {"time", "18:26"},
+    messageModel_->append({{"messageId", "legacy-3"}, {"displayName", "Local User"}, {"userCode", "A001"}, {"time", "18:26"},
                            {"content", "好的，谢谢！"}, {"selfMessage", true}, {"systemMessage", false}});
-    memberModel_->append({{"displayName", "Alice"}, {"userCode", "A001"}, {"online", true}, {"admin", true}});
-    memberModel_->append({{"displayName", "Bob"}, {"userCode", "B002"}, {"online", true}, {"admin", false}});
-    memberModel_->append({{"displayName", "Chen"}, {"userCode", "C003"}, {"online", true}, {"admin", false}});
 
+    #endif
     refreshTimer_.setInterval(3000);
     connect(&refreshTimer_, &QTimer::timeout, this, [this]() {
         if (connected_) {
@@ -117,14 +113,6 @@ void GuiChatController::sendPrivateMessage(const QString& content, const QString
                               Q_ARG(QString, content), Q_ARG(QString, targetUserCode));
 }
 
-void GuiChatController::sendMockMessage(const QString& content) {
-    const QString trimmed = content.trimmed();
-    if (trimmed.isEmpty()) return;
-    messageModel_->append({{"sender", "Mock User"}, {"userCode", "A001"},
-                           {"time", QDateTime::currentDateTime().toString("HH:mm")},
-                           {"content", trimmed}, {"selfMessage", true}, {"systemMessage", false}});
-}
-
 void GuiChatController::requestUsers() {
     QMetaObject::invokeMethod(worker_, "requestUsers", Qt::QueuedConnection);
 }
@@ -185,13 +173,31 @@ void GuiChatController::openPrivateChat(const QString& displayName, const QStrin
     selectDirectMessage(userCode);
 }
 
-void GuiChatController::sendAdminAction(const QString& action, const QString& targetUserCode) {
+void GuiChatController::sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId) {
     QMetaObject::invokeMethod(worker_, "sendAdminAction", Qt::QueuedConnection,
-                              Q_ARG(QString, action), Q_ARG(QString, targetUserCode));
+                              Q_ARG(QString, action), Q_ARG(QString, targetUserCode), Q_ARG(QString, messageId));
+}
+
+void GuiChatController::copyText(const QString& text) {
+    if (QGuiApplication::clipboard()) QGuiApplication::clipboard()->setText(text);
+}
+
+void GuiChatController::removeLocalMessage(const QString& messageId) {
+    if (messageId.isEmpty()) return;
+    for (ChatListModel* model : conversationModels_) {
+        model->removeRowsByValue("messageId", messageId);
+    }
+}
+
+void GuiChatController::recallMessage(const QString& messageId) {
+    if (!admin_ || messageId.isEmpty()) return;
+    QMetaObject::invokeMethod(worker_, "sendAdminAction", Qt::QueuedConnection,
+                              Q_ARG(QString, QStringLiteral("recall")),
+                              Q_ARG(QString, QString()), Q_ARG(QString, messageId));
 }
 
 void GuiChatController::handleConnected(bool isAdmin) {
-    clearMockDataForRealSession();
+    resetSessionData();
     connected_ = true;
     if (admin_ != isAdmin) {
         admin_ = isAdmin;
@@ -204,7 +210,7 @@ void GuiChatController::handleConnected(bool isAdmin) {
     requestUsers();
 }
 
-void GuiChatController::clearMockDataForRealSession() {
+void GuiChatController::resetSessionData() {
     roomModel_->clear();
     roomModel_->append({{"roomName", "lobby"}, {"memberCount", 0}, {"unreadCount", 0}});
     directMessageModel_->clear();
@@ -244,7 +250,7 @@ void GuiChatController::handleConnectionLost(const QString& reason) {
     appendSystemMessage(statusText_);
 }
 
-void GuiChatController::handleMessage(const QString& type, const QString& username,
+void GuiChatController::handleMessage(const QString& type, const QString& messageId, const QString& username,
                                       const QString& userCode, const QString& content,
                                       const QString& room, const QString& targetUserCode,
                                       const QStringList& users, const QStringList& rooms, bool isAdmin) {
@@ -327,11 +333,21 @@ void GuiChatController::handleMessage(const QString& type, const QString& userna
             key = "room:" + (room.isEmpty() ? QStringLiteral("lobby") : room);
         }
         const bool isSelf = !localUserCode_.isEmpty() && userCode.compare(localUserCode_, Qt::CaseInsensitive) == 0;
-        ensureConversationModel(key)->append({{"sender", username}, {"userCode", userCode},
+        const QString effectiveUsername = username.trimmed().isEmpty()
+            ? (isSelf ? localUserName_ : (userCode.trimmed().isEmpty() ? QStringLiteral("未知用户") : userCode))
+            : username;
+        const QString effectiveMessageId = messageId.isEmpty()
+            ? QStringLiteral("local-%1").arg(++localMessageCounter_)
+            : messageId;
+        ensureConversationModel(key)->append({{"messageId", effectiveMessageId}, {"displayName", effectiveUsername}, {"userCode", userCode},
                                                {"time", QDateTime::currentDateTime().toString("HH:mm")},
                                                {"content", content}, {"selfMessage", isSelf}, {"systemMessage", false}});
         if (!isSelf && key != activeConversationKey_) {
             incrementUnreadForConversation(key, username, userCode);
+        }
+    } else if (type == QStringLiteral("message_recalled")) {
+        if (!messageId.isEmpty()) {
+            for (ChatListModel* model : conversationModels_) model->removeRowsByValue("messageId", messageId);
         }
     } else if (type == QStringLiteral("system") && !room.isEmpty()) {
         // 系统提示属于服务端广播时所在的房间，不能跟随当前打开的私聊窗口。
@@ -355,7 +371,7 @@ void GuiChatController::appendSystemMessage(const QString& content) {
 
 void GuiChatController::appendSystemMessageToModel(ChatListModel* model, const QString& content) {
     if (!model) return;
-    model->append({{"sender", ""}, {"userCode", ""},
+    model->append({{"messageId", ""}, {"displayName", ""}, {"userCode", ""},
                    {"time", QDateTime::currentDateTime().toString("HH:mm")},
                    {"content", content}, {"selfMessage", false}, {"systemMessage", true}});
 }
