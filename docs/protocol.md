@@ -101,13 +101,24 @@ TCP 不保证一次 `send()` 对应一次 `recv()`，因此双方必须循环读
 
 私聊只发送给发送者和目标用户，不受频道限制。目标代码不存在、目标是自己或消息内容非法时，服务端只向发送者返回 `error`。
 
-## 6. 频道和在线成员
+## 6. 频道、权限和在线成员
 
 ```json
 {"type":"room_join","room":"study_group"}
+{"type":"room_create","room":"private_group","private":true}
 {"type":"room_leave"}
 {"type":"rooms_request"}
 {"type":"users_request"}
+```
+
+频道只能由 `room_create` 创建；`room_join` 只会加入已存在的频道。私有频道仅管理员、频道创建者和被邀请的成员可见、可加入。
+
+频道创建者或全局管理员可发送：
+
+```json
+{"type":"room_action","content":"invite","room":"private_group","target_user_code":"B001"}
+{"type":"room_action","content":"remove_member","room":"private_group","target_user_code":"B001"}
+{"type":"room_action","content":"delete","room":"private_group"}
 ```
 
 服务端返回：
@@ -116,14 +127,21 @@ TCP 不保证一次 `send()` 对应一次 `recv()`，因此双方必须循环读
 {
   "type": "rooms_response",
   "rooms": ["lobby", "study_group"],
-  "room": "study_group"
+  "room": "study_group",
+  "room_details": [
+    {"name":"lobby","private":false,"can_manage":false},
+    {"name":"study_group","owner_code":"A001","private":true,"can_manage":true}
+  ]
 }
 ```
 
 ```json
 {
   "type": "users_response",
-  "users": ["Alice#A001@lobby", "Bob#B001@study_group"]
+  "users": ["Alice#A001@lobby", "Bob#B001@study_group"],
+  "user_details": [
+    {"username":"Alice","user_code":"A001","room":"lobby","is_admin":true}
+  ]
 }
 ```
 

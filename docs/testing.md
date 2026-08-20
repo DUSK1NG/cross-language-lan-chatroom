@@ -5,7 +5,7 @@
 ## 1. 环境
 
 - Windows 11
-- Go SDK（本文示例使用 `C:\Users\jking1\go-sdk\go\bin`）
+- Go SDK 1.25+
 - MinGW-w64 g++
 - CMake 3.20+
 - CTest（随 CMake 安装）
@@ -15,23 +15,18 @@
 
 本机已配置并验证：CMake/CTest 4.3.3，MinGW Make 4.4.1；`C:\msys64\mingw64\bin` 已加入当前 Windows 用户的 `PATH`。
 
-进入项目目录：
+进入项目目录（将路径替换为你的本地克隆目录）：
 
 ```powershell
-cd C:\Users\jking1\Desktop\my-project\chat_X
+cd <项目根目录>
 ```
 
 ## 2. Go 全量验证
 
 ```powershell
-$env:Path = 'C:\Users\jking1\go-sdk\go\bin;' + $env:Path
-$env:GO111MODULE = 'off'
-$env:GOCACHE = 'C:\Users\jking1\Desktop\my-project\chat_X\server-go\.go-build-cache'
 cd server-go
 gofmt -w *.go
 go test ./...
-go test -race ./...
-go vet ./...
 go build -o chat-server.exe .
 ```
 
@@ -160,14 +155,14 @@ cd ..\client-cpp
 
 私聊验收的关键结论是：成功消息只到达发送者和目标用户；未知目标和自己发送只返回发送者错误；第三个客户端不会收到私聊内容。
 
-### 5.2 三客户端房间验收
+### 5.2 频道权限验收
 
-1. 三个客户端分别登录后，确认初始房间都是 `lobby`。
-2. Bob 输入 `/join study_room`，Alice 和 Charlie 仍留在 `lobby`。
-3. Bob 发送群聊，只有 Bob 能看到；Alice 和 Charlie 不应收到。
-4. Alice 输入 `/rooms`，确认列表包含 `lobby` 和 `study_room`。
-5. Alice 输入 `/join study_room` 后，Alice 与 Bob 可以互相群聊。
-6. Alice 输入 `/leave` 返回 `lobby`；私聊仍可使用 `/msg Bob#BOB001 message` 跨房间发送。
+1. Alice 以房主或 `-admin-code A001` 对应身份登录；Bob 以 `B001` 登录。
+2. Alice 创建公开频道，Bob 刷新后可见并能加入。
+3. Alice 创建私有频道，Bob 刷新后不可见也不能加入。
+4. Alice 在频道设置中邀请 `B001`；Bob 刷新后可见并能加入。
+5. Alice 移除 `B001`；Bob 应返回 `lobby`。
+6. Alice 删除私有频道；双方刷新后频道消失。
 
 ## 6. localhost 异常测试矩阵
 
