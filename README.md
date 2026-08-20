@@ -94,6 +94,10 @@ cmake --build build --parallel 2
 
 本机测试时填写 `127.0.0.1:8888`。局域网测试时，客户端应填写运行 Go Server 那台电脑的 IPv4 地址与端口 `8888`，并选择同一份 `server-lan.crt` 作为 CA 文件；客户端不需要、也不应获得私钥。
 
+## 正式发布包部署
+
+公开发布包不会包含证书、私钥、数据库或聊天记录。Alice Host 应在自己的电脑生成包含实际 IPv4 地址的 TLS 证书，再把**仅公钥证书** `server-lan.crt` 分发给 Bob Client；完整的 PowerShell 步骤见 [docs/release-setup.md](docs/release-setup.md)。
+
 ## 局域网测试
 
 在服务端主机查看 IPv4：
