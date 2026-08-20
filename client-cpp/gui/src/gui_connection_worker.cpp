@@ -67,16 +67,15 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
     const QString absoluteKeyFile = resolvePath(keyFile);
     const QString absoluteDbFile = resolvePath(dbFile);
 
-    if (!QFileInfo::exists(absoluteServerExe) || !QFileInfo::exists(absoluteCertFile) ||
-        !QFileInfo::exists(absoluteKeyFile)) {
-        emit connectionFailed(QStringLiteral("本地 Go Server、证书或密钥文件不存在，请检查 Host 路径"));
+    if (!QFileInfo::exists(absoluteServerExe)) {
+        emit connectionFailed(QStringLiteral("本地 Go Server 文件不存在，请检查 Host 路径"));
         return;
     }
 
     hostProcess_ = std::make_unique<QProcess>();
     hostProcess_->setProgram(absoluteServerExe);
     hostProcess_->setWorkingDirectory(QFileInfo(absoluteServerExe).absolutePath());
-    hostProcess_->setArguments({"-cert", absoluteCertFile, "-key", absoluteKeyFile, "-db", absoluteDbFile,
+    hostProcess_->setArguments({"-cert", absoluteCertFile, "-key", absoluteKeyFile, "-auto-cert", "-db", absoluteDbFile,
                                 "-admin-code", userCode});
     hostProcess_->start();
     if (!hostProcess_->waitForStarted(3000)) {

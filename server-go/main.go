@@ -12,9 +12,15 @@ const listenAddress = "0.0.0.0:8888"
 func main() {
 	certPath := flag.String("cert", "", "path to the TLS certificate PEM file")
 	keyPath := flag.String("key", "", "path to the TLS private key PEM file")
+	autoCert := flag.Bool("auto-cert", false, "generate a local self-signed certificate when both TLS files are absent")
 	dbPath := flag.String("db", "", "path to the SQLite account database")
 	adminCode := flag.String("admin-code", "", "user code granted administrator permissions")
 	flag.Parse()
+	if *autoCert {
+		if err := ensureSelfSignedCertificate(*certPath, *keyPath); err != nil {
+			log.Fatalf("automatic TLS certificate setup error: %v", err)
+		}
+	}
 
 	tlsConfig, err := loadTLSConfig(*certPath, *keyPath)
 	if err != nil {
