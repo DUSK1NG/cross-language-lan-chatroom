@@ -11,18 +11,39 @@ import (
 const maxUsernameSize = 32
 const maxRoomNameSize = 32
 
+// OnlineUser 是 users_response 中的结构化在线成员信息。
+// Users 字段仍保留，用于与旧客户端兼容。
+type OnlineUser struct {
+	Username string `json:"username"`
+	UserCode string `json:"user_code"`
+	Room     string `json:"room"`
+	IsAdmin  bool   `json:"is_admin"`
+}
+
+// RoomInfo 是 rooms_response 中的结构化频道信息。
+// CanManage 由服务端基于当前连接身份计算，客户端不能自行声明。
+type RoomInfo struct {
+	Name      string `json:"name"`
+	OwnerCode string `json:"owner_code,omitempty"`
+	Private   bool   `json:"private"`
+	CanManage bool   `json:"can_manage"`
+}
+
 type Message struct {
-	Type           string   `json:"type"`
-	MessageID      string   `json:"message_id,omitempty"`
-	Username       string   `json:"username,omitempty"`
-	UserCode       string   `json:"user_code,omitempty"`
-	TargetUserCode string   `json:"target_user_code,omitempty"`
-	Room           string   `json:"room,omitempty"`
-	Users          []string `json:"users,omitempty"`
-	Rooms          []string `json:"rooms,omitempty"`
-	Content        string   `json:"content,omitempty"`
-	Password       string   `json:"password,omitempty"`
-	IsAdmin        bool     `json:"is_admin,omitempty"`
+	Type           string       `json:"type"`
+	MessageID      string       `json:"message_id,omitempty"`
+	Username       string       `json:"username,omitempty"`
+	UserCode       string       `json:"user_code,omitempty"`
+	TargetUserCode string       `json:"target_user_code,omitempty"`
+	Room           string       `json:"room,omitempty"`
+	Private        bool         `json:"private,omitempty"`
+	Users          []string     `json:"users,omitempty"`
+	Rooms          []string     `json:"rooms,omitempty"`
+	UserDetails    []OnlineUser `json:"user_details,omitempty"`
+	RoomDetails    []RoomInfo   `json:"room_details,omitempty"`
+	Content        string       `json:"content,omitempty"`
+	Password       string       `json:"password,omitempty"`
+	IsAdmin        bool         `json:"is_admin,omitempty"`
 }
 
 func validateUserCode(code string) error {
@@ -121,6 +142,22 @@ func validateMessage(message Message) error {
 		return validateTextContent("private chat", message.Content)
 	case "room_join":
 		return validateRoomName(message.Room)
+	case "room_create":
+		return validateRoomName(message.Room)
+	case "room_action":
+		if err := validateRoomName(message.Room); err != nil {
+			return err
+		}
+		if message.Content != "invite" && message.Content != "remove_member" && message.Content != "delete" {
+			return fmt.Errorf("unsupported room action")
+		}
+		if message.Content == "delete" {
+			return nil
+		}
+		if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+			return fmt.Errorf("invalid room member: %w", err)
+		}
+		return nil
 	case "room_leave", "rooms_request":
 		return nil
 	case "users_request", "quit":

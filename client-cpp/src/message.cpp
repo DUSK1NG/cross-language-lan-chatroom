@@ -23,8 +23,27 @@ nlohmann::json serialize(const Message& message) {
     if (!message.content.empty()) object["content"] = message.content;
     if (!message.users.empty()) object["users"] = message.users;
     if (!message.rooms.empty()) object["rooms"] = message.rooms;
+    if (!message.user_details.empty()) {
+        object["user_details"] = nlohmann::json::array();
+        for (const OnlineUser& user : message.user_details) {
+            object["user_details"].push_back({{"username", user.username},
+                                               {"user_code", user.user_code},
+                                               {"room", user.room},
+                                               {"is_admin", user.is_admin}});
+        }
+    }
+    if (!message.room_details.empty()) {
+        object["room_details"] = nlohmann::json::array();
+        for (const RoomInfo& room : message.room_details) {
+            nlohmann::json value{{"name", room.name}, {"private", room.is_private},
+                                 {"can_manage", room.can_manage}};
+            if (!room.owner_code.empty()) value["owner_code"] = room.owner_code;
+            object["room_details"].push_back(std::move(value));
+        }
+    }
     if (!message.password.empty()) object["password"] = message.password;
     if (message.is_admin) object["is_admin"] = true;
+    if (message.is_private) object["private"] = true;
     return object;
 }
 
@@ -69,6 +88,13 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             }
             parsed.is_admin = object.at("is_admin").get<bool>();
         }
+        if (object.contains("private")) {
+            if (!object.at("private").is_boolean()) {
+                set_error("private is not a boolean");
+                return false;
+            }
+            parsed.is_private = object.at("private").get<bool>();
+        }
 
         if (object.contains("users")) {
             if (!object.at("users").is_array()) {
@@ -94,6 +120,44 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
                     return false;
                 }
                 parsed.rooms.push_back(value.get<std::string>());
+            }
+        }
+        if (object.contains("user_details")) {
+            if (!object.at("user_details").is_array()) {
+                set_error("user_details is not an array");
+                return false;
+            }
+            for (const auto& value : object.at("user_details")) {
+                if (!value.is_object() || !value.contains("username") || !value.contains("user_code") ||
+                    !value.contains("room") || !value.contains("is_admin") ||
+                    !value.at("username").is_string() || !value.at("user_code").is_string() ||
+                    !value.at("room").is_string() || !value.at("is_admin").is_boolean()) {
+                    set_error("user_details contains an invalid member");
+                    return false;
+                }
+                parsed.user_details.push_back({value.at("username").get<std::string>(),
+                                               value.at("user_code").get<std::string>(),
+                                               value.at("room").get<std::string>(),
+                                               value.at("is_admin").get<bool>()});
+            }
+        }
+        if (object.contains("room_details")) {
+            if (!object.at("room_details").is_array()) {
+                set_error("room_details is not an array");
+                return false;
+            }
+            for (const auto& value : object.at("room_details")) {
+                if (!value.is_object() || !value.contains("name") || !value.contains("private") ||
+                    !value.contains("can_manage") || !value.at("name").is_string() ||
+                    !value.at("private").is_boolean() || !value.at("can_manage").is_boolean() ||
+                    (value.contains("owner_code") && !value.at("owner_code").is_string())) {
+                    set_error("room_details contains an invalid room");
+                    return false;
+                }
+                RoomInfo room{value.at("name").get<std::string>(), "",
+                              value.at("private").get<bool>(), value.at("can_manage").get<bool>()};
+                if (value.contains("owner_code")) room.owner_code = value.at("owner_code").get<std::string>();
+                parsed.room_details.push_back(std::move(room));
             }
         }
 

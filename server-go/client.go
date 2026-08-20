@@ -232,6 +232,24 @@ func (c *Client) readPump(hub *Hub) {
 			}
 			hub.RoomJoin <- RoomRequest{Client: c, Room: message.Room}
 
+		case "room_create":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", Content: "Invalid channel name"}) {
+					return
+				}
+				continue
+			}
+			hub.RoomCreate <- RoomCreateRequest{Client: c, Room: message.Room, Private: message.Private}
+
+		case "room_action":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", Content: "Invalid channel action"}) {
+					return
+				}
+				continue
+			}
+			hub.RoomAction <- RoomActionRequest{Sender: c, Action: message.Content, Room: message.Room, TargetCode: message.TargetUserCode}
+
 		case "room_leave":
 			hub.RoomLeave <- c
 

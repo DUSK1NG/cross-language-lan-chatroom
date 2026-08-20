@@ -8,6 +8,20 @@
 
 namespace message {
 
+struct OnlineUser {
+    std::string username;
+    std::string user_code;
+    std::string room;
+    bool is_admin = false;
+};
+
+struct RoomInfo {
+    std::string name;
+    std::string owner_code;
+    bool is_private = false;
+    bool can_manage = false;
+};
+
 struct Message {
     Message(
         std::string type_value = {},
@@ -39,9 +53,12 @@ struct Message {
     std::string target_user_code;
     std::string room;
     std::vector<std::string> rooms{};
+    std::vector<OnlineUser> user_details{};
+    std::vector<RoomInfo> room_details{};
     std::string password;
     std::string message_id;
     bool is_admin = false;
+    bool is_private = false;
 };
 
 bool send_message(SOCKET socket_handle, const Message& message);

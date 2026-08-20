@@ -298,6 +298,10 @@ func TestHubRespondsWithSortedOnlineUsers(t *testing.T) {
 	assertMessageReceived(t, first.Send, Message{
 		Type:  "users_response",
 		Users: []string{"Alex#A001@lobby", "Zoe#Z001@lobby"},
+		UserDetails: []OnlineUser{
+			{Username: "Alex", UserCode: "A001", Room: "lobby"},
+			{Username: "Zoe", UserCode: "Z001", Room: "lobby"},
+		},
 	})
 	assertNoMessageReceived(t, second.Send)
 }
@@ -716,7 +720,8 @@ func TestHubKeepsGroupChatInsideRoom(t *testing.T) {
 	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Charlie#C003 joined the chat"})
 	assertMessageReceived(t, charlie.Send, Message{Type: "system", Content: "Charlie#C003 joined the chat"})
 
-	hub.RoomJoin <- RoomRequest{Client: bob, Room: "dev_room"}
+	hub.RoomCreate <- RoomCreateRequest{Client: bob, Room: "dev_room"}
+	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Channel #dev_room created"})
 	assertMessageReceived(t, alice.Send, Message{Type: "system", Content: "Bob#B002 left room lobby"})
 	assertMessageReceived(t, charlie.Send, Message{Type: "system", Content: "Bob#B002 left room lobby"})
 	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Bob#B002 left room lobby"})
@@ -735,7 +740,7 @@ func TestHubKeepsGroupChatInsideRoom(t *testing.T) {
 	assertNoMessageReceived(t, charlie.Send)
 }
 
-func TestHubRoomJoinCreatesRoomAndListsRooms(t *testing.T) {
+func TestHubRoomCreateJoinsAndListsRooms(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
 
@@ -745,7 +750,8 @@ func TestHubRoomJoinCreatesRoomAndListsRooms(t *testing.T) {
 	}
 	assertMessageReceived(t, client.Send, Message{Type: "system", Content: "Alice#A001 joined the chat"})
 
-	hub.RoomJoin <- RoomRequest{Client: client, Room: "study_1"}
+	hub.RoomCreate <- RoomCreateRequest{Client: client, Room: "study_1"}
+	assertMessageReceived(t, client.Send, Message{Type: "system", Content: "Channel #study_1 created"})
 	assertMessageReceived(t, client.Send, Message{Type: "system", Content: "Alice#A001 left room lobby"})
 	assertMessageReceived(t, client.Send, Message{Type: "system", Content: "Alice#A001 joined room study_1"})
 	if client.Room != "study_1" {
@@ -757,6 +763,10 @@ func TestHubRoomJoinCreatesRoomAndListsRooms(t *testing.T) {
 		Type:  "rooms_response",
 		Room:  "study_1",
 		Rooms: []string{"lobby", "study_1"},
+		RoomDetails: []RoomInfo{
+			{Name: "lobby"},
+			{Name: "study_1", OwnerCode: "a001", CanManage: true},
+		},
 	})
 
 	hub.RoomLeave <- client
@@ -765,6 +775,37 @@ func TestHubRoomJoinCreatesRoomAndListsRooms(t *testing.T) {
 	if client.Room != defaultRoomName {
 		t.Fatalf("client room = %q, want lobby", client.Room)
 	}
+}
+
+func TestHubPrivateRoomRequiresInvitation(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	alice := newTestClient(t, "Alice", "A001")
+	bob := newTestClient(t, "Bob", "B002")
+	for _, client := range []*Client{alice, bob} {
+		if err := registerForTest(t, hub, client); err != nil {
+			t.Fatalf("register %s: %v", client.Username, err)
+		}
+	}
+	assertMessageReceived(t, alice.Send, Message{Type: "system", Content: "Alice#A001 joined the chat"})
+	assertMessageReceived(t, alice.Send, Message{Type: "system", Content: "Bob#B002 joined the chat"})
+	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Bob#B002 joined the chat"})
+
+	hub.RoomCreate <- RoomCreateRequest{Client: alice, Room: "private_1", Private: true}
+	assertMessageReceived(t, alice.Send, Message{Type: "system", Content: "Channel #private_1 created"})
+	assertMessageReceived(t, alice.Send, Message{Type: "system", Content: "Alice#A001 left room lobby"})
+	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Alice#A001 left room lobby"})
+	assertMessageReceived(t, alice.Send, Message{Type: "system", Content: "Alice#A001 joined room private_1"})
+
+	hub.RoomJoin <- RoomRequest{Client: bob, Room: "private_1"}
+	assertMessageReceived(t, bob.Send, Message{Type: "error", Content: "This is a private channel. Ask the owner for an invitation."})
+
+	hub.RoomAction <- RoomActionRequest{Sender: alice, Action: "invite", Room: "private_1", TargetCode: "B002"}
+	assertMessageReceived(t, alice.Send, Message{Type: "system", Content: "Member invited to #private_1"})
+	hub.RoomJoin <- RoomRequest{Client: bob, Room: "private_1"}
+	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Bob#B002 left room lobby"})
+	assertMessageReceived(t, bob.Send, Message{Type: "system", Content: "Bob#B002 joined room private_1"})
 }
 
 func TestHubRejectsInvalidRoomName(t *testing.T) {

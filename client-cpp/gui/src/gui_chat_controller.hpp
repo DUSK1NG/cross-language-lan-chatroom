@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QThread>
 #include <QTimer>
+#include <QVariantList>
 
 class GuiConnectionWorker;
 
@@ -22,6 +23,7 @@ class GuiChatController final : public QObject {
     Q_PROPERTY(QString localUserCode READ localUserCode NOTIFY localIdentityChanged)
     Q_PROPERTY(int onlineMemberCount READ onlineMemberCount NOTIFY onlineMemberCountChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
+    Q_PROPERTY(bool activeRoomCanManage READ activeRoomCanManage NOTIFY activeRoomCanManageChanged)
 
 public:
     explicit GuiChatController(QObject* parent = nullptr);
@@ -38,6 +40,7 @@ public:
     QString localUserCode() const { return localUserCode_; }
     int onlineMemberCount() const { return onlineMemberCount_; }
     QString statusText() const { return statusText_; }
+    bool activeRoomCanManage() const { return activeRoomCanManage_; }
 
     Q_INVOKABLE void connectToServer(const QString& serverIp, int serverPort,
                                      const QString& username, const QString& userCode,
@@ -55,6 +58,8 @@ public:
     Q_INVOKABLE void sendPrivateMessage(const QString& content, const QString& targetUserCode);
     Q_INVOKABLE void requestUsers();
     Q_INVOKABLE void requestRooms();
+    Q_INVOKABLE void createRoom(const QString& room, bool isPrivate);
+    Q_INVOKABLE void sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode = {});
     Q_INVOKABLE void selectRoom(const QString& room);
     Q_INVOKABLE void selectDirectMessage(const QString& userCode);
     Q_INVOKABLE void openPrivateChat(const QString& displayName, const QString& userCode);
@@ -70,6 +75,7 @@ signals:
     void onlineMemberCountChanged();
     void statusTextChanged();
     void activeMessageModelChanged();
+    void activeRoomCanManageChanged();
 
 private slots:
     void handleConnected(bool isAdmin);
@@ -78,7 +84,9 @@ private slots:
     void handleMessage(const QString& type, const QString& messageId, const QString& username,
                        const QString& userCode, const QString& content,
                        const QString& room, const QString& targetUserCode,
-                       const QStringList& users, const QStringList& rooms, bool isAdmin);
+                       const QStringList& users, const QStringList& rooms,
+                       const QVariantList& userDetails, const QVariantList& roomDetails,
+                       bool isAdmin);
 
 private:
     void setStatus(const QString& status);
@@ -96,6 +104,7 @@ private:
     QHash<QString, ChatListModel*> conversationModels_;
     QHash<QString, int> roomMemberCounts_;
     QString activeConversationKey_ = QStringLiteral("room:lobby");
+    bool activeRoomCanManage_ = false;
     QThread workerThread_;
     QTimer refreshTimer_;
     GuiConnectionWorker* worker_ = nullptr;
