@@ -41,6 +41,27 @@ type RoomRequest struct {
 	Room   string
 }
 
+// RoomDefinition 保存频道的服务端权限状态。只有 Hub goroutine 可以修改它。
+type RoomDefinition struct {
+	Name      string
+	OwnerCode string
+	Private   bool
+	Allowed   map[string]bool
+}
+
+type RoomCreateRequest struct {
+	Client  *Client
+	Room    string
+	Private bool
+}
+
+type RoomActionRequest struct {
+	Sender     *Client
+	Action     string
+	Room       string
+	TargetCode string
+}
+
 type AdminActionRequest struct {
 	Sender     *Client
 	Action     string
@@ -98,24 +119,27 @@ func (c *Client) closeSend() {
 // Hub 是聊天室中客户端集合和广播消息的唯一管理者。
 // Clients、ActiveCodes 和 UsedCodes 只能由 Run goroutine 访问。
 type Hub struct {
-	Clients       map[*Client]bool
-	Register      chan RegisterRequest
-	Unregister    chan *Client
-	Broadcast     chan Message
-	Outbound      chan OutboundMessage
-	RequestUsers  chan *Client
-	Private       chan PrivateMessageRequest
-	RoomJoin      chan RoomRequest
-	RoomLeave     chan *Client
-	RequestRooms  chan *Client
-	AdminAction   chan AdminActionRequest
-	ActiveCodes   map[string]*Client
-	UsedCodes     map[string]struct{}
-	Rooms         map[string]map[*Client]bool
-	RoomNames     map[string]struct{}
-	OfflineStore  *AuthStore
-	AdminCode     string
-	NextMessageID uint64
+	Clients         map[*Client]bool
+	Register        chan RegisterRequest
+	Unregister      chan *Client
+	Broadcast       chan Message
+	Outbound        chan OutboundMessage
+	RequestUsers    chan *Client
+	Private         chan PrivateMessageRequest
+	RoomJoin        chan RoomRequest
+	RoomCreate      chan RoomCreateRequest
+	RoomAction      chan RoomActionRequest
+	RoomLeave       chan *Client
+	RequestRooms    chan *Client
+	AdminAction     chan AdminActionRequest
+	ActiveCodes     map[string]*Client
+	UsedCodes       map[string]struct{}
+	Rooms           map[string]map[*Client]bool
+	RoomNames       map[string]struct{}
+	RoomDefinitions map[string]*RoomDefinition
+	OfflineStore    *AuthStore
+	AdminCode       string
+	NextMessageID   uint64
 }
 
 func NewHub() *Hub {
@@ -128,6 +152,8 @@ func NewHub() *Hub {
 		RequestUsers: make(chan *Client),
 		Private:      make(chan PrivateMessageRequest),
 		RoomJoin:     make(chan RoomRequest),
+		RoomCreate:   make(chan RoomCreateRequest),
+		RoomAction:   make(chan RoomActionRequest),
 		RoomLeave:    make(chan *Client),
 		RequestRooms: make(chan *Client),
 		AdminAction:  make(chan AdminActionRequest),
@@ -135,6 +161,9 @@ func NewHub() *Hub {
 		UsedCodes:    make(map[string]struct{}),
 		Rooms:        make(map[string]map[*Client]bool),
 		RoomNames:    map[string]struct{}{defaultRoomName: {}},
+		RoomDefinitions: map[string]*RoomDefinition{
+			defaultRoomName: {Name: defaultRoomName, Allowed: make(map[string]bool)},
+		},
 	}
 }
 
@@ -162,6 +191,12 @@ func (h *Hub) Run() {
 
 		case request := <-h.RoomJoin:
 			h.handleRoomJoin(request)
+
+		case request := <-h.RoomCreate:
+			h.handleRoomCreate(request)
+
+		case request := <-h.RoomAction:
+			h.handleRoomAction(request)
 
 		case client := <-h.RoomLeave:
 			h.handleRoomLeave(client)
@@ -192,6 +227,10 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 	if err := validateRoomName(client.Room); err != nil {
 		h.respondRegister(request.Result, err)
 		return
+	}
+	if _, exists := h.RoomDefinitions[defaultRoomName]; !exists {
+		h.RoomDefinitions[defaultRoomName] = &RoomDefinition{Name: defaultRoomName, Allowed: make(map[string]bool)}
+		h.RoomNames[defaultRoomName] = struct{}{}
 	}
 
 	if _, active := h.ActiveCodes[client.NormalizedCode]; active {
@@ -378,14 +417,25 @@ func (h *Hub) handleRequestUsers(requester *Client) {
 	}
 
 	users := make([]string, 0, len(h.Clients))
+	userDetails := make([]OnlineUser, 0, len(h.Clients))
 	for client := range h.Clients {
 		users = append(users, client.Username+"#"+client.UserCode+"@"+client.Room)
+		userDetails = append(userDetails, OnlineUser{
+			Username: client.Username,
+			UserCode: client.UserCode,
+			Room:     client.Room,
+			IsAdmin:  client.IsAdmin,
+		})
 	}
 	sort.Strings(users)
+	sort.Slice(userDetails, func(i, j int) bool {
+		return userDetails[i].Username+"#"+userDetails[i].UserCode < userDetails[j].Username+"#"+userDetails[j].UserCode
+	})
 
 	h.deliver(requester, Message{
-		Type:  "users_response",
-		Users: users,
+		Type:        "users_response",
+		Users:       users,
+		UserDetails: userDetails,
 	})
 }
 
@@ -396,12 +446,26 @@ func (h *Hub) handleRequestRooms(requester *Client) {
 	if _, ok := h.Clients[requester]; !ok {
 		return
 	}
-	rooms := make([]string, 0, len(h.RoomNames))
-	for room := range h.RoomNames {
+	rooms := make([]string, 0, len(h.RoomDefinitions))
+	roomDetails := make([]RoomInfo, 0, len(h.RoomDefinitions))
+	for room, definition := range h.RoomDefinitions {
+		if !h.canViewRoom(requester, definition) {
+			continue
+		}
 		rooms = append(rooms, room)
+		roomDetails = append(roomDetails, RoomInfo{
+			Name: room, OwnerCode: definition.OwnerCode, Private: definition.Private,
+			CanManage: h.canManageRoom(requester, definition),
+		})
 	}
 	sort.Strings(rooms)
-	h.deliver(requester, Message{Type: "rooms_response", Rooms: rooms, Room: requester.Room})
+	sort.Slice(roomDetails, func(i, j int) bool { return roomDetails[i].Name < roomDetails[j].Name })
+	h.deliver(requester, Message{
+		Type:        "rooms_response",
+		Rooms:       rooms,
+		Room:        requester.Room,
+		RoomDetails: roomDetails,
+	})
 }
 
 func (h *Hub) handleRoomJoin(request RoomRequest) {
@@ -416,7 +480,15 @@ func (h *Hub) handleRoomJoin(request RoomRequest) {
 		h.deliverError(client, "Invalid room name")
 		return
 	}
-	h.RoomNames[request.Room] = struct{}{}
+	definition, exists := h.RoomDefinitions[request.Room]
+	if !exists {
+		h.deliverError(client, "Room not found. Create it first.")
+		return
+	}
+	if !h.canJoinRoom(client, definition) {
+		h.deliverError(client, "This is a private channel. Ask the owner for an invitation.")
+		return
+	}
 	if request.Room == client.Room {
 		h.deliver(client, Message{Type: "system", Content: "Already in room " + client.Room})
 		return
@@ -427,6 +499,75 @@ func (h *Hub) handleRoomJoin(request RoomRequest) {
 	client.Room = request.Room
 	h.addToRoom(client, client.Room)
 	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined room "+client.Room))
+}
+
+func (h *Hub) handleRoomCreate(request RoomCreateRequest) {
+	client := request.Client
+	if client == nil || !h.Clients[client] {
+		return
+	}
+	if err := validateRoomName(request.Room); err != nil {
+		h.deliverError(client, "Invalid room name")
+		return
+	}
+	if _, exists := h.RoomDefinitions[request.Room]; exists {
+		h.deliverError(client, "A channel with this name already exists")
+		return
+	}
+	definition := &RoomDefinition{Name: request.Room, OwnerCode: client.NormalizedCode, Private: request.Private,
+		Allowed: map[string]bool{client.NormalizedCode: true}}
+	h.RoomDefinitions[request.Room] = definition
+	h.RoomNames[request.Room] = struct{}{}
+	h.deliver(client, Message{Type: "system", Content: "Channel #" + request.Room + " created"})
+	h.handleRoomJoin(RoomRequest{Client: client, Room: request.Room})
+}
+
+func (h *Hub) handleRoomAction(request RoomActionRequest) {
+	sender := request.Sender
+	if sender == nil || !h.Clients[sender] {
+		return
+	}
+	definition, exists := h.RoomDefinitions[request.Room]
+	if !exists || request.Room == defaultRoomName {
+		h.deliverError(sender, "Channel not found or cannot be changed")
+		return
+	}
+	if !h.canManageRoom(sender, definition) {
+		h.deliverError(sender, "Channel owner or administrator permission required")
+		return
+	}
+	if request.Action == "delete" {
+		for member := range h.Rooms[request.Room] {
+			h.removeFromRoom(member)
+			member.Room = defaultRoomName
+			h.addToRoom(member, defaultRoomName)
+			h.deliver(member, Message{Type: "system", Content: "Channel #" + request.Room + " was deleted"})
+		}
+		delete(h.Rooms, request.Room)
+		delete(h.RoomDefinitions, request.Room)
+		delete(h.RoomNames, request.Room)
+		return
+	}
+	targetCode, err := normalizeUserCode(request.TargetCode)
+	if err != nil {
+		h.deliverError(sender, "Invalid target user code")
+		return
+	}
+	if request.Action == "invite" {
+		definition.Allowed[targetCode] = true
+		h.deliver(sender, Message{Type: "system", Content: "Member invited to #" + request.Room})
+		return
+	}
+	if request.Action == "remove_member" {
+		delete(definition.Allowed, targetCode)
+		if target, online := h.ActiveCodes[targetCode]; online && target.Room == request.Room {
+			h.removeFromRoom(target)
+			target.Room = defaultRoomName
+			h.addToRoom(target, defaultRoomName)
+			h.deliver(target, Message{Type: "system", Content: "You were removed from #" + request.Room})
+		}
+		h.deliver(sender, Message{Type: "system", Content: "Member removed from #" + request.Room})
+	}
 }
 
 func (h *Hub) handleRoomLeave(client *Client) {
@@ -453,6 +594,18 @@ func (h *Hub) addToRoom(client *Client, room string) {
 		h.Rooms[room] = make(map[*Client]bool)
 	}
 	h.Rooms[room][client] = true
+}
+
+func (h *Hub) canJoinRoom(client *Client, room *RoomDefinition) bool {
+	return room != nil && (!room.Private || client.IsAdmin || room.Allowed[client.NormalizedCode])
+}
+
+func (h *Hub) canViewRoom(client *Client, room *RoomDefinition) bool {
+	return h.canJoinRoom(client, room)
+}
+
+func (h *Hub) canManageRoom(client *Client, room *RoomDefinition) bool {
+	return client != nil && room != nil && (client.IsAdmin || (room.OwnerCode != "" && room.OwnerCode == client.NormalizedCode))
 }
 
 func (h *Hub) removeFromRoom(client *Client) {

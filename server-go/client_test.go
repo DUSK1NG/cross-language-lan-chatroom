@@ -360,6 +360,10 @@ func TestHandleConnectionUsersRequest(t *testing.T) {
 	want := Message{
 		Type:  "users_response",
 		Users: []string{"Alex#A001@lobby", "Zoe#Z001@lobby"},
+		UserDetails: []OnlineUser{
+			{Username: "Alex", UserCode: "A001", Room: "lobby"},
+			{Username: "Zoe", UserCode: "Z001", Room: "lobby"},
+		},
 	}
 	if !reflect.DeepEqual(usersResponse, want) {
 		t.Fatalf("users response = %+v, want %+v", usersResponse, want)

@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QThread>
+#include <QVariantMap>
 
 GuiConnectionWorker::GuiConnectionWorker(QObject* parent) : QObject(parent) {}
 
@@ -142,6 +143,29 @@ void GuiConnectionWorker::joinRoom(const QString& room) {
     }
 }
 
+void GuiConnectionWorker::createRoom(const QString& room, bool isPrivate) {
+    if (!connection_ || !connection_->is_ready() || room.trimmed().isEmpty()) {
+        return;
+    }
+    message::Message message{"room_create", "", "", "", {}, "",
+                             room.trimmed().toStdString(), {}, ""};
+    message.is_private = isPrivate;
+    if (!connection_->send(message)) {
+        emit connectionLost(QString::fromStdString(connection_->last_error()));
+    }
+}
+
+void GuiConnectionWorker::sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode) {
+    if (!connection_ || !connection_->is_ready() || action.trimmed().isEmpty() || room.trimmed().isEmpty()) {
+        return;
+    }
+    const message::Message message{"room_action", "", "", action.trimmed().toStdString(), {},
+                                   targetUserCode.trimmed().toStdString(), room.trimmed().toStdString(), {}, ""};
+    if (!connection_->send(message)) {
+        emit connectionLost(QString::fromStdString(connection_->last_error()));
+    }
+}
+
 void GuiConnectionWorker::requestUsers() {
     if (!connection_ || !connection_->is_ready()) {
         return;
@@ -191,6 +215,24 @@ void GuiConnectionWorker::receiveLoop() {
         for (const std::string& room : incoming.rooms) {
             rooms.append(QString::fromStdString(room));
         }
+        QVariantList userDetails;
+        for (const message::OnlineUser& user : incoming.user_details) {
+            QVariantMap detail;
+            detail.insert("displayName", QString::fromStdString(user.username));
+            detail.insert("userCode", QString::fromStdString(user.user_code));
+            detail.insert("room", QString::fromStdString(user.room));
+            detail.insert("admin", user.is_admin);
+            userDetails.append(detail);
+        }
+        QVariantList roomDetails;
+        for (const message::RoomInfo& roomInfo : incoming.room_details) {
+            QVariantMap detail;
+            detail.insert("roomName", QString::fromStdString(roomInfo.name));
+            detail.insert("ownerCode", QString::fromStdString(roomInfo.owner_code));
+            detail.insert("private", roomInfo.is_private);
+            detail.insert("canManage", roomInfo.can_manage);
+            roomDetails.append(detail);
+        }
 
         emit messageReceived(QString::fromStdString(incoming.type),
                              QString::fromStdString(incoming.message_id),
@@ -201,6 +243,8 @@ void GuiConnectionWorker::receiveLoop() {
                              QString::fromStdString(incoming.target_user_code),
                              users,
                              rooms,
+                             userDetails,
+                             roomDetails,
                              incoming.is_admin);
     }
 }

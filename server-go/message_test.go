@@ -513,3 +513,37 @@ func TestValidateMessageRejectsUnsupportedType(t *testing.T) {
 		t.Fatal("expected unsupported message type to be rejected")
 	}
 }
+
+func TestMessageRoundTripsStructuredUserAndRoomDetails(t *testing.T) {
+	input := Message{
+		Type: "users_response",
+		UserDetails: []OnlineUser{{
+			Username: "Alice",
+			UserCode: "A001",
+			Room:     "lobby",
+			IsAdmin:  true,
+		}},
+		RoomDetails: []RoomInfo{{
+			Name:      "study_group",
+			OwnerCode: "A001",
+			Private:   true,
+			CanManage: true,
+		}},
+	}
+
+	var buffer bytes.Buffer
+	if err := sendMessage(&buffer, input); err != nil {
+		t.Fatalf("sendMessage: %v", err)
+	}
+
+	got, err := receiveMessage(&buffer)
+	if err != nil {
+		t.Fatalf("receiveMessage: %v", err)
+	}
+	if !reflect.DeepEqual(got.UserDetails, input.UserDetails) {
+		t.Fatalf("user details = %#v, want %#v", got.UserDetails, input.UserDetails)
+	}
+	if !reflect.DeepEqual(got.RoomDetails, input.RoomDetails) {
+		t.Fatalf("room details = %#v, want %#v", got.RoomDetails, input.RoomDetails)
+	}
+}

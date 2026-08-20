@@ -170,7 +170,9 @@ Item {
 
                 ChatHeader {
                     Layout.fillWidth: true
-                    onSettingsRequested: root.settingsRequested()
+                    onSettingsRequested: {
+                        if (root.activeDirectMessage === "" && chatController.activeRoomCanManage) roomSettingsDialog.open()
+                    }
                     onMembersRequested: memberPopup.open()
                     showMembersButton: root.compactLayout
                     title: root.headerTitle
@@ -396,13 +398,43 @@ Item {
                 placeholderText: "例如 study_group"
                 validator: RegularExpressionValidator { regularExpression: /^[A-Za-z0-9_]{1,32}$/ }
             }
+            CheckBox {
+                id: privateRoomCheck
+                text: "设为私有频道（仅受邀成员可见和加入）"
+                checked: false
+            }
         }
 
         onAccepted: {
             const roomName = roomNameInput.text.trim()
-            if (roomName.length > 0) root.selectRoom(roomName)
+            if (roomName.length > 0) chatController.createRoom(roomName, privateRoomCheck.checked)
             roomNameInput.clear()
+            privateRoomCheck.checked = false
         }
-        onRejected: roomNameInput.clear()
+        onRejected: {
+            roomNameInput.clear()
+            privateRoomCheck.checked = false
+        }
+    }
+
+    AppDialog {
+        id: roomSettingsDialog
+        title: "频道管理"
+        modal: true
+        width: 520
+        padding: 16
+        anchors.centerIn: Overlay.overlay
+        ColumnLayout {
+            width: roomSettingsDialog.width - roomSettingsDialog.leftPadding - roomSettingsDialog.rightPadding
+            spacing: 12
+            Label { text: "管理 #" + root.activeRoom; color: Theme.primaryText; font.bold: true }
+            AppTextField { id: memberCodeInput; Layout.fillWidth: true; placeholderText: "成员代码，例如 B001" }
+            RowLayout {
+                Layout.fillWidth: true
+                AppButton { text: "邀请成员"; accent: true; enabled: memberCodeInput.text.trim().length > 0; onClicked: { chatController.sendRoomAction("invite", root.activeRoom, memberCodeInput.text); memberCodeInput.clear() } }
+                AppButton { text: "移除成员"; enabled: memberCodeInput.text.trim().length > 0; onClicked: { chatController.sendRoomAction("remove_member", root.activeRoom, memberCodeInput.text); memberCodeInput.clear() } }
+            }
+            AppButton { Layout.fillWidth: true; text: "删除频道"; danger: true; onClicked: { chatController.sendRoomAction("delete", root.activeRoom); roomSettingsDialog.close(); root.selectRoom("lobby") } }
+        }
     }
 }

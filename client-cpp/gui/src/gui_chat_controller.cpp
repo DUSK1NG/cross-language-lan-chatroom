@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QGuiApplication>
 #include <QClipboard>
+#include <QVariantMap>
 
 namespace {
 const QStringList kMessageRoles = {"messageId", "displayName", "userCode", "time", "content", "selfMessage", "systemMessage"};
@@ -12,7 +13,7 @@ const QStringList kMessageRoles = {"messageId", "displayName", "userCode", "time
 
 GuiChatController::GuiChatController(QObject* parent)
     : QObject(parent),
-      roomModel_(new ChatListModel({"roomName", "memberCount", "unreadCount"}, this)),
+      roomModel_(new ChatListModel({"roomName", "memberCount", "unreadCount", "ownerCode", "private", "canManage"}, this)),
       directMessageModel_(new ChatListModel({"displayName", "userCode", "unreadCount"}, this)),
       messageModel_(new ChatListModel(kMessageRoles, this)),
     memberModel_(new ChatListModel({"displayName", "userCode", "online", "admin"}, this)),
@@ -121,12 +122,30 @@ void GuiChatController::requestRooms() {
     QMetaObject::invokeMethod(worker_, "requestRooms", Qt::QueuedConnection);
 }
 
+void GuiChatController::createRoom(const QString& room, bool isPrivate) {
+    if (room.trimmed().isEmpty()) {
+        return;
+    }
+    QMetaObject::invokeMethod(worker_, "createRoom", Qt::QueuedConnection,
+                              Q_ARG(QString, room.trimmed()), Q_ARG(bool, isPrivate));
+}
+
+void GuiChatController::sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode) {
+    QMetaObject::invokeMethod(worker_, "sendRoomAction", Qt::QueuedConnection,
+                              Q_ARG(QString, action), Q_ARG(QString, room), Q_ARG(QString, targetUserCode));
+}
+
 void GuiChatController::selectRoom(const QString& room) {
     const QString key = "room:" + room;
     messageModel_ = ensureConversationModel(key);
     activeConversationKey_ = key;
     const int row = roomModel_->findRow("roomName", room);
+    const bool canManage = row >= 0 && roomModel_->valueAt(row, "canManage").toBool();
     if (row >= 0) roomModel_->updateRow(row, {{"unreadCount", 0}});
+    if (activeRoomCanManage_ != canManage) {
+        activeRoomCanManage_ = canManage;
+        emit activeRoomCanManageChanged();
+    }
     emit activeMessageModelChanged();
     if (connected_) {
         if (joinedRoom_.compare(room, Qt::CaseInsensitive) != 0) {
@@ -253,7 +272,9 @@ void GuiChatController::handleConnectionLost(const QString& reason) {
 void GuiChatController::handleMessage(const QString& type, const QString& messageId, const QString& username,
                                       const QString& userCode, const QString& content,
                                       const QString& room, const QString& targetUserCode,
-                                      const QStringList& users, const QStringList& rooms, bool isAdmin) {
+                                      const QStringList& users, const QStringList& rooms,
+                                      const QVariantList& userDetails, const QVariantList& roomDetails,
+                                      bool isAdmin) {
     if (type == QStringLiteral("login_ok")) {
         if (admin_ != isAdmin) {
             admin_ = isAdmin;
@@ -271,22 +292,36 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
         roomMemberCounts_.clear();
         memberModel_->clear();
         directMessageModel_->clear();
-        for (const QString& identity : users) {
-            const int hash = identity.indexOf('#');
-            const int roomSeparator = identity.indexOf('@', hash + 1);
-            const QString name = hash > 0 ? identity.left(hash) : identity;
-            const QString code = hash > 0
-                ? identity.mid(hash + 1, roomSeparator > hash ? roomSeparator - hash - 1 : -1)
-                : QString();
-            const QString userRoom = roomSeparator > hash ? identity.mid(roomSeparator + 1) : QStringLiteral("lobby");
+        const auto appendUser = [this, &unreadByUser](const QString& name, const QString& code,
+                                                       const QString& userRoom, bool memberAdmin) {
             roomMemberCounts_[userRoom] = roomMemberCounts_.value(userRoom, 0) + 1;
-            memberModel_->append({{"displayName", name}, {"userCode", code}, {"online", true}, {"admin", false}});
+            memberModel_->append({{"displayName", name}, {"userCode", code}, {"online", true}, {"admin", memberAdmin}});
             if (!localUserCode_.isEmpty() &&
                 code.compare(localUserCode_, Qt::CaseInsensitive) != 0) {
                 const int unreadCount = unreadByUser.value(code.toLower(), 0);
                 directMessageModel_->append({{"displayName", name},
                                              {"userCode", code},
                                              {"unreadCount", unreadCount}});
+            }
+        };
+        if (!userDetails.isEmpty()) {
+            for (const QVariant& value : userDetails) {
+                const QVariantMap detail = value.toMap();
+                appendUser(detail.value("displayName").toString(),
+                           detail.value("userCode").toString(),
+                           detail.value("room", QStringLiteral("lobby")).toString(),
+                           detail.value("admin").toBool());
+            }
+        } else {
+            for (const QString& identity : users) {
+                const int hash = identity.indexOf('#');
+                const int roomSeparator = identity.indexOf('@', hash + 1);
+                const QString name = hash > 0 ? identity.left(hash) : identity;
+                const QString code = hash > 0
+                    ? identity.mid(hash + 1, roomSeparator > hash ? roomSeparator - hash - 1 : -1)
+                    : QString();
+                const QString userRoom = roomSeparator > hash ? identity.mid(roomSeparator + 1) : QStringLiteral("lobby");
+                appendUser(name, code, userRoom, false);
             }
         }
         for (int row = 0; row < roomModel_->rowCount(); ++row) {
@@ -307,11 +342,32 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
                                 roomModel_->valueAt(row, "unreadCount").toInt());
         }
         roomModel_->clear();
-        for (const QString& room : rooms) {
-            roomModel_->append({{"roomName", room}, {"memberCount", 0},
-                                {"unreadCount", unreadByRoom.value(room, 0)}});
+        const auto appendRoom = [this, &unreadByRoom](const QString& roomName, const QString& ownerCode,
+                                                       bool isPrivate, bool canManage) {
+            roomModel_->append({{"roomName", roomName}, {"memberCount", 0},
+                                {"unreadCount", unreadByRoom.value(roomName, 0)},
+                                {"ownerCode", ownerCode}, {"private", isPrivate},
+                                {"canManage", canManage}});
             const int row = roomModel_->rowCount() - 1;
-            roomModel_->updateRow(row, {{"memberCount", roomMemberCounts_.value(room, 0)}});
+            roomModel_->updateRow(row, {{"memberCount", roomMemberCounts_.value(roomName, 0)}});
+        };
+        if (!roomDetails.isEmpty()) {
+            for (const QVariant& value : roomDetails) {
+                const QVariantMap detail = value.toMap();
+                appendRoom(detail.value("roomName").toString(), detail.value("ownerCode").toString(),
+                           detail.value("private").toBool(), detail.value("canManage").toBool());
+            }
+        } else {
+            for (const QString& room : rooms) {
+                appendRoom(room, {}, false, admin_);
+            }
+        }
+        const QString activeRoom = activeConversationKey_.startsWith("room:") ? activeConversationKey_.mid(5) : QString();
+        const int activeRow = roomModel_->findRow("roomName", activeRoom);
+        const bool canManage = activeRow >= 0 && roomModel_->valueAt(activeRow, "canManage").toBool();
+        if (activeRoomCanManage_ != canManage) {
+            activeRoomCanManage_ = canManage;
+            emit activeRoomCanManageChanged();
         }
         return;
     }

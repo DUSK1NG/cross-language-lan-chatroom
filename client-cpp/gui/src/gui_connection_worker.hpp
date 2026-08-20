@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QProcess>
 #include <QString>
+#include <QVariantList>
 #include <atomic>
 #include <memory>
 #include <thread>
@@ -35,6 +36,8 @@ public slots:
     void sendChatToRoom(const QString& content, const QString& room);
     void sendPrivate(const QString& content, const QString& targetUserCode);
     void joinRoom(const QString& room);
+    void createRoom(const QString& room, bool isPrivate);
+    void sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode = {});
     void requestUsers();
     void requestRooms();
     void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {});
@@ -52,6 +55,8 @@ signals:
                          const QString& targetUserCode,
                          const QStringList& users,
                          const QStringList& rooms,
+                         const QVariantList& userDetails,
+                         const QVariantList& roomDetails,
                          bool isAdmin);
 
 private:

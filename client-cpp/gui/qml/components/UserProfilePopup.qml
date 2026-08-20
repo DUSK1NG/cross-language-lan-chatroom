@@ -10,6 +10,7 @@ Popup {
     property bool admin: false
     property bool canAdmin: false
     property bool selfUser: false
+    property string pendingAction: ""
     signal privateRequested(string displayName, string userCode)
     width: 260
     height: canAdmin && !admin && !selfUser ? 330 : 280
@@ -17,6 +18,11 @@ Popup {
     focus: true
     anchors.centerIn: Overlay.overlay
     padding: 18
+
+    function confirmAdminAction(action) {
+        pendingAction = action
+        adminConfirmDialog.open()
+    }
 
     background: Rectangle {
         radius: 12
@@ -50,7 +56,7 @@ Popup {
                 compact: true
                 Layout.fillWidth: true
                 text: "禁言/解禁"
-                onClicked: { chatController.sendAdminAction("mute", root.userCode); root.close() }
+                onClicked: root.confirmAdminAction("mute")
             }
             AppButton {
                 variant: "danger"
@@ -58,9 +64,47 @@ Popup {
                 danger: true
                 Layout.fillWidth: true
                 text: "踢出"
-                onClicked: { chatController.sendAdminAction("kick", root.userCode); root.close() }
+                onClicked: root.confirmAdminAction("kick")
             }
         }
         AppButton { Layout.fillWidth: true; text: "关闭"; onClicked: root.close() }
+    }
+
+    AppDialog {
+        id: adminConfirmDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: 360
+        title: root.pendingAction === "kick" ? "确认踢出成员" : "确认切换禁言"
+        modal: true
+
+        contentItem: Label {
+            width: 320
+            wrapMode: Text.WordWrap
+            color: Theme.primaryText
+            text: root.pendingAction === "kick"
+                  ? "确定将 " + root.displayName + "#" + root.userCode + " 踢出聊天室吗？"
+                  : "确定切换 " + root.displayName + "#" + root.userCode + " 的禁言状态吗？"
+        }
+
+        footer: RowLayout {
+            width: adminConfirmDialog.width - adminConfirmDialog.leftPadding - adminConfirmDialog.rightPadding
+            Item { Layout.fillWidth: true }
+            AppButton { compact: true; text: "取消"; onClicked: adminConfirmDialog.close() }
+            AppButton {
+                compact: true
+                accent: root.pendingAction !== "kick"
+                danger: root.pendingAction === "kick"
+                variant: root.pendingAction === "kick" ? "danger" : "primary"
+                text: "确认"
+                onClicked: {
+                    chatController.sendAdminAction(root.pendingAction, root.userCode)
+                    adminConfirmDialog.close()
+                    root.close()
+                }
+            }
+        }
+
+        onClosed: root.pendingAction = ""
     }
 }
