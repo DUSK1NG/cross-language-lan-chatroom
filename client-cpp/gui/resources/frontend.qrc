@@ -1,7 +1,7 @@
 <RCC>
     <qresource prefix="/">
         <file alias="frontend/index.html">../../../frontend/dist/index.html</file>
-        <file alias="frontend/assets/index-B7s59gox.js">../../../frontend/dist/assets/index-B7s59gox.js</file>
+        <file alias="frontend/assets/index-Dt9YeZhX.js">../../../frontend/dist/assets/index-Dt9YeZhX.js</file>
         <file alias="frontend/assets/index-aBVf1qUd.css">../../../frontend/dist/assets/index-aBVf1qUd.css</file>
     </qresource>
 </RCC>

@@ -91,4 +91,6 @@ export interface ChatBridgeClient {
   currentStateJson(): string;
   dispatch(command: BridgeCommand): void;
   subscribe(listener: (state: BridgeState) => void): () => void;
+  subscribeCommandResult(listener: (result: CommandResult) => void): () => void;
+  subscribeBridgeError(listener: (error: BridgeError) => void): () => void;
 }

@@ -1,9 +1,11 @@
-import type { BridgeCommand, BridgeState, ChatBridgeClient } from './types';
+import type { BridgeCommand, BridgeError, BridgeState, ChatBridgeClient, CommandResult } from './types';
 
 export type QtBridgeProxy = {
   currentStateJson(callback: (json: string) => void): void | string;
   dispatch(commandJson: string): void;
   stateChanged: { connect(listener: (json: string) => void): void };
+  commandResult: { connect(listener: (json: string) => void): void };
+  bridgeError: { connect(listener: (json: string) => void): void };
 };
 
 type QtWebChannelConstructor = new (transport: unknown, callback: (channel: { objects: Record<string, QtBridgeProxy> }) => void) => unknown;
@@ -18,6 +20,8 @@ declare global {
 export class FakeChatBridge implements ChatBridgeClient {
   private state: BridgeState;
   private readonly listeners = new Set<(state: BridgeState) => void>();
+  private readonly resultListeners = new Set<(result: CommandResult) => void>();
+  private readonly errorListeners = new Set<(error: BridgeError) => void>();
   readonly commands: BridgeCommand[] = [];
 
   constructor(initialState: BridgeState) {
@@ -30,11 +34,22 @@ export class FakeChatBridge implements ChatBridgeClient {
 
   dispatch(command: BridgeCommand): void {
     this.commands.push(command);
+    queueMicrotask(() => this.resultListeners.forEach((listener) => listener({ id: command.id, ok: true })));
   }
 
   subscribe(listener: (state: BridgeState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  subscribeCommandResult(listener: (result: CommandResult) => void): () => void {
+    this.resultListeners.add(listener);
+    return () => this.resultListeners.delete(listener);
+  }
+
+  subscribeBridgeError(listener: (error: BridgeError) => void): () => void {
+    this.errorListeners.add(listener);
+    return () => this.errorListeners.delete(listener);
   }
 
   publish(state: BridgeState): void {
@@ -70,12 +85,22 @@ function readCurrentState(proxy: QtBridgeProxy): Promise<string> {
 
 class QtChatBridge implements ChatBridgeClient {
   private readonly listeners = new Set<(state: BridgeState) => void>();
+  private readonly resultListeners = new Set<(result: CommandResult) => void>();
+  private readonly errorListeners = new Set<(error: BridgeError) => void>();
 
   constructor(private readonly proxy: QtBridgeProxy, private state: BridgeState) {
     proxy.stateChanged.connect((json) => {
       const nextState = parseBridgeState(json);
       this.state = nextState;
       this.listeners.forEach((listener) => listener(nextState));
+    });
+    proxy.commandResult.connect((json) => {
+      const result = JSON.parse(json) as CommandResult;
+      this.resultListeners.forEach((listener) => listener(result));
+    });
+    proxy.bridgeError.connect((json) => {
+      const error = JSON.parse(json) as BridgeError;
+      this.errorListeners.forEach((listener) => listener(error));
     });
   }
 
@@ -90,6 +115,16 @@ class QtChatBridge implements ChatBridgeClient {
   subscribe(listener: (state: BridgeState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  subscribeCommandResult(listener: (result: CommandResult) => void): () => void {
+    this.resultListeners.add(listener);
+    return () => this.resultListeners.delete(listener);
+  }
+
+  subscribeBridgeError(listener: (error: BridgeError) => void): () => void {
+    this.errorListeners.add(listener);
+    return () => this.errorListeners.delete(listener);
   }
 }
 

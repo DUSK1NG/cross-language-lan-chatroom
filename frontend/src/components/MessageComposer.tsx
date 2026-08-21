@@ -16,8 +16,14 @@ export function MessageComposer({ state, bridge }: MessageComposerProps) {
     const payload = active.kind === 'room'
       ? { room: active.id, content: trimmed }
       : { targetUserCode: active.userCode, content: trimmed };
-    bridge.dispatch(createCommand(type, payload));
-    setContent('');
+    const command = createCommand(type, payload);
+    let unsubscribe: () => void = () => undefined;
+    unsubscribe = bridge.subscribeCommandResult((result) => {
+      if (result.id !== command.id) return;
+      unsubscribe();
+      if (result.ok) setContent('');
+    });
+    bridge.dispatch(command);
   }
 
   return (

@@ -18,7 +18,9 @@ describe('createQtBridge', () => {
     const proxy = {
       currentStateJson: vi.fn((callback: (json: string) => void) => callback(JSON.stringify(state))),
       dispatch: vi.fn(),
-      stateChanged: { connect: vi.fn() }
+      stateChanged: { connect: vi.fn() },
+      commandResult: { connect: vi.fn() },
+      bridgeError: { connect: vi.fn() }
     };
 
     const bridge = await createQtBridge(proxy);
@@ -34,7 +36,9 @@ describe('createQtBridge', () => {
     const proxy = {
       currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
       dispatch: vi.fn(),
-      stateChanged: { connect: (listener: (json: string) => void) => { stateListener = listener; } }
+      stateChanged: { connect: (listener: (json: string) => void) => { stateListener = listener; } },
+      commandResult: { connect: vi.fn() },
+      bridgeError: { connect: vi.fn() }
     };
     const bridge = await createQtBridge(proxy);
     const listener = vi.fn();
@@ -49,7 +53,9 @@ describe('createQtBridge', () => {
     const proxy = {
       currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
       dispatch: vi.fn(),
-      stateChanged: { connect: vi.fn() }
+      stateChanged: { connect: vi.fn() },
+      commandResult: { connect: vi.fn() },
+      bridgeError: { connect: vi.fn() }
     };
     class FakeWebChannel {
       constructor(_transport: unknown, callback: (channel: { objects: Record<string, typeof proxy> }) => void) {
@@ -78,5 +84,23 @@ describe('createQtBridge', () => {
     await expect(createWebChannelBridge()).rejects.toThrow('chatBridge object is unavailable');
     delete window.qt;
     delete window.QWebChannel;
+  });
+
+  it('forwards command results from the Qt proxy', async () => {
+    let resultListener: ((json: string) => void) | undefined;
+    const proxy = {
+      currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
+      dispatch: vi.fn(),
+      stateChanged: { connect: vi.fn() },
+      commandResult: { connect: (listener: (json: string) => void) => { resultListener = listener; } },
+      bridgeError: { connect: vi.fn() }
+    };
+    const bridge = await createQtBridge(proxy);
+    const listener = vi.fn();
+    bridge.subscribeCommandResult(listener);
+
+    resultListener?.('{"id":"web-1","ok":false,"error":{"code":"rejected","message":"no","retryable":false,"source":"controller"}}');
+
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ id: 'web-1', ok: false }));
   });
 });
