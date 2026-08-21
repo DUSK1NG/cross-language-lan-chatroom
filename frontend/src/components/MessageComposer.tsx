@@ -15,7 +15,7 @@ export function MessageComposer({ state, bridge }: MessageComposerProps) {
     const type = active.kind === 'room' ? 'chat.sendRoom' : 'chat.sendPrivate';
     const payload = active.kind === 'room'
       ? { room: active.id, content: trimmed }
-      : { userCode: active.userCode, content: trimmed };
+      : { targetUserCode: active.userCode, content: trimmed };
     bridge.dispatch(createCommand(type, payload));
     setContent('');
   }

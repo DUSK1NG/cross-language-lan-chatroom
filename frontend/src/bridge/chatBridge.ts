@@ -1,5 +1,20 @@
 import type { BridgeCommand, BridgeState, ChatBridgeClient } from './types';
 
+export type QtBridgeProxy = {
+  currentStateJson(callback: (json: string) => void): void | string;
+  dispatch(commandJson: string): void;
+  stateChanged: { connect(listener: (json: string) => void): void };
+};
+
+type QtWebChannelConstructor = new (transport: unknown, callback: (channel: { objects: Record<string, QtBridgeProxy> }) => void) => unknown;
+
+declare global {
+  interface Window {
+    QWebChannel?: QtWebChannelConstructor;
+    qt?: { webChannelTransport?: unknown };
+  }
+}
+
 export class FakeChatBridge implements ChatBridgeClient {
   private state: BridgeState;
   private readonly listeners = new Set<(state: BridgeState) => void>();
@@ -30,6 +45,76 @@ export class FakeChatBridge implements ChatBridgeClient {
 
 export function createFakeBridge(initialState: BridgeState): FakeChatBridge {
   return new FakeChatBridge(initialState);
+}
+
+function readCurrentState(proxy: QtBridgeProxy): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (json: string) => {
+      if (!settled) {
+        settled = true;
+        resolve(json);
+      }
+    };
+    try {
+      const result = proxy.currentStateJson(finish);
+      if (typeof result === 'string') finish(result);
+    } catch (error) {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    }
+  });
+}
+
+class QtChatBridge implements ChatBridgeClient {
+  private readonly listeners = new Set<(state: BridgeState) => void>();
+
+  constructor(private readonly proxy: QtBridgeProxy, private state: BridgeState) {
+    proxy.stateChanged.connect((json) => {
+      const nextState = parseBridgeState(json);
+      this.state = nextState;
+      this.listeners.forEach((listener) => listener(nextState));
+    });
+  }
+
+  currentStateJson(): string {
+    return JSON.stringify(this.state);
+  }
+
+  dispatch(command: BridgeCommand): void {
+    this.proxy.dispatch(JSON.stringify(command));
+  }
+
+  subscribe(listener: (state: BridgeState) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+}
+
+export async function createQtBridge(proxy: QtBridgeProxy): Promise<ChatBridgeClient> {
+  const state = parseBridgeState(await readCurrentState(proxy));
+  return new QtChatBridge(proxy, state);
+}
+
+export async function createWebChannelBridge(): Promise<ChatBridgeClient> {
+  const transport = window.qt?.webChannelTransport;
+  const WebChannel = window.QWebChannel;
+  if (!transport || !WebChannel) {
+    throw new Error('QWebChannel transport is unavailable');
+  }
+
+  return new Promise((resolve, reject) => {
+    new WebChannel(transport, (channel) => {
+      const proxy = channel.objects?.chatBridge;
+      if (!proxy) {
+        reject(new Error('chatBridge object is unavailable'));
+        return;
+      }
+      void createQtBridge(proxy).then(resolve, reject);
+    });
+  });
 }
 
 export function parseBridgeState(json: string): BridgeState {
