@@ -341,6 +341,7 @@ void GuiChatController::handleConnectionFailed(const QString& reason) {
     emit connectedChanged();
     setStatus(QStringLiteral("连接失败：") + reason);
     appendSystemMessage(statusText_);
+    emit connectionFailed(reason);
 }
 
 void GuiChatController::handleConnectionLost(const QString& reason) {
@@ -353,6 +354,7 @@ void GuiChatController::handleConnectionLost(const QString& reason) {
     emit connectedChanged();
     setStatus(reason.isEmpty() ? QStringLiteral("连接已断开") : QStringLiteral("连接已断开：") + reason);
     appendSystemMessage(statusText_);
+    emit connectionLost(reason);
 }
 
 void GuiChatController::handleMessage(const QString& type, const QString& messageId, const QString& username,

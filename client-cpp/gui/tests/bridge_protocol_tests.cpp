@@ -8,6 +8,7 @@ class BridgeProtocolTests final : public QObject {
 
 private slots:
     void acceptsRoomMessageCommand();
+    void acceptsRemoteConnectionWithoutCaFile();
     void rejectsMissingIdAndPayload();
     void rejectsWrongPayloadType();
     void rejectsEmptyRequiredPayloadValue();
@@ -20,6 +21,24 @@ void BridgeProtocolTests::acceptsRoomMessageCommand() {
         {"id", "cmd-42"},
         {"type", "chat.sendRoom"},
         {"payload", QJsonObject{{"content", "你好"}, {"room", "lobby"}}}
+    };
+
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::acceptsRemoteConnectionWithoutCaFile() {
+    const QJsonObject command{
+        {"id", "cmd-remote"},
+        {"type", "session.connectRemote"},
+        {"payload", QJsonObject{{"serverIp", "127.0.0.1"},
+                                 {"serverPort", 8888},
+                                 {"username", "Alice"},
+                                 {"userCode", "A001"},
+                                 {"password", "secret"},
+                                 {"caFile", ""},
+                                 {"registerAccount", false}}}
     };
 
     QString error;

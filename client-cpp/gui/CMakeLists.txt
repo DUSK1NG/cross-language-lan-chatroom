@@ -17,6 +17,8 @@ qt_add_executable(lan-chat-gui
     src/main.cpp
     src/bridge_protocol.cpp
     src/bridge_protocol.hpp
+    src/chat_bridge.cpp
+    src/chat_bridge.hpp
     src/chat_model.cpp
     src/chat_model.hpp
     src/gui_connection_worker.cpp
@@ -108,6 +110,42 @@ target_include_directories(bridge-protocol-tests PRIVATE
 
 enable_testing()
 add_test(NAME bridge-protocol-tests COMMAND bridge-protocol-tests)
+
+qt_add_executable(chat-bridge-tests
+    tests/chat_bridge_tests.cpp
+    src/chat_bridge.cpp
+    src/chat_bridge.hpp
+    src/bridge_protocol.cpp
+    src/bridge_protocol.hpp
+    src/chat_model.cpp
+    src/chat_model.hpp
+    src/gui_chat_controller.cpp
+    src/gui_chat_controller.hpp
+    src/gui_connection_worker.cpp
+    src/gui_connection_worker.hpp
+    ../src/auth.cpp
+    ../src/connection.cpp
+    ../src/message.cpp
+    ../src/protocol.cpp
+)
+
+target_link_libraries(chat-bridge-tests PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Test
+    ws2_32
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)
+
+target_include_directories(chat-bridge-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
+)
+
+add_test(NAME chat-bridge-tests COMMAND chat-bridge-tests)
 
 set_target_properties(lan-chat-gui PROPERTIES
     WIN32_EXECUTABLE TRUE

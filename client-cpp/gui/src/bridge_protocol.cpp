@@ -65,8 +65,10 @@ QJsonValue withoutSecrets(const QJsonValue& value) {
 
 bool validatePayload(const QString& type, const QJsonObject& payload) {
     if (type == QStringLiteral("session.connectRemote")) {
-        return hasRequiredStrings(payload, {"serverIp", "username", "userCode", "password", "caFile"}) &&
-               integerValue(payload, "serverPort") && booleanValue(payload, "registerAccount");
+        const QJsonValue caFile = payload.value(QStringLiteral("caFile"));
+        return hasRequiredStrings(payload, {"serverIp", "username", "userCode", "password"}) &&
+               integerValue(payload, "serverPort") && booleanValue(payload, "registerAccount") &&
+               (caFile.isUndefined() || caFile.isString());
     }
     if (type == QStringLiteral("session.connectLocalHost")) {
         return hasRequiredStrings(payload, {"serverExe", "certFile", "keyFile", "dbFile", "username", "userCode"});

@@ -46,6 +46,7 @@ public:
     int onlineMemberCount() const { return onlineMemberCount_; }
     QString statusText() const { return statusText_; }
     bool activeRoomCanManage() const { return activeRoomCanManage_; }
+    QString activeConversationKey() const { return activeConversationKey_; }
     QString savedServerIp() const;
     int savedServerPort() const;
     QString savedUsername() const;
@@ -88,6 +89,8 @@ signals:
     void activeMessageModelChanged();
     void activeRoomCanManageChanged();
     void savedConnectionChanged();
+    void connectionFailed(const QString& reason);
+    void connectionLost(const QString& reason);
 
 private slots:
     void handleConnected(bool isAdmin);
