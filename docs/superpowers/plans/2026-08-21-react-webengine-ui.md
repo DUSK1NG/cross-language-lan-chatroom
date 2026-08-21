@@ -274,7 +274,7 @@ git commit -m "feat(frontend): add React bridge shell"
 - Create: `docs/superpowers/plans/2026-08-21-react-webengine-ui-dependency-check.md` only if the installed component paths differ from the plan.
 
 **Interfaces:**
-- Produces valid CMake package paths for `Qt6WebEngineQuick` and `Qt6WebChannel` under the selected Qt 6.11 MinGW prefix.
+- Produces valid CMake package paths for `Qt6WebEngineWidgets` and `Qt6WebChannel` under the selected Qt 6.11 MSVC 2022 x64 prefix.
 - Produces runnable Qt DLLs for local development and release packaging.
 
 - [ ] **Step 1: Recheck the dependency paths**
@@ -282,15 +282,15 @@ git commit -m "feat(frontend): add React bridge shell"
 Run:
 
 ```powershell
-Get-ChildItem 'C:\Qt\6.11.2\mingw_64\lib\cmake' -Name | Where-Object { $_ -match 'WebEngine|WebChannel' }
-Get-ChildItem 'C:\Qt\6.11.2\mingw_64\bin' -Name | Where-Object { $_ -match 'WebEngine|WebChannel' }
+Get-ChildItem 'C:\Qt\6.11.2\msvc2022_64\lib\cmake' -Name | Where-Object { $_ -match 'WebEngine|WebChannel' }
+Get-ChildItem 'C:\Qt\6.11.2\msvc2022_64\bin' -Name | Where-Object { $_ -match 'WebEngine|WebChannel' }
 ```
 
 Expected after installation: both CMake package families and their runtime DLLs are present.
 
 - [ ] **Step 2: If missing, stop and request the Qt component installation**
 
-Use the Qt Maintenance Tool or an official Qt 6.11 MinGW package with WebEngine and WebChannel selected. Do not substitute Electron, a system WebView, or a random DLL copy. The repository implementation must remain disabled until the selected Qt prefix passes the path check.
+Use the Qt Maintenance Tool or an official Qt 6.11 MSVC 2022 x64 package with WebEngine, WebChannel and Positioning selected. The MSVC client also requires an MSVC-compatible OpenSSL 3 package; use the approved vcpkg temporary package for local verification. Do not substitute Electron, a system WebView, or a random DLL copy. The repository implementation must remain disabled until the selected Qt prefix passes the path check.
 
 - [ ] **Step 3: Verify CMake can resolve the components**
 
@@ -299,12 +299,14 @@ Run:
 ```powershell
 cmake -S .\client-cpp\gui -B .\client-cpp\gui\build-webengine -G Ninja `
   -DCMAKE_BUILD_TYPE=Debug `
-  -DCMAKE_CXX_COMPILER='C:\Qt\Tools\mingw1310_64\bin\g++.exe' `
-  -DCMAKE_PREFIX_PATH='C:\Qt\6.11.2\mingw_64' `
+  -DCMAKE_C_COMPILER='cl.exe' `
+  -DCMAKE_CXX_COMPILER='cl.exe' `
+  -DCMAKE_PREFIX_PATH='C:\Qt\6.11.2\msvc2022_64' `
+  -DOPENSSL_ROOT_DIR='<temporary-vcpkg-openssl-prefix>' `
   -DLAN_CHAT_ENABLE_WEB_UI=ON
 ```
 
-Expected: CMake finds `Qt6::WebEngineQuick` and `Qt6::WebChannel`. If it fails, report the exact missing package and leave the QML build unaffected.
+Expected: CMake finds `Qt6::WebEngineWidgets` and `Qt6::WebChannel`. If it fails, report the exact missing package and leave the QML build unaffected.
 
 ### Task 5: Add WebEngine host with QML fallback
 
@@ -328,7 +330,7 @@ Test the URL policy as pure functions: loopback HTTP development URL accepted; n
 
 - [ ] **Step 2: Add the optional WebEngine/WebChannel CMake components**
 
-Define `option(LAN_CHAT_ENABLE_WEB_UI "Build the React WebEngine UI" OFF)`. Only inside the ON branch call `find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineQuick WebChannel)`, link the corresponding Qt targets, add host sources, and add the resource file. Keep the existing QML target link set unchanged when OFF.
+Define `option(LAN_CHAT_ENABLE_WEB_UI "Build the React WebEngine UI" OFF)`. Only inside the ON branch call `find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineWidgets WebChannel)`, link the corresponding Qt targets, add host sources, and add the resource file. Keep the existing QML target link set unchanged when OFF.
 
 - [ ] **Step 3: Implement the host and bridge registration**
 
@@ -486,4 +488,3 @@ Only after all acceptance rows pass, update `docs/CODEX_HANDOFF.md` to identify 
 git add scripts/package-release.ps1 docs/release-setup.md docs/CODEX_HANDOFF.md docs/react-webengine-release-checklist.md
 git commit -m "docs: verify React WebEngine release path"
 ```
-

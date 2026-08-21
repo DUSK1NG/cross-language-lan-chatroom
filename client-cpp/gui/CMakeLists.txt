@@ -10,6 +10,12 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Test)
 find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
 find_package(Threads REQUIRED)
 
+option(LAN_CHAT_ENABLE_WEB_UI "Build the React WebEngine UI" OFF)
+
+if(MSVC)
+    add_compile_definitions(NOMINMAX)
+endif()
+
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
@@ -146,6 +152,47 @@ target_include_directories(chat-bridge-tests PRIVATE
 )
 
 add_test(NAME chat-bridge-tests COMMAND chat-bridge-tests)
+
+if(LAN_CHAT_ENABLE_WEB_UI)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineWidgets WebChannel)
+
+    set(FRONTEND_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../frontend/dist")
+    if(NOT EXISTS "${FRONTEND_DIST_DIR}/index.html")
+        message(FATAL_ERROR "React release UI is missing: ${FRONTEND_DIST_DIR}/index.html")
+    endif()
+
+    target_sources(lan-chat-gui PRIVATE
+        src/web_ui_host.cpp
+        src/web_ui_host.hpp
+        resources/frontend.qrc
+    )
+    target_compile_definitions(lan-chat-gui PRIVATE LAN_CHAT_ENABLE_WEB_UI=1)
+    target_link_libraries(lan-chat-gui PRIVATE
+        Qt6::Widgets
+        Qt6::WebEngineWidgets
+        Qt6::WebChannel
+    )
+
+    qt_add_executable(web-ui-host-tests
+        tests/web_ui_host_tests.cpp
+        src/web_ui_host.cpp
+        src/web_ui_host.hpp
+    )
+
+    target_link_libraries(web-ui-host-tests PRIVATE
+        Qt6::Core
+        Qt6::Test
+        Qt6::Widgets
+        Qt6::WebEngineWidgets
+        Qt6::WebChannel
+    )
+
+    target_include_directories(web-ui-host-tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
+    add_test(NAME web-ui-host-tests COMMAND web-ui-host-tests)
+endif()
 
 set_target_properties(lan-chat-gui PROPERTIES
     WIN32_EXECUTABLE TRUE
