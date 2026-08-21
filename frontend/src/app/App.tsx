@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { createCommand } from '../bridge/chatBridge';
 import type { ChatBridgeClient } from '../bridge/types';
 import { useBridgeState } from '../state/useBridgeState';
+import { WorkspacePage } from './WorkspacePage';
 import '../styles/global.css';
 
 type AppProps = { bridge: ChatBridgeClient };
@@ -22,17 +23,7 @@ export function App({ bridge }: AppProps) {
   }
 
   if (page === 'workspace' && state.connection.phase === 'connected') {
-    const title = state.navigation.activeConversation?.title ?? 'lobby';
-    return (
-      <main className="app-shell workspace-shell">
-        <section className="workspace-placeholder" aria-label="聊天工作区">
-          <p className="eyebrow">LAN CHAT / AURORA GLASS</p>
-          <h1># {title}</h1>
-          <p>{state.connection.statusText}</p>
-          <div className="identity-card">{state.identity.displayName} #{state.identity.userCode}</div>
-        </section>
-      </main>
-    );
+    return <WorkspacePage bridge={bridge} state={state} />;
   }
 
   return <ModeSelectionPage onRemote={() => setPage('connect')} />;

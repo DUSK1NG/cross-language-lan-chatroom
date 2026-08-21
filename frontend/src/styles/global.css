@@ -10,6 +10,7 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input { font: inherit; }
 button { color: inherit; }
+button:focus-visible, input:focus-visible { outline: 2px solid #37f6d0; outline-offset: 3px; }
 
 .app-shell {
   min-height: 100vh;
@@ -51,11 +52,81 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .workspace-placeholder h1 { color: #37f6d0; }
 .identity-card { margin-top: 60px; width: fit-content; padding: 14px 18px; border: 1px solid rgba(55, 246, 208, .24); border-radius: 16px; color: #d9e1f5; background: rgba(7, 11, 24, .52); }
 
+.workspace-shell { display: grid; grid-template-columns: 76px minmax(220px, 280px) minmax(0, 1fr) 248px; grid-template-rows: minmax(0, 1fr); gap: 0; min-height: 100vh; padding: 0; background: linear-gradient(135deg, rgba(20, 30, 64, .9), rgba(7, 11, 24, .98)); }
+.workspace-rail, .conversation-sidebar, .member-panel { border-right: 1px solid rgba(164, 182, 255, .14); background: rgba(12, 18, 39, .74); }
+.workspace-rail { display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 24px 12px; }
+.brand-mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 14px; color: #07131a; font-weight: 800; background: linear-gradient(135deg, #37f6d0, #8c7cff); box-shadow: 0 8px 24px rgba(55, 246, 208, .2); }
+.rail-actions { display: grid; gap: 10px; }
+.rail-button, .icon-button, .member-toggle { border: 1px solid transparent; border-radius: 12px; color: #9aa7c4; background: transparent; cursor: pointer; transition: color 150ms ease, border-color 150ms ease, background 150ms ease; }
+.rail-button { width: 42px; height: 42px; font-size: 18px; }
+.rail-button:hover, .rail-button--active, .icon-button:hover { color: #37f6d0; border-color: rgba(55, 246, 208, .22); background: rgba(55, 246, 208, .08); }
+.rail-button--bottom { margin-top: auto; }
+.conversation-sidebar, .member-panel { min-width: 0; padding: 26px 18px; overflow: auto; }
+.sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sidebar-heading .eyebrow { margin-bottom: 6px; font-size: 10px; }
+.sidebar-heading h2 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
+.icon-button { width: 32px; height: 32px; font-size: 18px; }
+.sidebar-heading--private { margin-top: 32px; }
+.conversation-list, .member-list { display: grid; gap: 6px; margin-top: 14px; }
+.conversation-item, .member-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px; border: 1px solid transparent; border-radius: 14px; color: #d9e1f5; background: transparent; text-align: left; }
+.conversation-item { width: 100%; cursor: pointer; }
+.conversation-item:hover, .conversation-item--active { border-color: rgba(140, 124, 255, .24); background: rgba(140, 124, 255, .12); }
+.conversation-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; color: #37f6d0; background: rgba(55, 246, 208, .1); }
+.conversation-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.conversation-copy strong, .conversation-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-copy small, .message-meta span, .header-status { color: #8190b0; font-size: 11px; }
+.unread-badge, .member-count { display: inline-grid; min-width: 20px; height: 20px; place-items: center; padding: 0 6px; border-radius: 10px; color: #07131a; font-size: 11px; font-weight: 800; background: #37f6d0; }
+.avatar { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; border-radius: 12px; color: #f5f7ff; font-weight: 700; background: linear-gradient(135deg, #ff72be, #8c7cff); }
+.avatar--small { width: 28px; height: 28px; border-radius: 9px; font-size: 12px; }
+.avatar--tiny { width: 28px; height: 28px; border: 2px solid #111932; border-radius: 50%; font-size: 11px; }
+.avatar--offset { margin-left: -9px; background: linear-gradient(135deg, #37f6d0, #3677ff); }
+.chat-region { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: rgba(7, 11, 24, .24); }
+.chat-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 28px 34px 22px; border-bottom: 1px solid rgba(164, 182, 255, .14); }
+.chat-header h1 { font-size: clamp(28px, 3vw, 44px); }
+.header-status { display: flex; align-items: center; gap: 7px; margin: 10px 0 0; }
+.status-dot, .presence-dot, .identity-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #8190b0; }
+.status-dot, .presence-dot--online, .identity-status { background: #37f6d0; box-shadow: 0 0 12px rgba(55, 246, 208, .7); }
+.member-toggle { display: flex; align-items: center; gap: 10px; padding: 7px 12px 7px 8px; border-color: rgba(164, 182, 255, .16); }
+.member-toggle:hover { color: #f5f7ff; border-color: rgba(55, 246, 208, .35); background: rgba(55, 246, 208, .08); }
+.avatar-stack { display: flex; }
+.message-timeline { min-height: 0; padding: 26px 34px; overflow: auto; overscroll-behavior: contain; }
+.message { display: flex; margin-bottom: 20px; }
+.message--self { justify-content: flex-end; }
+.message-cluster { display: flex; max-width: min(78%, 720px); flex-direction: column; gap: 6px; }
+.message--self .message-cluster { align-items: flex-end; }
+.message-meta { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; }
+.message-bubble { position: relative; padding: 13px 16px; border: 1px solid rgba(164, 182, 255, .14); border-radius: 18px 18px 18px 5px; color: #e8edff; background: rgba(22, 31, 63, .82); }
+.message--self .message-bubble { border-color: rgba(55, 246, 208, .22); border-radius: 18px 18px 5px 18px; background: rgba(32, 74, 80, .56); }
+.message-content { margin: 0; line-height: 1.6; }
+.message-content--wrap { overflow-wrap: anywhere; }
+.message-actions { display: flex; gap: 6px; margin-top: 8px; opacity: 0; transition: opacity 150ms ease; }
+.message-bubble:hover .message-actions, .message-actions:focus-within { opacity: 1; }
+.message-actions button { border: 0; color: #9aa7c4; background: transparent; cursor: pointer; font-size: 11px; }
+.message-actions button:hover { color: #37f6d0; }
+.empty-state { display: grid; height: 100%; min-height: 220px; place-items: center; align-content: center; color: #8190b0; }
+.empty-glyph { color: #37f6d0; font-size: 32px; }
+.message-composer { display: flex; gap: 10px; margin: 0 34px 26px; padding: 8px; border: 1px solid rgba(164, 182, 255, .18); border-radius: 16px; background: rgba(17, 25, 50, .72); }
+.message-composer input { min-width: 0; flex: 1; padding: 10px; border: 0; outline: 0; color: #f5f7ff; background: transparent; }
+.send-button { width: 38px; border: 0; border-radius: 11px; color: #07131a; background: #37f6d0; cursor: pointer; }
+.identity-card--fixed { position: fixed; z-index: 2; bottom: 24px; left: 92px; display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 12px; }
+.member-row { padding: 8px 0; }
+.modal-backdrop { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(3, 5, 14, .7); }
+.modal-surface { width: min(100%, 360px); max-height: min(80vh, 560px); padding: 22px; border: 1px solid rgba(164, 182, 255, .2); border-radius: 24px; background: #111932; box-shadow: 0 30px 100px rgba(0, 0, 0, .45); overflow: auto; }
+.member-panel--modal { display: block; padding: 0; border: 0; background: transparent; }
+
 @media (max-width: 760px) {
   .mode-grid { grid-template-columns: 1fr; }
   .mode-panel, .connect-panel { padding: 28px; border-radius: 24px; }
   .form-grid { grid-template-columns: 1fr; gap: 8px; }
   .form-grid label { margin-top: 8px; }
+  .workspace-shell { grid-template-columns: 58px minmax(0, 1fr); }
+  .conversation-sidebar { display: none; }
+  .member-panel { display: none; }
+  .chat-header { padding: 22px 18px 18px; }
+  .message-timeline { padding: 20px 18px; }
+  .message-composer { margin: 0 18px 18px; }
+  .identity-card--fixed { bottom: 18px; left: 70px; }
+  .message-cluster { max-width: 90%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
