@@ -1,7 +1,9 @@
 #pragma once
 
 #include "chat_model.hpp"
+#include "conversation_filter_model.hpp"
 
+#include <QAbstractItemModel>
 #include <QHash>
 #include <QObject>
 #include <QThread>
@@ -17,6 +19,8 @@ class GuiChatController final : public QObject {
     Q_PROPERTY(ChatListModel* messageModel READ messageModel CONSTANT)
     Q_PROPERTY(ChatListModel* activeMessageModel READ activeMessageModel NOTIFY activeMessageModelChanged)
     Q_PROPERTY(ChatListModel* memberModel READ memberModel CONSTANT)
+    Q_PROPERTY(QAbstractItemModel* filteredRoomModel READ filteredRoomModel CONSTANT)
+    Q_PROPERTY(QAbstractItemModel* filteredDirectMessageModel READ filteredDirectMessageModel CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool admin READ admin NOTIFY adminChanged)
     Q_PROPERTY(QString localUserName READ localUserName NOTIFY localIdentityChanged)
@@ -39,6 +43,8 @@ public:
     ChatListModel* messageModel() const { return messageModel_; }
     ChatListModel* activeMessageModel() const { return messageModel_; }
     ChatListModel* memberModel() const { return memberModel_; }
+    QAbstractItemModel* filteredRoomModel() const { return roomFilterModel_; }
+    QAbstractItemModel* filteredDirectMessageModel() const { return directMessageFilterModel_; }
     bool connected() const { return connected_; }
     bool admin() const { return admin_; }
     QString localUserName() const { return localUserName_; }
@@ -53,11 +59,12 @@ public:
     QString savedUserCode() const;
     QString savedCaFile() const;
     void setBundledCaFile(const QString& path);
+    Q_INVOKABLE QString autoPrivateKeyPath(const QString& serverExe,
+                                           const QString& certFile) const;
 
     Q_INVOKABLE void connectToServer(const QString& serverIp, int serverPort,
                                      const QString& username, const QString& userCode,
-                                     const QString& password, const QString& caFile = {},
-                                     bool registerAccount = false);
+                                     const QString& caFile = {});
     Q_INVOKABLE void connectToLocalHost(const QString& serverExe,
                                         const QString& certFile,
                                         const QString& keyFile,
@@ -70,6 +77,8 @@ public:
     Q_INVOKABLE void sendPrivateMessage(const QString& content, const QString& targetUserCode);
     Q_INVOKABLE void requestUsers();
     Q_INVOKABLE void requestRooms();
+    Q_INVOKABLE void loadMoreHistory();
+    Q_INVOKABLE void setSidebarQuery(const QString& query);
     Q_INVOKABLE void createRoom(const QString& room, bool isPrivate);
     Q_INVOKABLE void sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode = {});
     Q_INVOKABLE void selectRoom(const QString& room);
@@ -78,7 +87,7 @@ public:
     Q_INVOKABLE void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {});
     Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE void removeLocalMessage(const QString& messageId);
-    Q_INVOKABLE void recallMessage(const QString& messageId);
+    Q_INVOKABLE bool recallMessage(const QString& messageId, const QString& commandId = {});
 
 signals:
     void connectedChanged();
@@ -91,13 +100,17 @@ signals:
     void savedConnectionChanged();
     void connectionFailed(const QString& reason);
     void connectionLost(const QString& reason);
+    void recallSucceeded(const QString& commandId);
+    void recallFailed(const QString& commandId, const QString& reason);
 
 private slots:
     void handleConnected(bool isAdmin);
     void handleConnectionFailed(const QString& reason);
     void handleConnectionLost(const QString& reason);
-    void handleMessage(const QString& type, const QString& messageId, const QString& username,
-                       const QString& userCode, const QString& content,
+    void handleHistory(const QString& room, const QString& targetUserCode,
+                       bool isPrivate, const QVariantList& messages, bool hasMore);
+    void handleMessage(const QString& type, const QString& messageId, const QString& commandId,
+                       const QString& username, const QString& userCode, const QString& content,
                        const QString& room, const QString& targetUserCode,
                        const QStringList& users, const QStringList& rooms,
                        const QVariantList& userDetails, const QVariantList& roomDetails,
@@ -111,6 +124,8 @@ private:
                                         const QString& userCode);
     ChatListModel* ensureConversationModel(const QString& key);
     void resetSessionData();
+    bool canRecallMessage(const QString& messageId) const;
+    void requestActiveHistory(const QString& beforeMessageId = {});
     void saveConnectionPreferences(const QString& serverIp, int serverPort,
                                    const QString& username, const QString& userCode,
                                    const QString& caFile);
@@ -119,6 +134,8 @@ private:
     ChatListModel* directMessageModel_;
     ChatListModel* messageModel_;
     ChatListModel* memberModel_;
+    ConversationFilterModel* roomFilterModel_;
+    ConversationFilterModel* directMessageFilterModel_;
     QHash<QString, ChatListModel*> conversationModels_;
     QHash<QString, int> roomMemberCounts_;
     QString activeConversationKey_ = QStringLiteral("room:lobby");
@@ -135,4 +152,6 @@ private:
     QString bundledCaFile_;
     int onlineMemberCount_ = 0;
     int localMessageCounter_ = 0;
+    bool historyHasMore_ = false;
+    bool historyLoading_ = false;
 };

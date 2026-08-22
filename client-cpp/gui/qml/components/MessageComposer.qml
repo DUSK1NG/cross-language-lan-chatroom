@@ -6,17 +6,32 @@ import LanChatGui
 RowLayout {
     id: root
     property alias text: input.text
+    property int minimumInputHeight: 42
+    property int maximumInputHeight: 116
     signal sendRequested()
-    height: 58
+    height: Math.max(58, input.implicitHeight)
     spacing: Theme.spacingS
 
-    AppTextField {
+    TextArea {
         id: input
         Layout.fillWidth: true
-        placeholderText: "输入消息..."
+        Layout.preferredHeight: Math.min(root.maximumInputHeight,
+                                         Math.max(root.minimumInputHeight, contentHeight + topPadding + bottomPadding))
+        Layout.minimumHeight: root.minimumInputHeight
+        Layout.maximumHeight: root.maximumInputHeight
+        implicitHeight: Math.min(root.maximumInputHeight,
+                                 Math.max(root.minimumInputHeight, contentHeight + topPadding + bottomPadding))
+        placeholderText: "输入消息...（Enter 发送，Shift+Enter 换行）"
         color: Theme.primaryText
         placeholderTextColor: Theme.secondaryText
         selectByMouse: true
+        wrapMode: TextArea.Wrap
+        persistentSelection: true
+        font.pixelSize: Theme.fontBody
+        leftPadding: Theme.spacingM
+        rightPadding: Theme.spacingM
+        topPadding: Theme.spacingS
+        bottomPadding: Theme.spacingS
         background: Rectangle {
             radius: Theme.radiusMedium
             color: input.activeFocus ? Qt.rgba(0.96, 0.98, 1.0, 0.14)
@@ -30,9 +45,15 @@ RowLayout {
                 height: 1
                 color: input.activeFocus ? Theme.glassHighlight : "transparent"
             }
-            Behavior on border.color { ColorAnimation { duration: Theme.animationNormal } }
+            Behavior on border.color { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; ColorAnimation { duration: Theme.animationNormal } }
         }
-        onAccepted: root.sendRequested()
+        Keys.onPressed: function(event) {
+            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) &&
+                !(event.modifiers & Qt.ShiftModifier)) {
+                event.accepted = true
+                root.sendRequested()
+            }
+        }
     }
     AppButton {
         variant: "primary"
@@ -59,4 +80,14 @@ RowLayout {
             input.forceActiveFocus()
         }
     }
+
+    Label {
+        Layout.alignment: Qt.AlignBottom
+        Layout.bottomMargin: Theme.spacingS
+        text: input.length > 0 ? input.length : ""
+        color: input.length > 3600 ? Theme.danger : Theme.secondaryText
+        font.pixelSize: Theme.fontCaption
+        visible: input.length > 0
+    }
+
 }

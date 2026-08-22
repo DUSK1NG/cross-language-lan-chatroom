@@ -66,8 +66,8 @@ QJsonValue withoutSecrets(const QJsonValue& value) {
 bool validatePayload(const QString& type, const QJsonObject& payload) {
     if (type == QStringLiteral("session.connectRemote")) {
         const QJsonValue caFile = payload.value(QStringLiteral("caFile"));
-        return hasRequiredStrings(payload, {"serverIp", "username", "userCode", "password"}) &&
-               integerValue(payload, "serverPort") && booleanValue(payload, "registerAccount") &&
+        return hasRequiredStrings(payload, {"serverIp", "username", "userCode"}) &&
+               integerValue(payload, "serverPort") &&
                (caFile.isUndefined() || caFile.isString());
     }
     if (type == QStringLiteral("session.connectLocalHost")) {
@@ -108,6 +108,13 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
     if (type == QStringLiteral("message.removeLocal") ||
         type == QStringLiteral("message.recall")) {
         return hasRequiredStrings(payload, {"messageId"});
+    }
+    if (type == QStringLiteral("settings.setPerformanceMode")) {
+        const QString mode = payload.value(QStringLiteral("mode")).toString();
+        return mode == QStringLiteral("Automatic") ||
+               mode == QStringLiteral("High") ||
+               mode == QStringLiteral("Balanced") ||
+               mode == QStringLiteral("Power Saving");
     }
     return false;
 }

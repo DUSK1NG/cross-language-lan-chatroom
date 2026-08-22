@@ -1,6 +1,7 @@
 #include "gui_chat_controller.hpp"
 
 #include "gui_connection_worker.hpp"
+#include "host_path_resolver.hpp"
 
 #include <QDateTime>
 #include <QGuiApplication>
@@ -28,8 +29,14 @@ GuiChatController::GuiChatController(QObject* parent)
       roomModel_(new ChatListModel({"roomName", "memberCount", "unreadCount", "ownerCode", "private", "canManage"}, this)),
       directMessageModel_(new ChatListModel({"displayName", "userCode", "unreadCount"}, this)),
       messageModel_(new ChatListModel(kMessageRoles, this)),
-    memberModel_(new ChatListModel({"displayName", "userCode", "online", "admin"}, this)),
+      memberModel_(new ChatListModel({"displayName", "userCode", "online", "admin"}, this)),
+      roomFilterModel_(new ConversationFilterModel(this)),
+      directMessageFilterModel_(new ConversationFilterModel(this)),
       worker_(new GuiConnectionWorker) {
+    roomFilterModel_->setSourceModel(roomModel_);
+    roomFilterModel_->setSearchRoles({QStringLiteral("roomName")});
+    directMessageFilterModel_->setSourceModel(directMessageModel_);
+    directMessageFilterModel_->setSearchRoles({QStringLiteral("displayName"), QStringLiteral("userCode")});
     conversationModels_.insert("room:lobby", messageModel_);
 
 
@@ -56,22 +63,26 @@ GuiChatController::GuiChatController(QObject* parent)
     connect(worker_, &GuiConnectionWorker::connectionFailed, this, &GuiChatController::handleConnectionFailed);
     connect(worker_, &GuiConnectionWorker::connectionLost, this, &GuiChatController::handleConnectionLost);
     connect(worker_, &GuiConnectionWorker::messageReceived, this, &GuiChatController::handleMessage);
+    connect(worker_, &GuiConnectionWorker::historyReceived, this, &GuiChatController::handleHistory);
     workerThread_.start();
 }
 
 GuiChatController::~GuiChatController() {
-    disconnectFromServer();
+    refreshTimer_.stop();
+    // The controller is being destroyed, so the worker must finish its
+    // socket/process cleanup before the thread is joined. The interactive
+    // disconnect path below remains asynchronous and never waits on the GUI.
+    if (worker_ && workerThread_.isRunning()) {
+        QMetaObject::invokeMethod(worker_, "disconnectFromServer", Qt::BlockingQueuedConnection);
+    }
     workerThread_.quit();
     workerThread_.wait();
 }
 
 void GuiChatController::connectToServer(const QString& serverIp, int serverPort,
                                         const QString& username, const QString& userCode,
-                                        const QString& password, const QString& caFile,
-                                        bool registerAccount) {
-    if (!registerAccount) {
-        saveConnectionPreferences(serverIp, serverPort, username, userCode, caFile);
-    }
+                                        const QString& caFile) {
+    saveConnectionPreferences(serverIp, serverPort, username, userCode, caFile);
     const bool identityChanged = localUserName_ != username || localUserCode_ != userCode;
     localUserName_ = username;
     localUserCode_ = userCode;
@@ -80,8 +91,7 @@ void GuiChatController::connectToServer(const QString& serverIp, int serverPort,
     QMetaObject::invokeMethod(worker_, "connectToServer", Qt::QueuedConnection,
                               Q_ARG(QString, serverIp), Q_ARG(int, serverPort),
                               Q_ARG(QString, username), Q_ARG(QString, userCode),
-                              Q_ARG(QString, password), Q_ARG(QString, caFile),
-                              Q_ARG(bool, registerAccount));
+                              Q_ARG(QString, caFile));
 }
 
 void GuiChatController::connectToLocalHost(const QString& serverExe,
@@ -153,6 +163,11 @@ void GuiChatController::setBundledCaFile(const QString& path) {
     emit savedConnectionChanged();
 }
 
+QString GuiChatController::autoPrivateKeyPath(const QString& serverExe,
+                                              const QString& certFile) const {
+    return HostPathResolver::findPrivateKeyPath(serverExe, certFile);
+}
+
 void GuiChatController::saveConnectionPreferences(const QString& serverIp, int serverPort,
                                                    const QString& username, const QString& userCode,
                                                    const QString& caFile) {
@@ -175,7 +190,7 @@ void GuiChatController::saveConnectionPreferences(const QString& serverIp, int s
 void GuiChatController::disconnectFromServer() {
     refreshTimer_.stop();
     if (worker_) {
-        QMetaObject::invokeMethod(worker_, "disconnectFromServer", Qt::BlockingQueuedConnection);
+        QMetaObject::invokeMethod(worker_, "disconnectFromServer", Qt::QueuedConnection);
     }
     if (connected_) {
         connected_ = false;
@@ -208,6 +223,28 @@ void GuiChatController::requestRooms() {
     QMetaObject::invokeMethod(worker_, "requestRooms", Qt::QueuedConnection);
 }
 
+void GuiChatController::requestActiveHistory(const QString& beforeMessageId) {
+    if (!connected_ || historyLoading_) return;
+    const bool isPrivate = activeConversationKey_.startsWith("dm:");
+    const QString room = isPrivate ? QString() : activeConversationKey_.mid(5);
+    const QString peer = isPrivate ? activeConversationKey_.mid(3) : QString();
+    historyLoading_ = true;
+    QMetaObject::invokeMethod(worker_, "requestHistory", Qt::QueuedConnection,
+                              Q_ARG(QString, room), Q_ARG(QString, peer), Q_ARG(bool, isPrivate),
+                              Q_ARG(QString, beforeMessageId), Q_ARG(int, 50));
+}
+
+void GuiChatController::loadMoreHistory() {
+    if (!connected_ || historyLoading_ || !historyHasMore_ || messageModel_->rowCount() == 0) return;
+    const QString before = messageModel_->valueAt(0, "messageId").toString();
+    if (!before.isEmpty()) requestActiveHistory(before);
+}
+
+void GuiChatController::setSidebarQuery(const QString& query) {
+    roomFilterModel_->setQuery(query);
+    directMessageFilterModel_->setQuery(query);
+}
+
 void GuiChatController::createRoom(const QString& room, bool isPrivate) {
     if (room.trimmed().isEmpty()) {
         return;
@@ -238,6 +275,7 @@ void GuiChatController::selectRoom(const QString& room) {
             QMetaObject::invokeMethod(worker_, "joinRoom", Qt::QueuedConnection, Q_ARG(QString, room));
             joinedRoom_ = room;
         }
+        requestActiveHistory();
     }
 }
 
@@ -253,6 +291,7 @@ void GuiChatController::selectDirectMessage(const QString& userCode) {
         }
     }
     emit activeMessageModelChanged();
+    if (connected_) requestActiveHistory();
 }
 
 void GuiChatController::openPrivateChat(const QString& displayName, const QString& userCode) {
@@ -294,11 +333,12 @@ void GuiChatController::removeLocalMessage(const QString& messageId) {
     }
 }
 
-void GuiChatController::recallMessage(const QString& messageId) {
-    if (!admin_ || messageId.isEmpty()) return;
+bool GuiChatController::recallMessage(const QString& messageId, const QString& commandId) {
+    if (!canRecallMessage(messageId)) return false;
     QMetaObject::invokeMethod(worker_, "sendAdminAction", Qt::QueuedConnection,
                               Q_ARG(QString, QStringLiteral("recall")),
-                              Q_ARG(QString, QString()), Q_ARG(QString, messageId));
+                              Q_ARG(QString, QString()), Q_ARG(QString, messageId), Q_ARG(QString, commandId));
+    return true;
 }
 
 void GuiChatController::handleConnected(bool isAdmin) {
@@ -313,19 +353,21 @@ void GuiChatController::handleConnected(bool isAdmin) {
     setStatus(isAdmin ? QStringLiteral("已连接（管理员）") : QStringLiteral("已连接"));
     requestRooms();
     requestUsers();
+    requestActiveHistory();
 }
 
 void GuiChatController::resetSessionData() {
-    roomModel_->clear();
-    roomModel_->append({{"roomName", "lobby"}, {"memberCount", 0}, {"unreadCount", 0}});
-    directMessageModel_->clear();
-    memberModel_->clear();
+    roomModel_->replaceRows({{{"roomName", "lobby"}, {"memberCount", 0}, {"unreadCount", 0}}});
+    directMessageModel_->replaceRows({});
+    memberModel_->replaceRows({});
     for (ChatListModel* model : conversationModels_) {
         model->clear();
     }
     activeConversationKey_ = QStringLiteral("room:lobby");
     joinedRoom_ = QStringLiteral("lobby");
     messageModel_ = conversationModels_.value(activeConversationKey_);
+    historyHasMore_ = false;
+    historyLoading_ = false;
     onlineMemberCount_ = 0;
     emit onlineMemberCountChanged();
     emit activeMessageModelChanged();
@@ -357,8 +399,38 @@ void GuiChatController::handleConnectionLost(const QString& reason) {
     emit connectionLost(reason);
 }
 
-void GuiChatController::handleMessage(const QString& type, const QString& messageId, const QString& username,
-                                      const QString& userCode, const QString& content,
+void GuiChatController::handleHistory(const QString& room, const QString& targetUserCode,
+                                      bool isPrivate, const QVariantList& messages, bool hasMore) {
+    historyLoading_ = false;
+    const QString expectedKey = isPrivate ? "dm:" + targetUserCode : "room:" + room;
+    if (expectedKey.compare(activeConversationKey_, Qt::CaseInsensitive) != 0) return;
+
+    QList<QVariantMap> rows;
+    rows.reserve(messages.size());
+    for (const QVariant& value : messages) {
+        const QVariantMap detail = value.toMap();
+        const QString messageId = detail.value("messageId").toString();
+        if (messageId.isEmpty() || messageModel_->findRow("messageId", messageId) >= 0) continue;
+        const QString createdAt = detail.value("createdAt").toString();
+        const QDateTime timestamp = QDateTime::fromString(createdAt, Qt::ISODate);
+        const QString time = timestamp.isValid()
+            ? timestamp.toLocalTime().toString("HH:mm")
+            : QDateTime::currentDateTime().toString("HH:mm");
+        const QString userCode = detail.value("userCode").toString();
+        rows.append({{"messageId", messageId},
+                     {"displayName", detail.value("displayName")},
+                     {"userCode", userCode},
+                     {"time", time},
+                     {"content", detail.value("content")},
+                     {"selfMessage", userCode.compare(localUserCode_, Qt::CaseInsensitive) == 0},
+                     {"systemMessage", false}});
+    }
+    if (!rows.isEmpty()) messageModel_->prependRows(rows);
+    historyHasMore_ = hasMore;
+}
+
+void GuiChatController::handleMessage(const QString& type, const QString& messageId, const QString& commandId,
+                                      const QString& username, const QString& userCode, const QString& content,
                                       const QString& room, const QString& targetUserCode,
                                       const QStringList& users, const QStringList& rooms,
                                       const QVariantList& userDetails, const QVariantList& roomDetails,
@@ -378,18 +450,19 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
                                 directMessageModel_->valueAt(row, "unreadCount").toInt());
         }
         roomMemberCounts_.clear();
-        memberModel_->clear();
-        directMessageModel_->clear();
-        const auto appendUser = [this, &unreadByUser](const QString& name, const QString& code,
-                                                       const QString& userRoom, bool memberAdmin) {
+        QList<QVariantMap> memberRows;
+        QList<QVariantMap> directMessageRows;
+        const auto appendUser = [this, &unreadByUser, &memberRows, &directMessageRows](
+                                    const QString& name, const QString& code,
+                                    const QString& userRoom, bool memberAdmin) {
             roomMemberCounts_[userRoom] = roomMemberCounts_.value(userRoom, 0) + 1;
-            memberModel_->append({{"displayName", name}, {"userCode", code}, {"online", true}, {"admin", memberAdmin}});
+            memberRows.append({{"displayName", name}, {"userCode", code}, {"online", true}, {"admin", memberAdmin}});
             if (!localUserCode_.isEmpty() &&
                 code.compare(localUserCode_, Qt::CaseInsensitive) != 0) {
                 const int unreadCount = unreadByUser.value(code.toLower(), 0);
-                directMessageModel_->append({{"displayName", name},
-                                             {"userCode", code},
-                                             {"unreadCount", unreadCount}});
+                directMessageRows.append({{"displayName", name},
+                                          {"userCode", code},
+                                          {"unreadCount", unreadCount}});
             }
         };
         if (!userDetails.isEmpty()) {
@@ -412,10 +485,15 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
                 appendUser(name, code, userRoom, false);
             }
         }
+        memberModel_->replaceRows(memberRows);
+        directMessageModel_->replaceRows(directMessageRows);
+
+        QList<QVariantMap> roomMemberUpdates;
         for (int row = 0; row < roomModel_->rowCount(); ++row) {
             const QString roomName = roomModel_->valueAt(row, "roomName").toString();
-            roomModel_->updateRow(row, {{"memberCount", roomMemberCounts_.value(roomName, 0)}});
+            roomMemberUpdates.append({{"memberCount", roomMemberCounts_.value(roomName, 0)}});
         }
+        roomModel_->updateRows(roomMemberUpdates);
         if (onlineMemberCount_ != memberModel_->rowCount()) {
             onlineMemberCount_ = memberModel_->rowCount();
             emit onlineMemberCountChanged();
@@ -429,15 +507,15 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
             unreadByRoom.insert(roomModel_->valueAt(row, "roomName").toString(),
                                 roomModel_->valueAt(row, "unreadCount").toInt());
         }
-        roomModel_->clear();
-        const auto appendRoom = [this, &unreadByRoom](const QString& roomName, const QString& ownerCode,
-                                                       bool isPrivate, bool canManage) {
-            roomModel_->append({{"roomName", roomName}, {"memberCount", 0},
-                                {"unreadCount", unreadByRoom.value(roomName, 0)},
-                                {"ownerCode", ownerCode}, {"private", isPrivate},
-                                {"canManage", canManage}});
-            const int row = roomModel_->rowCount() - 1;
-            roomModel_->updateRow(row, {{"memberCount", roomMemberCounts_.value(roomName, 0)}});
+        QList<QVariantMap> roomRows;
+        const auto appendRoom = [this, &unreadByRoom, &roomRows](
+                                    const QString& roomName, const QString& ownerCode,
+                                    bool isPrivate, bool canManage) {
+            roomRows.append({{"roomName", roomName},
+                             {"memberCount", roomMemberCounts_.value(roomName, 0)},
+                             {"unreadCount", unreadByRoom.value(roomName, 0)},
+                             {"ownerCode", ownerCode}, {"private", isPrivate},
+                             {"canManage", canManage}});
         };
         if (!roomDetails.isEmpty()) {
             for (const QVariant& value : roomDetails) {
@@ -450,6 +528,7 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
                 appendRoom(room, {}, false, admin_);
             }
         }
+        roomModel_->replaceRows(roomRows);
         const QString activeRoom = activeConversationKey_.startsWith("room:") ? activeConversationKey_.mid(5) : QString();
         const int activeRow = roomModel_->findRow("roomName", activeRoom);
         const bool canManage = activeRow >= 0 && roomModel_->valueAt(activeRow, "canManage").toBool();
@@ -492,15 +571,31 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
     } else if (type == QStringLiteral("message_recalled")) {
         if (!messageId.isEmpty()) {
             for (ChatListModel* model : conversationModels_) model->removeRowsByValue("messageId", messageId);
+			emit recallSucceeded(commandId);
         }
     } else if (type == QStringLiteral("system") && !room.isEmpty()) {
         // 系统提示属于服务端广播时所在的房间，不能跟随当前打开的私聊窗口。
         appendSystemMessageToModel(ensureConversationModel("room:" + room), content);
-    } else if (type == QStringLiteral("system") || type == QStringLiteral("error")) {
+    } else if (type == QStringLiteral("error")) {
+        if (!commandId.isEmpty()) emit recallFailed(commandId, content);
+        appendSystemMessage(content);
+    } else if (type == QStringLiteral("system")) {
         appendSystemMessage(content);
     }
 
     Q_UNUSED(isAdmin);
+}
+
+bool GuiChatController::canRecallMessage(const QString& messageId) const {
+    if (messageId.isEmpty()) return false;
+    if (admin_) return true;
+    for (ChatListModel* model : conversationModels_) {
+        const int row = model->findRow("messageId", messageId);
+        if (row >= 0 && model->valueAt(row, "userCode").toString().compare(localUserCode_, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void GuiChatController::setStatus(const QString& status) {

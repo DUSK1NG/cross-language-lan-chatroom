@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import LanChatGui
 
-Popup {
+AppPopup {
     id: root
     property string displayName: ""
     property string userCode: ""

@@ -22,9 +22,7 @@ public slots:
                          int serverPort,
                          const QString& username,
                          const QString& userCode,
-                         const QString& password,
-                         const QString& caFile,
-                         bool registerAccount);
+                         const QString& caFile);
     void connectToLocalHost(const QString& serverExe,
                             const QString& certFile,
                             const QString& keyFile,
@@ -40,14 +38,18 @@ public slots:
     void sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode = {});
     void requestUsers();
     void requestRooms();
-    void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {});
+    void requestHistory(const QString& room, const QString& targetUserCode,
+                        bool isPrivate, const QString& beforeMessageId = {}, int limit = 50);
+    void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {}, const QString& commandId = {});
 
 signals:
+    void disconnected();
     void connected(bool isAdmin);
     void connectionFailed(const QString& reason);
     void connectionLost(const QString& reason);
     void messageReceived(const QString& type,
                          const QString& messageId,
+						 const QString& commandId,
                          const QString& username,
                          const QString& userCode,
                          const QString& content,
@@ -58,6 +60,8 @@ signals:
                          const QVariantList& userDetails,
                          const QVariantList& roomDetails,
                          bool isAdmin);
+    void historyReceived(const QString& room, const QString& targetUserCode,
+                         bool isPrivate, const QVariantList& messages, bool hasMore);
 
 private:
     void receiveLoop();

@@ -44,44 +44,12 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 
 		switch loginMessage.Type {
 		case "register":
-			if store == nil {
-				_ = sendMessage(conn, Message{Type: "register_error", Content: "Account storage is unavailable"})
-				continue
-			}
-			if err := validateMessage(loginMessage); err != nil {
-				_ = sendMessage(conn, Message{Type: "register_error", Content: "Invalid registration data"})
-				continue
-			}
-			if err := store.Register(loginMessage.Username, loginMessage.UserCode, loginMessage.Password); err != nil {
-				content := "Registration failed"
-				if errors.Is(err, ErrAccountAlreadyExists) {
-					content = "Username or user code already exists"
-				}
-				_ = sendMessage(conn, Message{Type: "register_error", Content: content})
-				continue
-			}
-			if err := sendMessage(conn, Message{Type: "register_ok", Content: "Registration successful"}); err != nil {
-				return
-			}
-			continue
+			_ = sendMessage(conn, Message{Type: "login_error", Content: "Password registration has been removed; use username and user code"})
+			return
 
 		case "login_auth":
-			if store == nil {
-				_ = sendMessage(conn, Message{Type: "login_error", Content: "Account storage is unavailable"})
-				return
-			}
-			if err := validateMessage(loginMessage); err != nil {
-				_ = sendMessage(conn, Message{Type: "login_error", Content: "Invalid credentials"})
-				return
-			}
-			account, err := store.Authenticate(loginMessage.Username, loginMessage.Password)
-			if err != nil {
-				_ = sendMessage(conn, Message{Type: "login_error", Content: "Invalid username or password"})
-				return
-			}
-			normalizedCode, _ := normalizeUserCode(account.UserCode)
-			client = newClient(conn, account.Username, account.UserCode, normalizedCode)
-			client.AccountBacked = true
+			_ = sendMessage(conn, Message{Type: "login_error", Content: "Password login has been removed; use username and user code"})
+			return
 
 		case "login":
 			if err := validateMessage(loginMessage); err != nil {
@@ -89,21 +57,25 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 				return
 			}
 			if store != nil {
-				hasIdentity, err := store.HasIdentity(loginMessage.Username, loginMessage.UserCode)
+				account, err := store.EnsureIdentity(loginMessage.Username, loginMessage.UserCode)
 				if err != nil {
-					_ = sendMessage(conn, Message{Type: "login_error", Content: "Account storage error"})
+					content := "Account identity is already used"
+					if !errors.Is(err, ErrAccountAlreadyExists) {
+						content = "Account storage error"
+					}
+					_ = sendMessage(conn, Message{Type: "login_error", Content: content})
 					return
 				}
-				if hasIdentity {
-					_ = sendMessage(conn, Message{Type: "login_error", Content: "Password login required"})
-					return
-				}
+				normalizedCode, _ := normalizeUserCode(account.UserCode)
+				client = newClient(conn, account.Username, account.UserCode, normalizedCode)
+				client.AccountBacked = true
+			} else {
+				normalizedCode, _ := normalizeUserCode(loginMessage.UserCode)
+				client = newClient(conn, loginMessage.Username, loginMessage.UserCode, normalizedCode)
 			}
-			normalizedCode, _ := normalizeUserCode(loginMessage.UserCode)
-			client = newClient(conn, loginMessage.Username, loginMessage.UserCode, normalizedCode)
 
 		default:
-			_ = sendMessage(conn, Message{Type: "login_error", Content: "Expected register, login_auth, or login message"})
+			_ = sendMessage(conn, Message{Type: "login_error", Content: "Expected login message"})
 			return
 		}
 		break
@@ -256,6 +228,17 @@ func (c *Client) readPump(hub *Hub) {
 		case "rooms_request":
 			hub.RequestRooms <- c
 
+		case "history_request":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", Content: "Invalid history request"}) {
+					return
+				}
+				continue
+			}
+			hub.History <- HistoryRequest{Client: c, Room: message.Room,
+				TargetCode: message.TargetUserCode, Private: message.Private,
+				BeforeMessageID: message.BeforeMessageID, Limit: message.Limit}
+
 		case "admin_action":
 			if err := validateMessage(message); err != nil {
 				if !c.enqueue(hub, Message{Type: "error", Content: "Invalid administrator action"}) {
@@ -263,7 +246,7 @@ func (c *Client) readPump(hub *Hub) {
 				}
 				continue
 			}
-			hub.AdminAction <- AdminActionRequest{Sender: c, Action: message.Content, TargetCode: message.TargetUserCode, MessageID: message.MessageID}
+			hub.AdminAction <- AdminActionRequest{Sender: c, Action: message.Content, TargetCode: message.TargetUserCode, MessageID: message.MessageID, CommandID: message.CommandID}
 
 		case "quit":
 			hub.Unregister <- c
@@ -287,6 +270,12 @@ func (c *Client) writePump(hub *Hub) {
 			if hub != nil {
 				hub.Unregister <- c
 			}
+			c.closeConnection()
+			return
+		}
+		if c.disconnectAfterFlush.Load() &&
+			message.Type == "system" &&
+			message.Content == "You were kicked by the administrator" {
 			c.closeConnection()
 			return
 		}

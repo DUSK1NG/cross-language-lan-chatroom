@@ -13,7 +13,7 @@ RowLayout {
     height: 38
     spacing: Theme.spacingS
     scale: mouse.pressed ? 0.985 : 1.0
-    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+    Behavior on scale { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
     Avatar { displayName: root.displayName; size: 28 }
     ColumnLayout {

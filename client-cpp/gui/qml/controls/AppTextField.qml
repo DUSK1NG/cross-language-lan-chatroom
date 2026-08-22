@@ -36,7 +36,7 @@ TextField {
             height: 1
             color: root.activeFocus ? Theme.glassHighlight : "transparent"
         }
-        Behavior on color { ColorAnimation { duration: Theme.animationNormal } }
-        Behavior on border.color { ColorAnimation { duration: Theme.animationNormal } }
+        Behavior on color { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; ColorAnimation { duration: Theme.animationNormal } }
+        Behavior on border.color { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; ColorAnimation { duration: Theme.animationNormal } }
     }
 }

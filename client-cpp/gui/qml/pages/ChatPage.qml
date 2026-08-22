@@ -9,8 +9,8 @@ Item {
     property string activeRoom: "lobby"
     property string activeDirectMessage: ""
     property string headerTitle: "# lobby"
-    property var roomModel: chatController.roomModel
-    property var directMessageModel: chatController.directMessageModel
+    property var roomModel: chatController.filteredRoomModel
+    property var directMessageModel: chatController.filteredDirectMessageModel
     property var messageModel: chatController.activeMessageModel
     property var memberModel: chatController.memberModel
     property string sidebarQuery: ""
@@ -42,6 +42,7 @@ Item {
             return
         }
         composer.text = ""
+        messageList.followTail = true
         messageList.positionViewAtEnd()
     }
 
@@ -79,6 +80,7 @@ Item {
                     GradientStop { position: 1.0; color: "transparent" }
                 }
                 opacity: 0.28
+                visible: performanceProfile.gradientsEnabled
             }
 
             ColumnLayout {
@@ -91,7 +93,10 @@ Item {
                     Layout.fillWidth: true
                     iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/search.svg"
                     placeholderText: "搜索频道或私聊"
-                    onTextChanged: root.sidebarQuery = text.trim().toLowerCase()
+                    onTextChanged: {
+                        root.sidebarQuery = text.trim().toLowerCase()
+                        chatController.setSidebarQuery(root.sidebarQuery)
+                    }
                 }
                 AppButton { Layout.fillWidth: true; variant: "primary"; iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/plus.svg"; text: "新建频道"; onClicked: createRoomDialog.open() }
                 Label { text: "CHANNELS"; color: Theme.secondaryText; font.pixelSize: Theme.fontCaption; font.weight: Font.DemiBold }
@@ -103,7 +108,6 @@ Item {
                         roomName: model.roomName
                         memberCount: model.memberCount
                         unreadCount: model.unreadCount
-                        visible: root.sidebarQuery.length === 0 || model.roomName.toLowerCase().indexOf(root.sidebarQuery) >= 0
                         selected: root.activeRoom === model.roomName && root.activeDirectMessage === ""
                         onItemSelected: root.selectRoom(roomName)
                     }
@@ -117,7 +121,6 @@ Item {
                         displayName: model.displayName
                         userCode: model.userCode
                         unreadCount: model.unreadCount
-                        visible: root.sidebarQuery.length === 0 || model.displayName.toLowerCase().indexOf(root.sidebarQuery) >= 0 || model.userCode.toLowerCase().indexOf(root.sidebarQuery) >= 0
                         selected: root.activeDirectMessage === model.userCode
                         onItemSelected: root.selectDirectMessage(displayName, userCode)
                     }
@@ -161,6 +164,7 @@ Item {
                     GradientStop { position: 1.0; color: "transparent" }
                 }
                 opacity: 0.16
+                visible: performanceProfile.gradientsEnabled
             }
 
             ColumnLayout {
@@ -185,6 +189,8 @@ Item {
 
                 ListView {
                     id: messageList
+                    property bool followTail: true
+                    property real prependContentHeight: -1
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     spacing: 8
@@ -192,6 +198,20 @@ Item {
                     boundsBehavior: Flickable.StopAtBounds
                     cacheBuffer: 640
                     model: root.messageModel
+                    onModelChanged: {
+                        followTail = true
+                        Qt.callLater(positionViewAtEnd)
+                    }
+                    onCountChanged: {
+                        if (followTail) Qt.callLater(positionViewAtEnd)
+                    }
+                    onContentHeightChanged: {
+                        if (followTail) Qt.callLater(positionViewAtEnd)
+                    }
+                    onMovementEnded: followTail = atYEnd
+                    onAtYBeginningChanged: {
+                        if (atYBeginning && count > 0) chatController.loadMoreHistory()
+                    }
                     delegate: MessageDelegate {
                         width: messageList.width
                         messageId: model.messageId
@@ -209,6 +229,24 @@ Item {
                         onProfileRequested: root.showProfile(displayName, userCode, false)
                     }
                     ScrollBar.vertical: AppScrollBar { }
+
+                    Connections {
+                        target: root.messageModel
+                        function onRowsAboutToBeInserted(parent, first, last) {
+                            if (first === 0 && !messageList.followTail) {
+                                messageList.prependContentHeight = messageList.contentHeight
+                            }
+                        }
+                        function onRowsInserted(parent, first, last) {
+                            if (first === 0 && messageList.prependContentHeight >= 0 && !messageList.followTail) {
+                                const previousHeight = messageList.prependContentHeight
+                                messageList.prependContentHeight = -1
+                                Qt.callLater(function() {
+                                    messageList.contentY += messageList.contentHeight - previousHeight
+                                })
+                            }
+                        }
+                    }
                 }
 
                 MessageComposer {
@@ -237,6 +275,7 @@ Item {
                     GradientStop { position: 1.0; color: "transparent" }
                 }
                 opacity: 0.24
+                visible: performanceProfile.gradientsEnabled
             }
 
             ColumnLayout {
@@ -290,7 +329,17 @@ Item {
         }
     }
 
-    Popup {
+    AppToast {
+        id: phaseToast
+    }
+
+    Connections {
+        target: chatController
+        function onConnectionFailed(reason) { phaseToast.show(reason, "error") }
+        function onConnectionLost(reason) { phaseToast.show(reason, "error") }
+    }
+
+    AppPopup {
         id: memberPopup
         width: 280
         height: Math.min(root.height - 48, 520)
@@ -367,19 +416,6 @@ Item {
                 text: "确定"
                 enabled: roomNameInput.text.trim().length > 0
                 onClicked: createRoomDialog.accept()
-            }
-        }
-
-        enter: Transition {
-            ParallelAnimation {
-                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
-                NumberAnimation { property: "scale"; from: 0.96; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
-            }
-        }
-        exit: Transition {
-            ParallelAnimation {
-                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.InCubic }
-                NumberAnimation { property: "scale"; from: 1.0; to: 0.98; duration: 110; easing.type: Easing.InCubic }
             }
         }
 

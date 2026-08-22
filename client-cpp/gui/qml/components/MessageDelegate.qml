@@ -59,7 +59,7 @@ Item {
             border.color: root.selfMessage ? "transparent" : Theme.borderSoft
             border.width: root.selfMessage ? 0 : 1
             opacity: root.hovered ? 1.0 : 0.97
-            Behavior on opacity { NumberAnimation { duration: 140 } }
+            Behavior on opacity { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; NumberAnimation { duration: 140 } }
             Text {
                 id: messageText
                 anchors.centerIn: parent
@@ -87,7 +87,7 @@ Item {
         acceptedButtons: Qt.NoButton
     }
 
-    Popup {
+    AppPopup {
         id: morePopup
         width: 150
         height: root.canRecall ? 178 : 140

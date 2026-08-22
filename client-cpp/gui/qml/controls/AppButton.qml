@@ -67,10 +67,10 @@ Button {
             opacity: root.hovered ? 0.95 : 0.58
         }
 
-        Behavior on color { ColorAnimation { duration: Theme.animationNormal; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: Theme.animationNormal; easing.type: Easing.OutCubic } }
+        Behavior on color { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; ColorAnimation { duration: Theme.animationNormal; easing.type: Easing.OutCubic } }
+        Behavior on border.color { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; ColorAnimation { duration: Theme.animationNormal; easing.type: Easing.OutCubic } }
     }
 
     scale: root.pressed ? 0.975 : root.hovered ? 1.01 : 1.0
-    Behavior on scale { NumberAnimation { duration: Theme.animationFast; easing.type: Easing.OutCubic } }
+    Behavior on scale { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; NumberAnimation { duration: Theme.animationFast; easing.type: Easing.OutCubic } }
 }

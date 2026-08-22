@@ -30,20 +30,29 @@ type RoomInfo struct {
 }
 
 type Message struct {
-	Type           string       `json:"type"`
-	MessageID      string       `json:"message_id,omitempty"`
-	Username       string       `json:"username,omitempty"`
-	UserCode       string       `json:"user_code,omitempty"`
-	TargetUserCode string       `json:"target_user_code,omitempty"`
-	Room           string       `json:"room,omitempty"`
-	Private        bool         `json:"private,omitempty"`
-	Users          []string     `json:"users,omitempty"`
-	Rooms          []string     `json:"rooms,omitempty"`
-	UserDetails    []OnlineUser `json:"user_details,omitempty"`
-	RoomDetails    []RoomInfo   `json:"room_details,omitempty"`
-	Content        string       `json:"content,omitempty"`
-	Password       string       `json:"password,omitempty"`
-	IsAdmin        bool         `json:"is_admin,omitempty"`
+	Type            string       `json:"type"`
+	MessageID       string       `json:"message_id,omitempty"`
+	CommandID       string       `json:"command_id,omitempty"`
+	Username        string       `json:"username,omitempty"`
+	UserCode        string       `json:"user_code,omitempty"`
+	TargetUserCode  string       `json:"target_user_code,omitempty"`
+	Room            string       `json:"room,omitempty"`
+	Private         bool         `json:"private,omitempty"`
+	Users           []string     `json:"users,omitempty"`
+	Rooms           []string     `json:"rooms,omitempty"`
+	UserDetails     []OnlineUser `json:"user_details,omitempty"`
+	RoomDetails     []RoomInfo   `json:"room_details,omitempty"`
+	Content         string       `json:"content,omitempty"`
+	CreatedAt       string       `json:"created_at,omitempty"`
+	BeforeMessageID string       `json:"before_message_id,omitempty"`
+	Limit           int          `json:"limit,omitempty"`
+	HasMore         bool         `json:"has_more,omitempty"`
+	Recalled        bool         `json:"recalled,omitempty"`
+	Messages        []Message    `json:"messages,omitempty"`
+	// Password is retained only so old database/test fixtures still compile;
+	// password authentication is removed and this field never crosses the wire.
+	Password string `json:"-"`
+	IsAdmin  bool   `json:"is_admin,omitempty"`
 }
 
 func validateUserCode(code string) error {
@@ -124,15 +133,9 @@ func validateMessage(message Message) error {
 			return err
 		}
 	case "register":
-		if err := validateLoginIdentity(message); err != nil {
-			return err
-		}
-		return validatePassword(message.Password)
+		return fmt.Errorf("password registration has been removed")
 	case "login_auth":
-		if message.Username == "" || !utf8.ValidString(message.Username) || len([]byte(message.Username)) > maxUsernameSize {
-			return fmt.Errorf("invalid username")
-		}
-		return validatePassword(message.Password)
+		return fmt.Errorf("password login has been removed")
 	case "chat":
 		return validateTextContent("chat", message.Content)
 	case "private_chat":
@@ -140,6 +143,26 @@ func validateMessage(message Message) error {
 			return fmt.Errorf("invalid target user code: %w", err)
 		}
 		return validateTextContent("private chat", message.Content)
+	case "history_request":
+		if message.Private {
+			if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+				return fmt.Errorf("invalid history target user code: %w", err)
+			}
+		} else if err := validateRoomName(message.Room); err != nil {
+			return err
+		}
+		if message.Limit < 0 || message.Limit > maxHistoryPageSize {
+			return fmt.Errorf("history page size must be between 0 and %d", maxHistoryPageSize)
+		}
+	case "history_response":
+		if message.Messages == nil {
+			return fmt.Errorf("history messages must be a JSON array")
+		}
+		for _, historyMessage := range message.Messages {
+			if historyMessage.MessageID == "" || historyMessage.Username == "" || historyMessage.UserCode == "" {
+				return fmt.Errorf("history message identity is required")
+			}
+		}
 	case "room_join":
 		return validateRoomName(message.Room)
 	case "room_create":

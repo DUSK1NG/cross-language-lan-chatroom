@@ -2,6 +2,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App';
+import { BridgeUnavailablePage } from './app/BridgeUnavailablePage';
+import { resolveRuntimeBridge } from './app/runtimeBridge';
 import { createFakeBridge, createWebChannelBridge } from './bridge/chatBridge';
 import type { BridgeState, ChatBridgeClient } from './bridge/types';
 
@@ -16,19 +18,18 @@ const initialState: BridgeState = {
 };
 
 async function bootstrap() {
-  let bridge: ChatBridgeClient | undefined;
-  if (window.qt?.webChannelTransport) {
-    try {
-      bridge = await createWebChannelBridge();
-    } catch (error) {
-      console.error('Unable to connect to ChatBridge; using the local preview bridge.', error);
-    }
+  const resolution = await resolveRuntimeBridge({
+    hasTransport: Boolean(window.qt?.webChannelTransport),
+    isDevelopment: import.meta.env.DEV,
+    createBridge: createWebChannelBridge,
+    createPreviewBridge: () => createFakeBridge(initialState)
+  });
+  const root = createRoot(document.getElementById('root')!);
+  if (resolution.error || !resolution.bridge) {
+    root.render(<BridgeUnavailablePage message={resolution.error ?? 'Qt bridge 未连接'} onRetry={() => window.location.reload()} />);
+    return;
   }
-
-  bridge ??= createFakeBridge(initialState);
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode><App bridge={bridge} /></StrictMode>
-  );
+  root.render(<StrictMode><App bridge={resolution.bridge} /></StrictMode>);
 }
 
 void bootstrap();

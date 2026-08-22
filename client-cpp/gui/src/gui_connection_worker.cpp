@@ -17,9 +17,7 @@ void GuiConnectionWorker::connectToServer(const QString& serverIp,
                                           int serverPort,
                                           const QString& username,
                                           const QString& userCode,
-                                          const QString& password,
-                                          const QString& caFile,
-                                          bool registerAccount) {
+                                          const QString& caFile) {
     stopReceiveLoop();
 
     connection::Config config{
@@ -28,8 +26,6 @@ void GuiConnectionWorker::connectToServer(const QString& serverIp,
         username.toStdString(),
         userCode.toStdString(),
         caFile.toStdString(),
-        password.toStdString(),
-        registerAccount,
     };
     connection_ = std::make_unique<connection::ConnectionState>(std::move(config));
 
@@ -91,7 +87,7 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
         hostProcess_.reset();
         return;
     }
-    connectToServer(QStringLiteral("127.0.0.1"), 8888, username, userCode, {}, absoluteCertFile, false);
+    connectToServer(QStringLiteral("127.0.0.1"), 8888, username, userCode, absoluteCertFile);
 }
 
 void GuiConnectionWorker::disconnectFromServer() {
@@ -102,6 +98,7 @@ void GuiConnectionWorker::disconnectFromServer() {
         if (!hostProcess_->waitForFinished(1500)) hostProcess_->kill();
         hostProcess_.reset();
     }
+    emit disconnected();
 }
 
 void GuiConnectionWorker::sendChat(const QString& content) {
@@ -183,14 +180,27 @@ void GuiConnectionWorker::requestRooms() {
     }
 }
 
-void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId) {
+void GuiConnectionWorker::requestHistory(const QString& room, const QString& targetUserCode,
+                                         bool isPrivate, const QString& beforeMessageId, int limit) {
+    if (!connection_ || !connection_->is_ready()) return;
+    message::Message message{"history_request", "", "", "", {},
+                             targetUserCode.trimmed().toStdString(), room.trimmed().toStdString(), {}, ""};
+    message.is_private = isPrivate;
+    message.before_message_id = beforeMessageId.trimmed().toStdString();
+    message.limit = qBound(1, limit, 100);
+    if (!connection_->send(message)) {
+        emit connectionLost(QString::fromStdString(connection_->last_error()));
+    }
+}
+
+void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId, const QString& commandId) {
     if (!connection_ || !connection_->is_ready() || action.trimmed().isEmpty() ||
         (action.trimmed() != QStringLiteral("recall") && targetUserCode.trimmed().isEmpty())) {
         return;
     }
     const message::Message message{
         "admin_action", "", "", action.trimmed().toStdString(), {},
-        targetUserCode.trimmed().toStdString(), "", {}, "", messageId.trimmed().toStdString()};
+        targetUserCode.trimmed().toStdString(), "", {}, "", messageId.trimmed().toStdString(), commandId.trimmed().toStdString()};
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
@@ -233,8 +243,27 @@ void GuiConnectionWorker::receiveLoop() {
             roomDetails.append(detail);
         }
 
+        if (incoming.type == "history_response") {
+            QVariantList historyMessages;
+            for (const message::Message& historyMessage : incoming.messages) {
+                QVariantMap detail;
+                detail.insert("messageId", QString::fromStdString(historyMessage.message_id));
+                detail.insert("displayName", QString::fromStdString(historyMessage.username));
+                detail.insert("userCode", QString::fromStdString(historyMessage.user_code));
+                detail.insert("content", QString::fromStdString(historyMessage.content));
+                detail.insert("createdAt", QString::fromStdString(historyMessage.created_at));
+                detail.insert("recalled", historyMessage.recalled);
+                historyMessages.append(detail);
+            }
+            emit historyReceived(QString::fromStdString(incoming.room),
+                                 QString::fromStdString(incoming.target_user_code),
+                                 incoming.is_private, historyMessages, incoming.has_more);
+            continue;
+        }
+
         emit messageReceived(QString::fromStdString(incoming.type),
                              QString::fromStdString(incoming.message_id),
+							 QString::fromStdString(incoming.command_id),
                              QString::fromStdString(incoming.username),
                              QString::fromStdString(incoming.user_code),
                              QString::fromStdString(incoming.content),

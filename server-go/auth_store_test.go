@@ -3,9 +3,9 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -23,45 +23,45 @@ func newTestAuthStore(t *testing.T) (*AuthStore, string) {
 
 func TestAuthStoreRejectsDuplicateUsernameAndCode(t *testing.T) {
 	store, _ := newTestAuthStore(t)
-	if err := store.Register("Alice", "ALICE01", "correct-password"); err != nil {
+	if err := store.Register("Alice", "ALICE01"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Register("alice", "OTHER01", "another-password"); !errors.Is(err, ErrAccountAlreadyExists) {
+	if err := store.Register("alice", "OTHER01"); !errors.Is(err, ErrAccountAlreadyExists) {
 		t.Fatalf("duplicate username error = %v", err)
 	}
-	if err := store.Register("Bob", "alice01", "another-password"); !errors.Is(err, ErrAccountAlreadyExists) {
+	if err := store.Register("Bob", "alice01"); !errors.Is(err, ErrAccountAlreadyExists) {
 		t.Fatalf("duplicate code error = %v", err)
 	}
 }
 
-func TestAuthStoreRejectsWrongPassword(t *testing.T) {
+func TestAuthStoreEnsureIdentityCreatesAndReusesIdentity(t *testing.T) {
 	store, _ := newTestAuthStore(t)
-	if err := store.Register("Alice", "ALICE01", "correct-password"); err != nil {
+	account, err := store.EnsureIdentity("Alice", "ALICE01")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Authenticate("Alice", "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
-		t.Fatalf("wrong password error = %v", err)
+	if account.Username != "Alice" || account.UserCode != "ALICE01" {
+		t.Fatalf("created account = %+v", account)
+	}
+	reused, err := store.EnsureIdentity("alice", "alice01")
+	if err != nil || reused.Username != "Alice" || reused.UserCode != "ALICE01" {
+		t.Fatalf("reused account = %+v, error = %v", reused, err)
 	}
 }
 
-func TestAuthStoreStoresBcryptHashWithoutPlaintext(t *testing.T) {
+func TestAuthStoreRejectsMismatchedExistingIdentity(t *testing.T) {
 	store, _ := newTestAuthStore(t)
-	password := "correct-password"
-	if err := store.Register("Alice", "ALICE01", password); err != nil {
+	if _, err := store.EnsureIdentity("Alice", "ALICE01"); err != nil {
 		t.Fatal(err)
 	}
-	var hash string
-	if err := store.db.QueryRow(`SELECT password_hash FROM accounts WHERE normalized_username = ?`, "alice").Scan(&hash); err != nil {
-		t.Fatal(err)
-	}
-	if hash == password || !strings.HasPrefix(hash, "$2") {
-		t.Fatalf("password hash = %q; expected bcrypt hash without plaintext", hash)
+	if _, err := store.EnsureIdentity("Bob", "ALICE01"); !errors.Is(err, ErrAccountAlreadyExists) {
+		t.Fatalf("mismatched identity error = %v", err)
 	}
 }
 
 func TestAuthStorePersistsAcrossRestart(t *testing.T) {
 	store, dbPath := newTestAuthStore(t)
-	if err := store.Register("Alice", "ALICE01", "correct-password"); err != nil {
+	if _, err := store.EnsureIdentity("Alice", "ALICE01"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -72,16 +72,16 @@ func TestAuthStorePersistsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	account, err := reopened.Authenticate("alice", "correct-password")
+	account, err := reopened.EnsureIdentity("alice", "alice01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if account.Username != "Alice" || account.UserCode != "ALICE01" || account.PasswordHash == "" {
+	if account.Username != "Alice" || account.UserCode != "ALICE01" {
 		t.Fatalf("reopened account = %+v", account)
 	}
 }
 
-func TestHandleConnectionSupportsRegisterThenPasswordLogin(t *testing.T) {
+func TestHandleConnectionSupportsPasswordlessLogin(t *testing.T) {
 	store, _ := newTestAuthStore(t)
 	hub := NewHub()
 	go hub.Run()
@@ -92,13 +92,7 @@ func TestHandleConnectionSupportsRegisterThenPasswordLogin(t *testing.T) {
 		close(done)
 	}()
 
-	if err := sendMessage(clientConn, Message{Type: "register", Username: "Alice", UserCode: "ALICE01", Password: "correct-password"}); err != nil {
-		t.Fatal(err)
-	}
-	if response := receiveClientTestMessage(t, clientConn); response.Type != "register_ok" {
-		t.Fatalf("register response = %+v", response)
-	}
-	if err := sendMessage(clientConn, Message{Type: "login_auth", Username: "alice", Password: "correct-password"}); err != nil {
+	if err := sendMessage(clientConn, Message{Type: "login", Username: "Alice", UserCode: "ALICE01"}); err != nil {
 		t.Fatal(err)
 	}
 	loginOK := receiveClientTestMessage(t, clientConn)
@@ -115,7 +109,7 @@ func TestHandleConnectionSupportsRegisterThenPasswordLogin(t *testing.T) {
 
 func TestHandleConnectionAllowsAuthenticatedAccountToReconnect(t *testing.T) {
 	store, _ := newTestAuthStore(t)
-	if err := store.Register("Alice", "ALICE01", "correct-password"); err != nil {
+	if _, err := store.EnsureIdentity("Alice", "ALICE01"); err != nil {
 		t.Fatal(err)
 	}
 	hub := NewHub()
@@ -127,7 +121,7 @@ func TestHandleConnectionAllowsAuthenticatedAccountToReconnect(t *testing.T) {
 		handleConnectionWithStore(firstServer, hub, store)
 		close(firstDone)
 	}()
-	if err := sendMessage(firstClient, Message{Type: "login_auth", Username: "Alice", Password: "correct-password"}); err != nil {
+	if err := sendMessage(firstClient, Message{Type: "login", Username: "Alice", UserCode: "ALICE01"}); err != nil {
 		t.Fatal(err)
 	}
 	firstLogin := receiveClientTestMessage(t, firstClient)
@@ -143,7 +137,7 @@ func TestHandleConnectionAllowsAuthenticatedAccountToReconnect(t *testing.T) {
 		handleConnectionWithStore(secondServer, hub, store)
 		close(secondDone)
 	}()
-	if err := sendMessage(secondClient, Message{Type: "login_auth", Username: "alice", Password: "correct-password"}); err != nil {
+	if err := sendMessage(secondClient, Message{Type: "login", Username: "alice", UserCode: "alice01"}); err != nil {
 		t.Fatal(err)
 	}
 	secondLogin := receiveClientTestMessage(t, secondClient)
@@ -172,7 +166,7 @@ func TestAuthStoreUsesConfiguredDatabasePath(t *testing.T) {
 
 func TestAuthStoreStoresAndTakesOfflineMessages(t *testing.T) {
 	store, _ := newTestAuthStore(t)
-	if err := store.Register("Bob", "BOB001", "correct-password"); err != nil {
+	if err := store.Register("Bob", "BOB001"); err != nil {
 		t.Fatalf("register Bob: %v", err)
 	}
 	message := Message{Type: "private_chat", Username: "Alice", UserCode: "A001", Content: "你好，Bob"}
@@ -189,5 +183,79 @@ func TestAuthStoreStoresAndTakesOfflineMessages(t *testing.T) {
 	remaining, err := store.TakeOfflineMessages("BOB001")
 	if err != nil || len(remaining) != 0 {
 		t.Fatalf("offline messages were not removed: %#v, %v", remaining, err)
+	}
+}
+
+func TestAuthStorePersistsAndPagesRoomHistory(t *testing.T) {
+	store, dbPath := newTestAuthStore(t)
+	defer store.Close()
+
+	for i := 1; i <= 3; i++ {
+		if err := store.SaveChatMessage(Message{
+			Type: "chat", MessageID: fmt.Sprintf("room-%d", i), Username: "Alice", UserCode: "A001",
+			Room: "lobby", Content: fmt.Sprintf("message %d", i), CreatedAt: fmt.Sprintf("2026-08-22T10:00:0%dZ", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page, err := store.LoadHistory(HistoryQuery{UserCode: "A001", Room: "lobby", Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 2 || !page.HasMore || page.Messages[0].MessageID != "room-2" || page.Messages[1].MessageID != "room-3" {
+		t.Fatalf("first history page = %+v", page)
+	}
+
+	older, err := store.LoadHistory(HistoryQuery{UserCode: "A001", Room: "lobby", BeforeMessageID: "room-2", Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(older.Messages) != 1 || older.Messages[0].MessageID != "room-1" || older.HasMore {
+		t.Fatalf("older history page = %+v", older)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openAuthStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	reloaded, err := reopened.LoadHistory(HistoryQuery{UserCode: "A001", Room: "lobby", Limit: 10})
+	if err != nil || len(reloaded.Messages) != 3 {
+		t.Fatalf("reloaded history = %+v, error = %v", reloaded, err)
+	}
+}
+
+func TestAuthStoreRecallKeepsTombstoneAndPrivateHistoryIsIsolated(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	defer store.Close()
+
+	messages := []Message{
+		{Type: "private_chat", MessageID: "dm-1", Username: "Alice", UserCode: "A001", TargetUserCode: "B001", Content: "secret", CreatedAt: "2026-08-22T10:00:00Z"},
+		{Type: "private_chat", MessageID: "dm-2", Username: "Alice", UserCode: "A001", TargetUserCode: "C001", Content: "other", CreatedAt: "2026-08-22T10:00:01Z"},
+	}
+	for _, message := range messages {
+		if err := store.SaveChatMessage(message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.MarkMessageRecalled("dm-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := store.LoadHistory(HistoryQuery{UserCode: "B001", PeerCode: "A001", Private: true, Limit: 10})
+	if err != nil || len(page.Messages) != 1 {
+		t.Fatalf("private history = %+v, error = %v", page, err)
+	}
+	if page.Messages[0].MessageID != "dm-1" || !page.Messages[0].Recalled || page.Messages[0].Content != "消息已撤回" {
+		t.Fatalf("recalled private message = %+v", page.Messages[0])
+	}
+
+	other, err := store.LoadHistory(HistoryQuery{UserCode: "B001", PeerCode: "C001", Private: true, Limit: 10})
+	if err != nil || len(other.Messages) != 0 {
+		t.Fatalf("private history leaked across peers = %+v, error = %v", other, err)
 	}
 }

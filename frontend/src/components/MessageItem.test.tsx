@@ -1,0 +1,145 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { createFakeBridge } from '../bridge/chatBridge';
+import type { BridgeState, MessageItem as MessageItemData } from '../bridge/types';
+import { MessageItem } from './MessageItem';
+
+const state: BridgeState = {
+  schemaVersion: 1,
+  connection: { phase: 'connected', statusText: 'Connected', retryable: false },
+  identity: { displayName: 'Alice', userCode: 'A001', admin: false },
+  navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } },
+  rooms: [], directMessages: [], activeMessages: [], members: [],
+  permissions: { activeRoomCanManage: false },
+  savedConnection: { serverIp: '127.0.0.1', serverPort: 8888, username: 'Alice', userCode: 'A001', caFile: '' }
+};
+
+const message: MessageItemData = {
+  messageId: 'm-1', displayName: 'Alice', userCode: 'A001', time: '10:01',
+  content: 'hello', selfMessage: true, systemMessage: false
+};
+
+const peerMessage: MessageItemData = {
+  ...message,
+  messageId: 'm-2',
+  displayName: 'Bob',
+  userCode: 'B002',
+  selfMessage: false
+};
+
+const quotedMessage: MessageItemData = {
+  ...message,
+  messageId: 'm-3',
+  content: '> Bob: hello\nI am replying here',
+};
+
+const systemMessage: MessageItemData = {
+  ...message,
+  messageId: 'm-system',
+  displayName: '',
+  userCode: '',
+  time: '10:02',
+  content: 'Alice#A001 joined the chat',
+  selfMessage: false,
+  systemMessage: true
+};
+
+describe('MessageItem', () => {
+  afterEach(cleanup);
+
+  it('places actions below the message bubble and keeps copy available', () => {
+    const bridge = createFakeBridge(state);
+    const onCopy = vi.fn();
+
+    render(<MessageItem message={message} bridge={bridge} onCopy={onCopy} />);
+
+    const bubble = screen.getByTestId('message-content-m-1').closest('.message-bubble')!;
+    const actions = screen.getByLabelText('actions-m-1');
+    expect(bubble).not.toContainElement(actions);
+    expect(bubble.nextElementSibling).toBe(actions);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+    expect(onCopy).toHaveBeenCalledWith(message);
+  });
+
+  it('forwards the complete message to the quote handler', () => {
+    const bridge = createFakeBridge(state);
+    const onQuote = vi.fn();
+
+    render(<MessageItem message={message} bridge={bridge} onQuote={onQuote} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '引用' }));
+    expect(onQuote).toHaveBeenCalledWith(message);
+  });
+
+  it('copies the complete message text through the bridge command', () => {
+    const bridge = createFakeBridge(state);
+
+    render(<MessageItem message={message} bridge={bridge} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+
+    expect(bridge.commands).toContainEqual(expect.objectContaining({
+      type: 'message.copy',
+      payload: { text: 'hello' }
+    }));
+  });
+
+  it('renders a quoted message on its own line above the reply', () => {
+    const bridge = createFakeBridge(state);
+
+    render(<MessageItem message={quotedMessage} bridge={bridge} />);
+
+    const bubble = screen.getByTestId('message-m-3').querySelector('.message-bubble')!;
+    const quote = screen.getByTestId('message-quote-m-3');
+    const body = screen.getByTestId('message-content-m-3');
+
+    expect(quote).toHaveTextContent('> Bob: hello');
+    expect(body).toHaveTextContent('I am replying here');
+    expect(quote.nextElementSibling).toBe(body);
+    expect(bubble.firstElementChild).toBe(quote);
+  });
+
+  it('renders system notifications as centered text without a message bubble', () => {
+    const bridge = createFakeBridge(state);
+
+    render(<MessageItem message={systemMessage} bridge={bridge} />);
+
+    const item = screen.getByTestId('message-m-system');
+    expect(item).toHaveClass('message--system');
+    expect(item.querySelector('.message-bubble')).not.toBeInTheDocument();
+    expect(item.querySelector('.message-meta')).not.toBeInTheDocument();
+    expect(screen.getByTestId('message-content-m-system')).toHaveClass('message-system-text');
+    expect(screen.getByTestId('message-content-m-system')).toHaveTextContent('Alice#A001 joined the chat');
+  });
+
+  it('shows Recall only when the workspace grants recall permission', () => {
+    const bridge = createFakeBridge(state);
+    const { rerender } = render(<MessageItem message={peerMessage} bridge={bridge} canRecall={false} />);
+
+    expect(screen.queryByRole('button', { name: '撤回' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument();
+
+    rerender(<MessageItem message={peerMessage} bridge={bridge} canRecall />);
+
+    fireEvent.click(screen.getByRole('button', { name: '撤回' }));
+    expect(bridge.commands).toContainEqual(expect.objectContaining({
+      type: 'message.recall',
+      payload: { messageId: 'm-2' }
+    }));
+  });
+
+  it('keeps Remove local to the author and shows result feedback for its own command', async () => {
+    const bridge = createFakeBridge(state);
+    render(<MessageItem message={message} bridge={bridge} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+
+    expect(bridge.commands).toContainEqual(expect.objectContaining({
+      type: 'message.removeLocal',
+      payload: { messageId: 'm-1' }
+    }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('已在本地删除完成。'));
+  });
+});

@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="frontend/index.html">@FRONTEND_DIST_DIR@/index.html</file>
+@FRONTEND_ASSET_ENTRIES@    </qresource>
+</RCC>

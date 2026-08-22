@@ -40,6 +40,17 @@ cmake --build .\client-cpp\gui\build-bridge --target lan-chat-gui chat-bridge-te
 ctest --test-dir .\client-cpp\gui\build-bridge -R "^(bridge-protocol-tests|chat-bridge-tests)$" --timeout 20 --output-on-failure
 ```
 
+The same build also contains the Phase 1 renderer diagnostics test:
+
+```powershell
+ctest --test-dir .\client-cpp\gui\build-bridge -R "^graphics-info-tests$" --timeout 20 --output-on-failure
+```
+
+The default QML settings page exposes the public Qt Quick renderer API and
+screen metrics. `QSG_INFO=1` and `QT_LOGGING_RULES="qt.scenegraph.general=true;qt.rhi.*=true"`
+can be used for a diagnostic launch; these variables are intentionally not part
+of the normal release startup command.
+
 ## Scope boundary
 
 These checks verify the bridge seam, resource embedding, frontend behavior, and both GUI build paths. They do not replace the physical LAN two-client TLS acceptance run; that remains a separate Windows acceptance step.

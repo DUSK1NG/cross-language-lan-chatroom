@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import LanChatGui
 
-Popup {
+AppPopup {
     id: picker
     width: 380
     height: 326
@@ -37,19 +37,6 @@ Popup {
             color: "transparent"
             border.color: Qt.rgba(1, 1, 1, 0.06)
             border.width: 1
-        }
-    }
-
-    enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 180; easing.type: Easing.OutCubic }
-        }
-    }
-    exit: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 120; easing.type: Easing.InCubic }
-            NumberAnimation { property: "scale"; from: 1; to: 0.98; duration: 120; easing.type: Easing.InCubic }
         }
     }
 
@@ -119,8 +106,8 @@ Popup {
                 radius: Theme.radiusMedium
                 color: emojiMouse.containsMouse ? Qt.rgba(0.96, 0.98, 1.0, 0.14) : "transparent"
                 scale: emojiMouse.pressed ? 0.92 : emojiMouse.containsMouse ? 1.05 : 1
-                Behavior on color { ColorAnimation { duration: Theme.animationFast } }
-                Behavior on scale { NumberAnimation { duration: Theme.animationFast; easing.type: Easing.OutCubic } }
+                Behavior on color { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; ColorAnimation { duration: Theme.animationFast } }
+                Behavior on scale { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; NumberAnimation { duration: Theme.animationFast; easing.type: Easing.OutCubic } }
                 Text {
                     anchors.centerIn: parent
                     text: modelData

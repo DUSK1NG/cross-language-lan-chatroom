@@ -1,5 +1,7 @@
 #include "chat_model.hpp"
 
+#include <utility>
+
 namespace {
 constexpr int kMaxRowsPerModel = 1000;
 }
@@ -42,16 +44,75 @@ int ChatListModel::roleForName(const QByteArray& name) const {
 }
 
 void ChatListModel::append(const QVariantMap& row) {
-    const int newRow = rows_.size();
-    beginInsertRows({}, newRow, newRow);
-    rows_.append(row);
-    endInsertRows();
+    appendRows({row});
+}
 
-    if (rows_.size() > kMaxRowsPerModel) {
-        beginRemoveRows({}, 0, 0);
-        rows_.removeFirst();
+void ChatListModel::appendRows(const QList<QVariantMap>& rows) {
+    if (rows.isEmpty()) return;
+
+    QList<QVariantMap> incoming = rows;
+    if (incoming.size() > kMaxRowsPerModel) {
+        incoming = incoming.mid(incoming.size() - kMaxRowsPerModel);
+    }
+
+    const int overflow = qMax(0, rows_.size() + incoming.size() - kMaxRowsPerModel);
+    if (overflow >= rows_.size() && !rows_.isEmpty()) {
+        beginResetModel();
+        rows_ = incoming;
+        endResetModel();
+        return;
+    }
+
+    if (overflow > 0) {
+        beginRemoveRows({}, 0, overflow - 1);
+        rows_.remove(0, overflow);
         endRemoveRows();
     }
+
+    const int firstNewRow = rows_.size();
+    beginInsertRows({}, firstNewRow, firstNewRow + incoming.size() - 1);
+    rows_.append(incoming);
+    endInsertRows();
+}
+
+void ChatListModel::prependRows(const QList<QVariantMap>& rows) {
+    if (rows.isEmpty()) return;
+
+    QList<QVariantMap> incoming = rows;
+    if (incoming.size() > kMaxRowsPerModel) {
+        incoming = incoming.mid(incoming.size() - kMaxRowsPerModel);
+    }
+
+    const int overflow = qMax(0, rows_.size() + incoming.size() - kMaxRowsPerModel);
+    if (overflow >= rows_.size() && !rows_.isEmpty()) {
+        beginResetModel();
+        rows_ = incoming;
+        endResetModel();
+        return;
+    }
+
+    if (overflow > 0) {
+        const int firstRemovedRow = rows_.size() - overflow;
+        beginRemoveRows({}, firstRemovedRow, rows_.size() - 1);
+        rows_.remove(firstRemovedRow, overflow);
+        endRemoveRows();
+    }
+
+    beginInsertRows({}, 0, incoming.size() - 1);
+    rows_ = incoming + rows_;
+    endInsertRows();
+}
+
+void ChatListModel::replaceRows(const QList<QVariantMap>& rows) {
+    QList<QVariantMap> replacement = rows;
+    if (replacement.size() > kMaxRowsPerModel) {
+        replacement = replacement.mid(replacement.size() - kMaxRowsPerModel);
+    }
+    if (rows_ == replacement) return;
+
+    beginResetModel();
+    rows_ = std::move(replacement);
+    endResetModel();
 }
 
 int ChatListModel::findRow(const QByteArray& roleName, const QVariant& value) const {
@@ -75,6 +136,27 @@ void ChatListModel::updateRow(int row, const QVariantMap& values) {
     emit dataChanged(index(row, 0), index(row, 0));
 }
 
+void ChatListModel::updateRows(const QList<QVariantMap>& valuesByRow) {
+    const int lastRow = qMin(rows_.size(), valuesByRow.size()) - 1;
+    if (lastRow < 0) return;
+
+    bool changed = false;
+    for (int row = 0; row <= lastRow; ++row) {
+        if (valuesByRow.at(row).isEmpty()) continue;
+        const QVariantMap& values = valuesByRow.at(row);
+        for (auto it = values.cbegin(); it != values.cend(); ++it) {
+            if (rows_.at(row).value(it.key()) != it.value()) {
+                changed = true;
+                break;
+            }
+        }
+        rows_[row].insert(values);
+    }
+    if (changed) {
+        emit dataChanged(index(0, 0), index(lastRow, 0));
+    }
+}
+
 void ChatListModel::removeRow(int row) {
     if (row < 0 || row >= rows_.size()) return;
     beginRemoveRows({}, row, row);
@@ -89,10 +171,5 @@ void ChatListModel::removeRowsByValue(const QByteArray& roleName, const QVariant
 }
 
 void ChatListModel::clear() {
-    if (rows_.isEmpty()) {
-        return;
-    }
-    beginResetModel();
-    rows_.clear();
-    endResetModel();
+    replaceRows({});
 }

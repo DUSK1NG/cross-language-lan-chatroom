@@ -17,9 +17,13 @@ public:
     int roleForName(const QByteArray& name) const;
 
     void append(const QVariantMap& row);
+    void appendRows(const QList<QVariantMap>& rows);
+    void prependRows(const QList<QVariantMap>& rows);
+    void replaceRows(const QList<QVariantMap>& rows);
     int findRow(const QByteArray& roleName, const QVariant& value) const;
     QVariant valueAt(int row, const QByteArray& roleName) const;
     void updateRow(int row, const QVariantMap& values);
+    void updateRows(const QList<QVariantMap>& valuesByRow);
     void removeRow(int row);
     void removeRowsByValue(const QByteArray& roleName, const QVariant& value);
     void clear();

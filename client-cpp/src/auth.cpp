@@ -46,7 +46,7 @@ std::string make_guest_code() {
 
 std::string usage() {
     return "Usage: chat-client.exe [server-ip] [port] [username] [user-code] "
-           "[--password password] [--register] [--ca-file path]\n"
+           "[--ca-file path]\n"
            "       chat-client.exe --guest [server-ip] [port] [username] [--ca-file path]\n"
            "       chat-client.exe --host [username] [--server-exe path] [--cert path] [--key path]";
 }
@@ -61,10 +61,6 @@ bool parse_arguments(
     std::size_t positional_count = 0;
     for (std::size_t index = 0; index < args.size(); ++index) {
         const std::string& argument = args[index];
-        if (argument == "--register") {
-            options.register_account = true;
-            continue;
-        }
         if (argument == "--guest") {
             options.guest_mode = true;
             options.user_code.clear();
@@ -74,10 +70,6 @@ bool parse_arguments(
             options.host_mode = true;
             options.guest_mode = true;
             options.user_code.clear();
-            continue;
-        }
-        if (argument == "--password") {
-            if (!take_value(args, index, options.password, "--password", error)) return false;
             continue;
         }
         if (argument == "--ca-file") {
@@ -142,27 +134,12 @@ bool parse_arguments(
         options.user_code = make_guest_code();
     }
 
-    if (options.register_account && options.password.empty()) {
-        error = "--register requires --password.";
-        return false;
-    }
-    if (options.guest_mode && (options.register_account || !options.password.empty())) {
-        error = "Guest/host mode does not use account passwords.";
-        return false;
-    }
     return true;
 }
 
-message::Message make_register_message(const ClientOptions& options) {
-    return message::Message{
-        "register", options.username, options.user_code, "", {}, "", "", {},
-        options.password};
-}
-
 message::Message make_login_message(const ClientOptions& options) {
-    const std::string type = options.password.empty() ? "login" : "login_auth";
     return message::Message{
-        type, options.username, options.user_code, "", {}, "", "", {}, options.password};
+        "login", options.username, options.user_code, "", {}, "", "", {}};
 }
 
 }  // namespace auth

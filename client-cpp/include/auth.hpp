@@ -13,8 +13,6 @@ struct ClientOptions {
     std::string username = "Alice";
     std::string user_code = "ALICE001";
     std::string ca_file;
-    std::string password;
-    bool register_account = false;
     bool guest_mode = false;
     bool host_mode = false;
     std::string server_exe = "..\\server-go\\chat-server.exe";
@@ -28,7 +26,6 @@ bool parse_arguments(
     std::string& error);
 
 std::string usage();
-message::Message make_register_message(const ClientOptions& options);
 message::Message make_login_message(const ClientOptions& options);
 
 }  // namespace auth

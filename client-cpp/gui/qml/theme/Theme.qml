@@ -51,4 +51,7 @@ QtObject {
     readonly property int animationFast: 100
     readonly property int animationNormal: 180
     readonly property int animationSlow: 260
+    readonly property int popupEnterDuration: 160
+    readonly property int popupExitDuration: 100
+    readonly property real popupStartScale: 0.98
 }

@@ -6,6 +6,11 @@ Dialog {
     id: root
     modal: true
     padding: Theme.spacingL
+    property real motionScale: typeof performanceProfile === "undefined"
+                               ? 1.0 : performanceProfile.animationDurationScale
+    transformOrigin: Item.Center
+    focus: true
+    closePolicy: Popup.CloseOnEscape
 
     background: Rectangle {
         radius: Theme.radiusLarge
@@ -28,14 +33,14 @@ Dialog {
 
     enter: Transition {
         ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.animationNormal; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: Theme.animationNormal; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Math.round(Theme.popupEnterDuration * root.motionScale); easing.type: Easing.OutCubic }
+            NumberAnimation { property: "scale"; from: Theme.popupStartScale; to: 1; duration: Math.round(Theme.popupEnterDuration * root.motionScale); easing.type: Easing.OutCubic }
         }
     }
     exit: Transition {
         ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animationFast; easing.type: Easing.InCubic }
-            NumberAnimation { property: "scale"; from: 1; to: 0.98; duration: Theme.animationFast; easing.type: Easing.InCubic }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Math.round(Theme.popupExitDuration * root.motionScale); easing.type: Easing.InCubic }
+            NumberAnimation { property: "scale"; from: 1; to: Theme.popupStartScale; duration: Math.round(Theme.popupExitDuration * root.motionScale); easing.type: Easing.InCubic }
         }
     }
 }

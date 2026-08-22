@@ -44,6 +44,38 @@ export type MemberSummary = {
   admin: boolean;
 };
 
+export type HostDefaults = {
+  serverExe: string;
+  certFile: string;
+  keyFile: string;
+  dbFile: string;
+};
+
+export type PerformanceState = {
+  mode: 'Automatic' | 'High' | 'Balanced' | 'Power Saving';
+  effectiveMode: string;
+  effectsEnabled: boolean;
+  animationsEnabled: boolean;
+  gradientsEnabled: boolean;
+  animationDurationScale: number;
+  observedFrameCount: number;
+  observedFps: number;
+  observedP95FrameMs: number;
+  observedMaxFrameMs: number;
+  automaticReason: string;
+};
+
+export type GraphicsState = {
+  graphicsApi: string;
+  renderer: string;
+  vendor: string;
+  hardwareAcceleration: boolean;
+  softwareRendering: boolean;
+  refreshRate: number;
+  dpi: number;
+  resolution: string;
+};
+
 export type BridgeState = {
   schemaVersion: 1;
   connection: {
@@ -73,6 +105,9 @@ export type BridgeState = {
     userCode: string;
     caFile: string;
   };
+  hostDefaults?: HostDefaults;
+  performance?: PerformanceState;
+  graphics?: GraphicsState;
 };
 
 export type BridgeCommand = {

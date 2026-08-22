@@ -11,6 +11,6 @@ ScrollBar {
         radius: Theme.radiusRound
         color: root.pressed ? Theme.accent : root.hovered ? Theme.border : Theme.borderSoft
         opacity: root.active || root.hovered ? 0.90 : 0.45
-        Behavior on opacity { NumberAnimation { duration: Theme.animationFast } }
+        Behavior on opacity { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; NumberAnimation { duration: Theme.animationFast } }
     }
 }

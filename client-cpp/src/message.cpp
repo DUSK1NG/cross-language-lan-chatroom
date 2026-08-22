@@ -16,6 +16,12 @@ void set_error(const std::string& error) {
 nlohmann::json serialize(const Message& message) {
     nlohmann::json object = nlohmann::json{{"type", message.type}};
     if (!message.message_id.empty()) object["message_id"] = message.message_id;
+    if (!message.command_id.empty()) object["command_id"] = message.command_id;
+    if (!message.created_at.empty()) object["created_at"] = message.created_at;
+    if (!message.before_message_id.empty()) object["before_message_id"] = message.before_message_id;
+    if (message.limit > 0) object["limit"] = message.limit;
+    if (message.has_more) object["has_more"] = true;
+    if (message.recalled) object["recalled"] = true;
     if (!message.username.empty()) object["username"] = message.username;
     if (!message.user_code.empty()) object["user_code"] = message.user_code;
     if (!message.target_user_code.empty()) object["target_user_code"] = message.target_user_code;
@@ -41,9 +47,14 @@ nlohmann::json serialize(const Message& message) {
             object["room_details"].push_back(std::move(value));
         }
     }
-    if (!message.password.empty()) object["password"] = message.password;
     if (message.is_admin) object["is_admin"] = true;
     if (message.is_private) object["private"] = true;
+    if (!message.messages.empty()) {
+        object["messages"] = nlohmann::json::array();
+        for (const Message& nested : message.messages) {
+            object["messages"].push_back(serialize(nested));
+        }
+    }
     return object;
 }
 
@@ -73,11 +84,13 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
         };
         if (!read_string("username", parsed.username) ||
             !read_string("message_id", parsed.message_id) ||
+            !read_string("command_id", parsed.command_id) ||
             !read_string("user_code", parsed.user_code) ||
             !read_string("target_user_code", parsed.target_user_code) ||
             !read_string("room", parsed.room) ||
             !read_string("content", parsed.content) ||
-            !read_string("password", parsed.password)) {
+            !read_string("created_at", parsed.created_at) ||
+            !read_string("before_message_id", parsed.before_message_id)) {
             set_error("JSON message contains a field with the wrong type");
             return false;
         }
@@ -94,6 +107,27 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
                 return false;
             }
             parsed.is_private = object.at("private").get<bool>();
+        }
+        if (object.contains("has_more")) {
+            if (!object.at("has_more").is_boolean()) {
+                set_error("has_more is not a boolean");
+                return false;
+            }
+            parsed.has_more = object.at("has_more").get<bool>();
+        }
+        if (object.contains("recalled")) {
+            if (!object.at("recalled").is_boolean()) {
+                set_error("recalled is not a boolean");
+                return false;
+            }
+            parsed.recalled = object.at("recalled").get<bool>();
+        }
+        if (object.contains("limit")) {
+            if (!object.at("limit").is_number_integer()) {
+                set_error("limit is not an integer");
+                return false;
+            }
+            parsed.limit = object.at("limit").get<int>();
         }
 
         if (object.contains("users")) {
@@ -158,6 +192,52 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
                               value.at("private").get<bool>(), value.at("can_manage").get<bool>()};
                 if (value.contains("owner_code")) room.owner_code = value.at("owner_code").get<std::string>();
                 parsed.room_details.push_back(std::move(room));
+            }
+        }
+
+        if (object.contains("messages")) {
+            if (!object.at("messages").is_array()) {
+                set_error("messages is not an array");
+                return false;
+            }
+            for (const auto& value : object.at("messages")) {
+                if (!value.is_object()) {
+                    set_error("messages contains a non-object value");
+                    return false;
+                }
+                Message nested;
+                const auto read_nested_string = [&value](const char* key, std::string& destination) {
+                    if (!value.contains(key)) return true;
+                    if (!value.at(key).is_string()) return false;
+                    destination = value.at(key).get<std::string>();
+                    return true;
+                };
+                if (!read_nested_string("type", nested.type) ||
+                    !read_nested_string("message_id", nested.message_id) ||
+                    !read_nested_string("username", nested.username) ||
+                    !read_nested_string("user_code", nested.user_code) ||
+                    !read_nested_string("target_user_code", nested.target_user_code) ||
+                    !read_nested_string("room", nested.room) ||
+                    !read_nested_string("content", nested.content) ||
+                    !read_nested_string("created_at", nested.created_at)) {
+                    set_error("messages contains a field with the wrong type");
+                    return false;
+                }
+                if (value.contains("private")) {
+                    if (!value.at("private").is_boolean()) {
+                        set_error("nested private is not a boolean");
+                        return false;
+                    }
+                    nested.is_private = value.at("private").get<bool>();
+                }
+                if (value.contains("recalled")) {
+                    if (!value.at("recalled").is_boolean()) {
+                        set_error("nested recalled is not a boolean");
+                        return false;
+                    }
+                    nested.recalled = value.at("recalled").get<bool>();
+                }
+                parsed.messages.push_back(std::move(nested));
             }
         }
 

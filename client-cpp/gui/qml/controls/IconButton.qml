@@ -21,7 +21,7 @@ ToolButton {
                                            : "transparent"
         border.color: root.hovered ? Theme.border : "transparent"
         border.width: 1
-        Behavior on color { ColorAnimation { duration: Theme.animationFast } }
+        Behavior on color { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; ColorAnimation { duration: Theme.animationFast } }
     }
 
     ToolTip.visible: root.hovered && root.tooltipText.length > 0

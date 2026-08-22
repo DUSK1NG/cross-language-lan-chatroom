@@ -33,7 +33,8 @@ struct Message {
         std::string room_value = {},
         std::vector<std::string> rooms_value = {},
         std::string password_value = {},
-        std::string message_id_value = {})
+        std::string message_id_value = {},
+        std::string command_id_value = {})
         : type(std::move(type_value)),
           username(std::move(username_value)),
           user_code(std::move(user_code_value)),
@@ -43,7 +44,8 @@ struct Message {
           room(std::move(room_value)),
           rooms(std::move(rooms_value)),
           password(std::move(password_value)),
-          message_id(std::move(message_id_value)) {}
+          message_id(std::move(message_id_value)),
+          command_id(std::move(command_id_value)) {}
 
     std::string type;
     std::string username;
@@ -57,6 +59,13 @@ struct Message {
     std::vector<RoomInfo> room_details{};
     std::string password;
     std::string message_id;
+    std::string command_id;
+    std::string created_at;
+    std::string before_message_id;
+    int limit = 0;
+    bool has_more = false;
+    bool recalled = false;
+    std::vector<Message> messages{};
     bool is_admin = false;
     bool is_private = false;
 };

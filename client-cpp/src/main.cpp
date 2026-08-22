@@ -655,9 +655,7 @@ int wmain(int argc, wchar_t* argv[]) {
             client_options.server_port,
             client_options.username,
             client_options.user_code,
-            client_options.ca_file,
-            client_options.password,
-            client_options.register_account});
+            client_options.ca_file});
     message::Message login_response;
     connection::LoginResult login_result = connection::LoginResult::kRetryableFailure;
     if (!connection_state.connect_and_login(login_response, login_result)) {

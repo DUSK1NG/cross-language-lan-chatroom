@@ -15,8 +15,8 @@ Rectangle {
     border.color: selected ? Theme.glassHighlight : "transparent"
     border.width: selected ? 1 : 0
     scale: mouse.pressed ? 0.985 : 1.0
-    Behavior on color { ColorAnimation { duration: 160 } }
-    Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+    Behavior on color { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; ColorAnimation { duration: 160 } }
+    Behavior on scale { enabled: typeof performanceProfile === "undefined" || performanceProfile.animationsEnabled; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
     Label {
         anchors.left: parent.left

@@ -1,9 +1,12 @@
 #include "chat_bridge.hpp"
 
 #include "bridge_protocol.hpp"
+#include "graphics_info.hpp"
 #include "gui_chat_controller.hpp"
+#include "performance_profile.hpp"
 
 #include <QAbstractItemModel>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
@@ -11,6 +14,7 @@
 
 namespace {
 constexpr int kMaxSerializedRows = 500;
+constexpr int kStatePublishIntervalMs = 100;
 
 QJsonArray serializeModel(const QAbstractItemModel* model, int maxRows = kMaxSerializedRows) {
     QJsonArray result;
@@ -38,10 +42,15 @@ QString roomFromConversationKey(const QString& key) {
 }
 
 ChatBridge::ChatBridge(GuiChatController* controller, QObject* parent)
-    : QObject(parent), controller_(controller) {
+    : ChatBridge(controller, nullptr, nullptr, parent) {}
+
+ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* performanceProfile,
+                       GraphicsInfo* graphicsInfo, QObject* parent)
+    : QObject(parent), controller_(controller), performanceProfile_(performanceProfile),
+      graphicsInfo_(graphicsInfo) {
     Q_ASSERT(controller_);
     stateTimer_.setSingleShot(true);
-    stateTimer_.setInterval(16);
+    stateTimer_.setInterval(kStatePublishIntervalMs);
     connect(&stateTimer_, &QTimer::timeout, this, &ChatBridge::publishState);
 
     connect(controller_, &GuiChatController::connectedChanged, this, [this]() {
@@ -60,33 +69,72 @@ ChatBridge::ChatBridge(GuiChatController* controller, QObject* parent)
     });
     connect(controller_, &GuiChatController::activeRoomCanManageChanged, this, &ChatBridge::scheduleStateUpdate);
     connect(controller_, &GuiChatController::savedConnectionChanged, this, &ChatBridge::scheduleStateUpdate);
+    if (performanceProfile_) {
+        connect(performanceProfile_, &PerformanceProfile::modeChanged,
+                this, &ChatBridge::scheduleStateUpdate);
+        connect(performanceProfile_, &PerformanceProfile::effectiveModeChanged,
+                this, &ChatBridge::scheduleStateUpdate);
+        connect(performanceProfile_, &PerformanceProfile::capabilitiesChanged,
+                this, &ChatBridge::scheduleStateUpdate);
+        connect(performanceProfile_, &PerformanceProfile::metricsChanged,
+                this, &ChatBridge::scheduleStateUpdate);
+        connect(performanceProfile_, &PerformanceProfile::automaticReasonChanged,
+                this, &ChatBridge::scheduleStateUpdate);
+    }
+    if (graphicsInfo_) {
+        connect(graphicsInfo_, &GraphicsInfo::changed,
+                this, &ChatBridge::scheduleStateUpdate);
+    }
     connect(controller_, &GuiChatController::connectionFailed, this, [this](const QString& reason) {
         handleConnectionError(QStringLiteral("connection_failed"), reason, true);
     });
     connect(controller_, &GuiChatController::connectionLost, this, [this](const QString& reason) {
         handleConnectionError(QStringLiteral("connection_lost"), reason, true);
     });
+    connect(controller_, &GuiChatController::recallSucceeded, this, [this](const QString& commandId) {
+        completeRecallCommand(commandId, true);
+    });
+    connect(controller_, &GuiChatController::recallFailed, this, [this](const QString& commandId, const QString& reason) {
+        completeRecallCommand(commandId, false, reason);
+    });
 
-    connectModel(controller_->roomModel());
-    connectModel(controller_->directMessageModel());
-    connectModel(controller_->messageModel());
-    connectModel(controller_->memberModel());
-    connectModel(controller_->activeMessageModel());
-    latestStateJson_ = bridge::serializeState(buildState());
+    connectModel(controller_->roomModel(), false);
+    connectModel(controller_->directMessageModel(), false);
+    connectModel(controller_->messageModel(), false);
+    connectModel(controller_->memberModel(), false);
+    connectModel(controller_->activeMessageModel(), false);
+    rebuildStateSnapshot();
 }
 
-void ChatBridge::connectModel(QAbstractItemModel* model) {
+void ChatBridge::setHostDefaults(const QString& serverExe, const QString& certFile,
+                                 const QString& keyFile, const QString& dbFile) {
+    hostDefaults_ = QJsonObject{{"serverExe", serverExe}, {"certFile", certFile},
+                                {"keyFile", keyFile}, {"dbFile", dbFile}};
+    rebuildStateSnapshot();
+}
+
+void ChatBridge::connectModel(QAbstractItemModel* model, bool scheduleUpdate) {
+    if (!model || connectedModels_.contains(model)) {
+        return;
+    }
+    connectedModels_.insert(model);
+
+    const auto markDirty = [this, model]() { markModelDirty(model); };
+    connect(model, &QAbstractItemModel::dataChanged, this, markDirty);
+    connect(model, &QAbstractItemModel::rowsInserted, this, markDirty);
+    connect(model, &QAbstractItemModel::rowsRemoved, this, markDirty);
+    connect(model, &QAbstractItemModel::modelReset, this, markDirty);
+    markModelDirty(model, scheduleUpdate);
+}
+
+void ChatBridge::markModelDirty(QAbstractItemModel* model, bool scheduleUpdate) {
     if (!model) {
         return;
     }
-    connect(model, &QAbstractItemModel::dataChanged, this, &ChatBridge::scheduleStateUpdate,
-            Qt::UniqueConnection);
-    connect(model, &QAbstractItemModel::rowsInserted, this, &ChatBridge::scheduleStateUpdate,
-            Qt::UniqueConnection);
-    connect(model, &QAbstractItemModel::rowsRemoved, this, &ChatBridge::scheduleStateUpdate,
-            Qt::UniqueConnection);
-    connect(model, &QAbstractItemModel::modelReset, this, &ChatBridge::scheduleStateUpdate,
-            Qt::UniqueConnection);
+    dirtyModels_.insert(model);
+    if (scheduleUpdate) {
+        scheduleStateUpdate();
+    }
 }
 
 void ChatBridge::scheduleStateUpdate() {
@@ -96,8 +144,16 @@ void ChatBridge::scheduleStateUpdate() {
 }
 
 void ChatBridge::publishState() {
-    latestStateJson_ = bridge::serializeState(buildState());
+    rebuildStateSnapshot();
     emit stateChanged(latestStateJson_);
+}
+
+void ChatBridge::rebuildStateSnapshot() {
+    QElapsedTimer timer;
+    timer.start();
+    latestStateJson_ = bridge::serializeState(buildState());
+    lastStateBuildDurationUs_ = timer.nsecsElapsed() / 1000;
+    ++stateBuildCount_;
 }
 
 void ChatBridge::handleConnectionError(const QString& code, const QString& reason, bool retryable) {
@@ -122,7 +178,16 @@ QJsonObject ChatBridge::buildActiveConversation() const {
     return QJsonObject{{"kind", "room"}, {"id", room}, {"title", room}};
 }
 
-QJsonObject ChatBridge::buildState() const {
+QJsonObject ChatBridge::buildState() {
+    lastSerializedModelCount_ = dirtyModels_.size();
+    for (const QAbstractItemModel* model : dirtyModels_) {
+        serializedModels_.insert(model, serializeModel(model));
+    }
+    dirtyModels_.clear();
+
+    const auto snapshotFor = [this](const QAbstractItemModel* model) {
+        return serializedModels_.value(model);
+    };
     QString phase = QStringLiteral("idle");
     if (controller_->connected()) {
         phase = QStringLiteral("connected");
@@ -139,6 +204,37 @@ QJsonObject ChatBridge::buildState() const {
         connection.insert(QStringLiteral("lastError"), lastError_);
     }
 
+    QJsonObject performance;
+    if (performanceProfile_) {
+        performance = QJsonObject{
+            {"mode", performanceProfile_->mode()},
+            {"effectiveMode", performanceProfile_->effectiveMode()},
+            {"effectsEnabled", performanceProfile_->effectsEnabled()},
+            {"animationsEnabled", performanceProfile_->animationsEnabled()},
+            {"gradientsEnabled", performanceProfile_->gradientsEnabled()},
+            {"animationDurationScale", performanceProfile_->animationDurationScale()},
+            {"observedFrameCount", performanceProfile_->observedFrameCount()},
+            {"observedFps", performanceProfile_->observedFps()},
+            {"observedP95FrameMs", performanceProfile_->observedP95FrameMs()},
+            {"observedMaxFrameMs", performanceProfile_->observedMaxFrameMs()},
+            {"automaticReason", performanceProfile_->automaticReason()}
+        };
+    }
+
+    QJsonObject graphics;
+    if (graphicsInfo_) {
+        graphics = QJsonObject{
+            {"graphicsApi", graphicsInfo_->graphicsApi()},
+            {"renderer", graphicsInfo_->renderer()},
+            {"vendor", graphicsInfo_->vendor()},
+            {"hardwareAcceleration", graphicsInfo_->hardwareAcceleration()},
+            {"softwareRendering", graphicsInfo_->softwareRendering()},
+            {"refreshRate", graphicsInfo_->refreshRate()},
+            {"dpi", graphicsInfo_->dpi()},
+            {"resolution", graphicsInfo_->resolution()}
+        };
+    }
+
     const QString activeRoom = roomFromConversationKey(controller_->activeConversationKey());
     const QString page = controller_->connected() ? QStringLiteral("workspace") : QStringLiteral("mode");
     return QJsonObject{
@@ -148,16 +244,19 @@ QJsonObject ChatBridge::buildState() const {
                                   {"admin", controller_->admin()}}},
         {"navigation", QJsonObject{{"page", page},
                                     {"activeConversation", buildActiveConversation()}}},
-        {"rooms", serializeModel(controller_->roomModel())},
-        {"directMessages", serializeModel(controller_->directMessageModel())},
-        {"activeMessages", serializeModel(controller_->activeMessageModel())},
-        {"members", serializeModel(controller_->memberModel())},
+        {"rooms", snapshotFor(controller_->roomModel())},
+        {"directMessages", snapshotFor(controller_->directMessageModel())},
+        {"activeMessages", snapshotFor(controller_->activeMessageModel())},
+        {"members", snapshotFor(controller_->memberModel())},
         {"permissions", QJsonObject{{"activeRoomCanManage", controller_->activeRoomCanManage()}}},
+        {"performance", performance},
+        {"graphics", graphics},
         {"savedConnection", QJsonObject{{"serverIp", controller_->savedServerIp()},
                                          {"serverPort", controller_->savedServerPort()},
                                          {"username", controller_->savedUsername()},
                                          {"userCode", controller_->savedUserCode()},
-                                         {"caFile", controller_->savedCaFile()}}}
+                                         {"caFile", controller_->savedCaFile()}}},
+        {"hostDefaults", hostDefaults_}
     };
 }
 
@@ -167,6 +266,21 @@ void ChatBridge::emitInvalidCommand(const QString& commandId, const QString& cod
     emit commandResult(QString::fromUtf8(
         QJsonDocument(bridge::makeCommandResult(commandId, false, error))
             .toJson(QJsonDocument::Compact)));
+}
+
+void ChatBridge::completeRecallCommand(const QString& commandId, bool ok, const QString& reason) {
+    const auto it = pendingRecallCommandIds_.find(commandId);
+    if (it == pendingRecallCommandIds_.end()) return;
+	const QString resultCommandId = it.value();
+    pendingRecallCommandIds_.erase(it);
+    QJsonObject error;
+    if (!ok) {
+        error = bridge::makeError(QStringLiteral("recall_rejected"),
+                                  reason.isEmpty() ? QStringLiteral("Recall rejected") : reason,
+                                  false, QStringLiteral("server"), resultCommandId);
+    }
+    emit commandResult(QString::fromUtf8(
+        QJsonDocument(bridge::makeCommandResult(resultCommandId, ok, error)).toJson(QJsonDocument::Compact)));
 }
 
 void ChatBridge::dispatch(const QString& commandJson) {
@@ -187,11 +301,11 @@ void ChatBridge::dispatch(const QString& commandJson) {
 
     const QString type = command.value(QStringLiteral("type")).toString();
     const QJsonObject payload = command.value(QStringLiteral("payload")).toObject();
+    bool awaitRecallResult = false;
     if (type == QStringLiteral("session.connectRemote")) {
         controller_->connectToServer(payload.value("serverIp").toString(), payload.value("serverPort").toInt(),
                                      payload.value("username").toString(), payload.value("userCode").toString(),
-                                     payload.value("password").toString(), payload.value("caFile").toString(),
-                                     payload.value("registerAccount").toBool());
+                                     payload.value("caFile").toString());
     } else if (type == QStringLiteral("session.connectLocalHost")) {
         controller_->connectToLocalHost(payload.value("serverExe").toString(), payload.value("certFile").toString(),
                                         payload.value("keyFile").toString(), payload.value("dbFile").toString(),
@@ -225,9 +339,34 @@ void ChatBridge::dispatch(const QString& commandJson) {
     } else if (type == QStringLiteral("message.removeLocal")) {
         controller_->removeLocalMessage(payload.value("messageId").toString());
     } else if (type == QStringLiteral("message.recall")) {
-        controller_->recallMessage(payload.value("messageId").toString());
+        const QString messageId = payload.value("messageId").toString();
+        pendingRecallCommandIds_.insert(commandId, commandId);
+        if (!controller_->recallMessage(messageId, commandId)) {
+            pendingRecallCommandIds_.remove(commandId);
+            const QJsonObject error = bridge::makeError(QStringLiteral("permission_denied"),
+                                                        QStringLiteral("Recall is only available to the message author or an administrator"),
+                                                        false, QStringLiteral("controller"), commandId);
+            emit commandResult(QString::fromUtf8(
+                QJsonDocument(bridge::makeCommandResult(commandId, false, error)).toJson(QJsonDocument::Compact)));
+            return;
+        }
+        awaitRecallResult = true;
+    } else if (type == QStringLiteral("settings.setPerformanceMode")) {
+        if (!performanceProfile_) {
+            const QJsonObject error = bridge::makeError(
+                QStringLiteral("capability_unavailable"),
+                QStringLiteral("性能设置当前不可用"), false, QStringLiteral("bridge"), commandId);
+            emit commandResult(QString::fromUtf8(
+                QJsonDocument(bridge::makeCommandResult(commandId, false, error)).toJson(QJsonDocument::Compact)));
+            return;
+        }
+        performanceProfile_->setMode(payload.value("mode").toString());
     }
 
+    if (awaitRecallResult) {
+        scheduleStateUpdate();
+        return;
+    }
     emit commandResult(QString::fromUtf8(
         QJsonDocument(bridge::makeCommandResult(commandId, true)).toJson(QJsonDocument::Compact)));
     scheduleStateUpdate();

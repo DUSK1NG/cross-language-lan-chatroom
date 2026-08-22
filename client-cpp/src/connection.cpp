@@ -158,39 +158,12 @@ bool ConnectionState::connect_and_login(
         return false;
     }
 
-    bool should_register = false;
-    {
-        const std::lock_guard<std::mutex> lock(mutex_);
-        should_register = config_.register_account && !registration_completed_;
-    }
-
     const auth::ClientOptions auth_options{
         config_.server_ip,
         config_.server_port,
         config_.username,
         config_.user_code,
-        config_.ca_file,
-        config_.password,
-        config_.register_account};
-
-    if (should_register) {
-        const message::Message registration = auth::make_register_message(auth_options);
-        message::Message registration_response;
-        if (!message::send_message(candidate->ssl, registration) ||
-            !message::receive_message(candidate->ssl, registration_response)) {
-            last_error_ = openssl_error("TLS registration exchange failed");
-            close_current();
-            return false;
-        }
-        if (registration_response.type != "register_ok") {
-            login_response = std::move(registration_response);
-            result = LoginResult::kRejected;
-            close_current();
-            return false;
-        }
-        const std::lock_guard<std::mutex> lock(mutex_);
-        registration_completed_ = true;
-    }
+        config_.ca_file};
 
     const message::Message login = auth::make_login_message(auth_options);
     if (!message::send_message(candidate->ssl, login) ||

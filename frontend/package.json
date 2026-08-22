@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "gsap": "^3.15.0",
     "lucide-react": "latest",
     "motion": "latest",
     "react": "latest",
@@ -18,9 +19,9 @@
   "devDependencies": {
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
+    "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@types/node": "latest",
     "jsdom": "latest",
     "tailwindcss": "latest",
     "typescript": "latest",

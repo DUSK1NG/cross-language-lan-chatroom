@@ -77,14 +77,6 @@ Item {
                       : (root.modeName === "Guest" ? "B001" : "A001")
             }
 
-            Label { text: "密码"; color: Theme.primaryText }
-            AppTextField {
-                id: password
-                Layout.fillWidth: true
-                echoMode: TextInput.Password
-                selectByMouse: true
-            }
-
             Label { text: "CA 文件"; color: Theme.primaryText }
             AppTextField {
                 id: caFile
@@ -111,9 +103,7 @@ Item {
                                                    Number(serverPort.text),
                                                    username.text,
                                                    userCode.text,
-                                                   password.text,
-                                                   caFile.text,
-                                                   false)
+                                                   caFile.text)
                 }
             }
         }

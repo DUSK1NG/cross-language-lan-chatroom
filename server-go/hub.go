@@ -1,12 +1,16 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"log"
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // 上线提示和用户列表可能在登录后连续到达，缓冲区不能过小，
@@ -41,6 +45,34 @@ type RoomRequest struct {
 	Room   string
 }
 
+type HistoryRequest struct {
+	Client          *Client
+	Room            string
+	TargetCode      string
+	Private         bool
+	BeforeMessageID string
+	Limit           int
+}
+
+// historyJob contains only immutable request data needed by the SQLite worker.
+// The worker must not read or mutate Hub state directly.
+type historyJob struct {
+	Store           *AuthStore
+	Client          *Client
+	Room            string
+	TargetCode      string
+	Private         bool
+	BeforeMessageID string
+	Limit           int
+	Query           HistoryQuery
+}
+
+type historyResult struct {
+	Job  historyJob
+	Page HistoryPage
+	Err  error
+}
+
 // RoomDefinition 保存频道的服务端权限状态。只有 Hub goroutine 可以修改它。
 type RoomDefinition struct {
 	Name      string
@@ -67,6 +99,16 @@ type AdminActionRequest struct {
 	Action     string
 	TargetCode string
 	MessageID  string
+	CommandID  string
+}
+
+// MessageRecord is the minimum server-side state needed to authorize a recall.
+// It is accessed only by the Hub goroutine.
+type MessageRecord struct {
+	AuthorCode       string
+	Recipients       map[string]bool
+	OfflineMessageID string
+	Recalled         bool
 }
 
 // Client 表示一个已经完成登录的客户端连接。
@@ -81,8 +123,9 @@ type Client struct {
 	Room           string
 	Send           chan Message
 
-	closeOnce     sync.Once
-	closeSendOnce sync.Once
+	closeOnce            sync.Once
+	closeSendOnce        sync.Once
+	disconnectAfterFlush atomic.Bool
 }
 
 func newClient(conn net.Conn, username, userCode, normalizedCode string) *Client {
@@ -131,6 +174,9 @@ type Hub struct {
 	RoomAction      chan RoomActionRequest
 	RoomLeave       chan *Client
 	RequestRooms    chan *Client
+	History         chan HistoryRequest
+	HistoryJobs     chan historyJob
+	HistoryResults  chan historyResult
 	AdminAction     chan AdminActionRequest
 	ActiveCodes     map[string]*Client
 	UsedCodes       map[string]struct{}
@@ -140,30 +186,47 @@ type Hub struct {
 	OfflineStore    *AuthStore
 	AdminCode       string
 	NextMessageID   uint64
+	MessageRecords  map[string]MessageRecord
 }
 
 func NewHub() *Hub {
-	return &Hub{
-		Clients:      make(map[*Client]bool),
-		Register:     make(chan RegisterRequest),
-		Unregister:   make(chan *Client),
-		Broadcast:    make(chan Message),
-		Outbound:     make(chan OutboundMessage),
-		RequestUsers: make(chan *Client),
-		Private:      make(chan PrivateMessageRequest),
-		RoomJoin:     make(chan RoomRequest),
-		RoomCreate:   make(chan RoomCreateRequest),
-		RoomAction:   make(chan RoomActionRequest),
-		RoomLeave:    make(chan *Client),
-		RequestRooms: make(chan *Client),
-		AdminAction:  make(chan AdminActionRequest),
-		ActiveCodes:  make(map[string]*Client),
-		UsedCodes:    make(map[string]struct{}),
-		Rooms:        make(map[string]map[*Client]bool),
-		RoomNames:    map[string]struct{}{defaultRoomName: {}},
+	hub := &Hub{
+		Clients:        make(map[*Client]bool),
+		Register:       make(chan RegisterRequest),
+		Unregister:     make(chan *Client),
+		Broadcast:      make(chan Message),
+		Outbound:       make(chan OutboundMessage),
+		RequestUsers:   make(chan *Client),
+		Private:        make(chan PrivateMessageRequest),
+		RoomJoin:       make(chan RoomRequest),
+		RoomCreate:     make(chan RoomCreateRequest),
+		RoomAction:     make(chan RoomActionRequest),
+		RoomLeave:      make(chan *Client),
+		RequestRooms:   make(chan *Client),
+		History:        make(chan HistoryRequest),
+		HistoryJobs:    make(chan historyJob, 32),
+		HistoryResults: make(chan historyResult, 32),
+		AdminAction:    make(chan AdminActionRequest),
+		ActiveCodes:    make(map[string]*Client),
+		UsedCodes:      make(map[string]struct{}),
+		Rooms:          make(map[string]map[*Client]bool),
+		RoomNames:      map[string]struct{}{defaultRoomName: {}},
 		RoomDefinitions: map[string]*RoomDefinition{
 			defaultRoomName: {Name: defaultRoomName, Allowed: make(map[string]bool)},
 		},
+		MessageRecords: make(map[string]MessageRecord),
+	}
+	go hub.historyWorker()
+	return hub
+}
+
+// historyWorker keeps SQLite I/O out of the Hub event loop. A single bounded
+// worker deliberately limits database pressure while still allowing broadcasts,
+// login, and room operations to continue during a slow history query.
+func (h *Hub) historyWorker() {
+	for job := range h.HistoryJobs {
+		page, err := job.Store.LoadHistory(job.Query)
+		h.HistoryResults <- historyResult{Job: job, Page: page, Err: err}
 	}
 }
 
@@ -203,6 +266,12 @@ func (h *Hub) Run() {
 
 		case client := <-h.RequestRooms:
 			h.handleRequestRooms(client)
+
+		case request := <-h.History:
+			h.handleHistoryRequest(request)
+
+		case result := <-h.HistoryResults:
+			h.handleHistoryResult(result)
 
 		case request := <-h.AdminAction:
 			h.handleAdminAction(request)
@@ -258,18 +327,48 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 
 func (h *Hub) handleAdminAction(request AdminActionRequest) {
 	sender := request.Sender
-	if sender == nil || !sender.IsAdmin {
-		if sender != nil {
-			h.deliverError(sender, "Administrator permission required")
-		}
+	if sender == nil || !h.Clients[sender] {
 		return
 	}
 	if request.Action == "recall" {
-		if request.MessageID == "" {
-			h.deliverError(sender, "Message not found")
+		record, exists := h.MessageRecords[request.MessageID]
+		if !exists && h.OfflineStore != nil && request.MessageID != "" {
+			if stored, err := h.OfflineStore.GetStoredMessage(request.MessageID); err == nil {
+				record = h.recordForStoredMessage(stored)
+				exists = true
+			}
+		}
+		if request.MessageID == "" || !exists {
+			h.deliverError(sender, "Message not found", request.MessageID, request.CommandID)
 			return
 		}
-		h.broadcastMessage(Message{Type: "message_recalled", MessageID: request.MessageID})
+		if record.Recalled {
+			h.deliverError(sender, "Message already recalled", request.MessageID, request.CommandID)
+			return
+		}
+		if !sender.IsAdmin && sender.NormalizedCode != record.AuthorCode {
+			h.deliverError(sender, "Only the message author or an administrator can recall this message", request.MessageID, request.CommandID)
+			return
+		}
+		if h.OfflineStore != nil {
+			if err := h.OfflineStore.MarkMessageRecalled(request.MessageID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				h.deliverError(sender, "Failed to persist recalled message", request.MessageID, request.CommandID)
+				return
+			}
+		}
+		if record.OfflineMessageID != "" && h.OfflineStore != nil {
+			if err := h.OfflineStore.DeleteOfflineMessage(record.OfflineMessageID); err != nil {
+				h.deliverError(sender, "Failed to remove recalled offline message", request.MessageID, request.CommandID)
+				return
+			}
+		}
+		record.Recalled = true
+		h.MessageRecords[request.MessageID] = record
+		h.deliverRecall(record, Message{Type: "message_recalled", MessageID: request.MessageID, CommandID: request.CommandID})
+		return
+	}
+	if !sender.IsAdmin {
+		h.deliverError(sender, "Administrator permission required")
 		return
 	}
 	targetCode, err := normalizeUserCode(request.TargetCode)
@@ -285,7 +384,7 @@ func (h *Hub) handleAdminAction(request AdminActionRequest) {
 	switch request.Action {
 	case "kick":
 		h.deliver(target, Message{Type: "system", Content: "You were kicked by the administrator"})
-		h.unregisterClient(target, true)
+		h.unregisterClientAfterFlush(target)
 		h.deliver(sender, Message{Type: "system", Content: target.Username + "#" + target.UserCode + " was kicked"})
 	case "mute":
 		target.Muted = !target.Muted
@@ -317,6 +416,24 @@ func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {
 	log.Printf("client unregistered: %s", client.Username)
 }
 
+// unregisterClientAfterFlush removes a kicked client from the Hub while
+// allowing its queued kick notification to reach the socket first.
+func (h *Hub) unregisterClientAfterFlush(client *Client) {
+	if client == nil {
+		return
+	}
+	if _, ok := h.Clients[client]; !ok {
+		return
+	}
+
+	room := client.Room
+	client.disconnectAfterFlush.Store(true)
+	h.removeClient(client)
+	h.broadcastSystemMessageToRoom(room, presenceMessage(client, "left the chat"))
+	client.closeSend()
+	log.Printf("client unregistered after notification: %s", client.Username)
+}
+
 func (h *Hub) broadcastMessage(message Message) {
 	if message.MessageID == "" && message.Type != "message_recalled" {
 		h.NextMessageID++
@@ -329,6 +446,22 @@ func (h *Hub) broadcastMessage(message Message) {
 				room = sender.Room
 			}
 		}
+	}
+	if message.Type == "chat" {
+		if h.OfflineStore != nil {
+			persisted := message
+			persisted.Room = room
+			persisted.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			if err := h.OfflineStore.SaveChatMessage(persisted); err != nil {
+				if sender, ok := h.ActiveCodes[strings.ToLower(message.UserCode)]; ok {
+					h.deliverError(sender, "Failed to save message history")
+				}
+				return
+			}
+		}
+	}
+	if message.Type != "message_recalled" && message.MessageID != "" {
+		h.recordMessage(message, h.recipientCodes(h.roomClients(room)), "")
 	}
 	for client := range h.roomClients(room) {
 		h.deliver(client, message)
@@ -654,6 +787,14 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 			UserCode: sender.UserCode, TargetUserCode: request.TargetCode, Content: request.Content}
 		h.NextMessageID++
 		message.MessageID = strconv.FormatUint(h.NextMessageID, 10)
+		h.recordMessage(message, map[string]bool{sender.NormalizedCode: true, targetCode: true}, message.MessageID)
+		persisted := message
+		persisted.Private = true
+		persisted.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if err := h.OfflineStore.SaveChatMessage(persisted); err != nil {
+			h.deliverError(sender, "Failed to save message history")
+			return
+		}
 		if err := h.OfflineStore.SaveOfflineMessage(targetCode, message); err != nil {
 			h.deliverError(sender, "Failed to save offline message")
 			return
@@ -676,19 +817,148 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 	}
 	h.NextMessageID++
 	message.MessageID = strconv.FormatUint(h.NextMessageID, 10)
+	h.recordMessage(message, map[string]bool{sender.NormalizedCode: true, targetCode: true}, "")
+	if h.OfflineStore != nil {
+		persisted := message
+		persisted.Private = true
+		persisted.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if err := h.OfflineStore.SaveChatMessage(persisted); err != nil {
+			h.deliverError(sender, "Failed to save message history")
+			return
+		}
+	}
 	if !h.deliver(sender, message) {
 		return
 	}
 	h.deliver(target, message)
 }
 
-func (h *Hub) deliverError(client *Client, content string) {
+func (h *Hub) handleHistoryRequest(request HistoryRequest) {
+	client := request.Client
+	if client == nil || !h.Clients[client] || h.OfflineStore == nil {
+		return
+	}
+	if request.Private {
+		peerCode, err := normalizeUserCode(request.TargetCode)
+		if err != nil || peerCode == client.NormalizedCode {
+			h.deliverError(client, "Invalid private conversation")
+			return
+		}
+		query := HistoryQuery{
+			UserCode: client.UserCode, PeerCode: peerCode, Private: true,
+			BeforeMessageID: request.BeforeMessageID, Limit: request.Limit,
+		}
+		h.enqueueHistory(historyJob{
+			Store: h.OfflineStore, Client: client, TargetCode: peerCode, Private: true, Query: query,
+		})
+		return
+	}
+	if err := validateRoomName(request.Room); err != nil {
+		h.deliverError(client, "Invalid room name")
+		return
+	}
+	definition, exists := h.RoomDefinitions[request.Room]
+	if !exists || !h.canViewRoom(client, definition) {
+		h.deliverError(client, "You do not have access to this channel")
+		return
+	}
+	query := HistoryQuery{
+		UserCode: client.UserCode, Room: request.Room,
+		BeforeMessageID: request.BeforeMessageID, Limit: request.Limit,
+	}
+	h.enqueueHistory(historyJob{
+		Store: h.OfflineStore, Client: client, Room: request.Room, Query: query,
+	})
+}
+
+func (h *Hub) enqueueHistory(job historyJob) {
+	select {
+	case h.HistoryJobs <- job:
+	default:
+		if job.Client != nil {
+			h.deliverError(job.Client, "History service is busy")
+		}
+	}
+}
+
+func (h *Hub) handleHistoryResult(result historyResult) {
+	client := result.Job.Client
+	if client == nil || !h.Clients[client] {
+		return
+	}
+	if result.Err != nil {
+		h.deliverError(client, "Failed to load message history")
+		return
+	}
+
+	message := Message{
+		Type:           "history_response",
+		Room:           result.Job.Room,
+		Private:        result.Job.Private,
+		Messages:       result.Page.Messages,
+		HasMore:        result.Page.HasMore,
+		TargetUserCode: result.Job.TargetCode,
+	}
+	h.deliver(client, message)
+}
+
+func (h *Hub) recordForStoredMessage(stored StoredMessage) MessageRecord {
+	recipients := make(map[string]bool)
+	if stored.Kind == "private" {
+		recipients[stored.AuthorCode] = true
+		recipients[stored.TargetCode] = true
+	} else {
+		recipients = h.recipientCodes(h.roomClients(stored.Message.Room))
+	}
+	return MessageRecord{AuthorCode: stored.AuthorCode, Recipients: recipients}
+}
+
+func (h *Hub) recipientCodes(clients map[*Client]bool) map[string]bool {
+	recipients := make(map[string]bool, len(clients))
+	for client := range clients {
+		if client != nil && client.NormalizedCode != "" {
+			recipients[client.NormalizedCode] = true
+		}
+	}
+	return recipients
+}
+
+func (h *Hub) recordMessage(message Message, recipients map[string]bool, offlineMessageID string) {
+	if message.MessageID == "" {
+		return
+	}
+	authorCode := ""
+	if normalized, err := normalizeUserCode(message.UserCode); err == nil {
+		authorCode = normalized
+	}
+	h.MessageRecords[message.MessageID] = MessageRecord{AuthorCode: authorCode, Recipients: recipients, OfflineMessageID: offlineMessageID}
+}
+
+func (h *Hub) deliverRecall(record MessageRecord, message Message) {
+	for code := range record.Recipients {
+		if client, online := h.ActiveCodes[code]; online {
+			h.deliver(client, message)
+		}
+	}
+}
+
+func (h *Hub) deliverError(client *Client, content string, identifiers ...string) {
 	if content == "" {
 		return
 	}
+	id := ""
+	if len(identifiers) > 0 {
+		id = identifiers[0]
+	}
+	commandID := ""
+	if len(identifiers) > 1 {
+		commandID = identifiers[1]
+	}
 	h.deliver(client, Message{
-		Type:    "error",
-		Content: content,
+		Type:      "error",
+		MessageID: id,
+		CommandID: commandID,
+		Content:   content,
 	})
 }
 

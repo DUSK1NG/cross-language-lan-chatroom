@@ -6,6 +6,32 @@ import LanChatGui
 Item {
     id: root
     signal backRequested()
+    property bool keyFileManuallyEdited: false
+    property string autoDetectedKeyFile: ""
+
+    function refreshPrivateKeyPath() {
+        if (keyFileManuallyEdited) return
+        const candidate = chatController.autoPrivateKeyPath(serverExe.text, certFile.text)
+        if (candidate.length > 0) {
+            keyFile.text = candidate
+            autoDetectedKeyFile = candidate
+            keyStatus.text = "已自动检测私钥"
+        } else {
+            keyStatus.text = "未找到私钥，请手动填写"
+        }
+    }
+
+    Component.onCompleted: refreshPrivateKeyPath()
+
+    Connections {
+        target: serverExe
+        function onTextChanged() { root.refreshPrivateKeyPath() }
+    }
+
+    Connections {
+        target: certFile
+        function onTextChanged() { root.refreshPrivateKeyPath() }
+    }
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -26,7 +52,34 @@ Item {
             Label { text: "证书"; color: Theme.primaryText }
             AppTextField { id: certFile; Layout.fillWidth: true; text: hostCertFile }
             Label { text: "私钥"; color: Theme.primaryText }
-            AppTextField { id: keyFile; Layout.fillWidth: true; text: hostKeyFile }
+            RowLayout {
+                Layout.fillWidth: true
+                AppTextField {
+                    id: keyFile
+                    Layout.fillWidth: true
+                    text: hostKeyFile
+                    onTextEdited: {
+                        if (text !== root.autoDetectedKeyFile) {
+                            root.keyFileManuallyEdited = true
+                            keyStatus.text = "已使用手动私钥路径"
+                        }
+                    }
+                }
+                AppButton {
+                    text: "自动检测"
+                    onClicked: {
+                        root.keyFileManuallyEdited = false
+                        root.refreshPrivateKeyPath()
+                    }
+                }
+            }
+            Label {
+                id: keyStatus
+                Layout.columnSpan: 2
+                text: ""
+                color: text.startsWith("未") ? Theme.accent : Theme.secondaryText
+                font.pixelSize: Theme.fontCaption
+            }
             Label { text: "数据库"; color: Theme.primaryText }
             AppTextField { id: dbFile; Layout.fillWidth: true; text: hostDbFile }
         }

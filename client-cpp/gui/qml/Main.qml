@@ -20,10 +20,12 @@ ApplicationWindow {
     function openChat(mode) {
         selectedMode = mode
         currentPage = "chat"
+        if (chatPageLoader.item) chatPageLoader.item.modeName = mode
     }
 
     function openRemoteSetup(mode) {
         selectedMode = mode
+        if (connectPageLoader.item) connectPageLoader.item.modeName = mode
         currentPage = "connect"
     }
     function openHostSetup() {
@@ -42,6 +44,7 @@ ApplicationWindow {
             GradientStop { position: 0.52; color: "#11151a" }
             GradientStop { position: 1.0; color: "#0f1216" }
         }
+        visible: performanceProfile.gradientsEnabled
     }
 
     Rectangle {
@@ -53,6 +56,7 @@ ApplicationWindow {
         z: -1
         color: Theme.glowBlue
         opacity: 0.34
+        visible: performanceProfile.effectsEnabled
     }
 
     Rectangle {
@@ -64,6 +68,7 @@ ApplicationWindow {
         z: -1
         color: Theme.glowViolet
         opacity: 0.28
+        visible: performanceProfile.effectsEnabled
     }
 
     TitleBar {
@@ -75,33 +80,24 @@ ApplicationWindow {
         onCloseRequested: window.close()
     }
 
-    Loader {
-        id: pageLoader
+    Item {
+        id: pageHost
         z: 1
         anchors.top: titleBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        width: parent.width
-        height: Math.max(0, parent.height - titleBar.height)
-        visible: true
-        opacity: 1
-        x: 0
-        Behavior on opacity {
-            NumberAnimation { duration: Theme.animationNormal; easing.type: Easing.OutCubic }
-        }
-        Behavior on x {
-            NumberAnimation { duration: Theme.animationNormal; easing.type: Easing.OutCubic }
-        }
-        source: currentPage === "mode" ? "pages/ModeSelectionPage.qml" :
-                currentPage === "connect" ? "pages/ConnectionPage.qml" :
-                currentPage === "host" ? "pages/HostSetupPage.qml" :
-                currentPage === "settings" ? "pages/SettingsPage.qml" : "pages/ChatPage.qml"
-        onLoaded: {
-            if (!item) return
-            item.width = pageLoader.width
-            item.height = pageLoader.height
-            if (currentPage === "mode") {
+        clip: true
+
+        // Keep page instances alive. Switching settings/chat now only toggles
+        // visibility and does not rebuild the message ListView and delegates.
+        Loader {
+            id: modePageLoader
+            anchors.fill: parent
+            source: "pages/ModeSelectionPage.qml"
+            visible: currentPage === "mode"
+            onLoaded: {
+                if (!item) return
                 item.modeSelected.connect(function(mode) {
                     if (mode === "Remote Server" || mode === "Guest") {
                         window.openRemoteSetup(mode)
@@ -111,18 +107,66 @@ ApplicationWindow {
                         window.openChat(mode)
                     }
                 })
-            } else if (currentPage === "chat") {
+            }
+        }
+
+        Loader {
+            id: connectPageLoader
+            anchors.fill: parent
+            source: "pages/ConnectionPage.qml"
+            visible: currentPage === "connect"
+            onLoaded: {
+                if (!item) return
                 item.modeName = window.selectedMode
-                item.settingsRequested.connect(window.openSettings)
-            } else if (currentPage === "settings") {
-                item.backRequested.connect(window.returnToChat)
-            } else if (currentPage === "connect") {
-                item.modeName = window.selectedMode
-                item.backRequested.connect(function() { window.currentPage = "mode" })
-            } else if (currentPage === "host") {
                 item.backRequested.connect(function() { window.currentPage = "mode" })
             }
         }
+
+        Loader {
+            id: hostPageLoader
+            anchors.fill: parent
+            source: "pages/HostSetupPage.qml"
+            visible: currentPage === "host"
+            onLoaded: {
+                if (!item) return
+                item.backRequested.connect(function() { window.currentPage = "mode" })
+            }
+        }
+
+        Loader {
+            id: settingsPageLoader
+            anchors.fill: parent
+            source: "pages/SettingsPage.qml"
+            visible: currentPage === "settings"
+            onLoaded: {
+                if (!item) return
+                item.backRequested.connect(window.returnToChat)
+            }
+        }
+
+        Loader {
+            id: chatPageLoader
+            anchors.fill: parent
+            source: "pages/ChatPage.qml"
+            visible: currentPage === "chat"
+            onLoaded: {
+                if (!item) return
+                item.modeName = window.selectedMode
+                item.settingsRequested.connect(window.openSettings)
+            }
+        }
+    }
+
+    Loader {
+        id: performanceOverlayLoader
+        anchors.top: titleBar.bottom
+        anchors.right: parent.right
+        width: 262
+        height: 190
+        z: 100
+        active: typeof performanceSampler !== "undefined"
+        source: "controls/PerformanceOverlay.qml"
+        onLoaded: if (item) { item.sampler = performanceSampler; item.profile = performanceProfile }
     }
 
     Connections {

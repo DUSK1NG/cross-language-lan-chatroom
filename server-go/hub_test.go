@@ -93,6 +93,40 @@ func TestHubBroadcastsJoinMessageOnFirstRegistration(t *testing.T) {
 	})
 }
 
+func TestHubKickQueuesNotificationBeforeDisconnect(t *testing.T) {
+	hub := NewHub()
+	admin := newTestClient(t, "Alice", "Admin2026")
+	target := newTestClient(t, "Bob", "Bob2026")
+	admin.IsAdmin = true
+	hub.Clients[admin] = true
+	hub.Clients[target] = true
+	hub.ActiveCodes[admin.NormalizedCode] = admin
+	hub.ActiveCodes[target.NormalizedCode] = target
+	hub.Rooms[defaultRoomName] = map[*Client]bool{admin: true, target: true}
+
+	hub.handleAdminAction(AdminActionRequest{
+		Sender:     admin,
+		Action:     "kick",
+		TargetCode: target.UserCode,
+	})
+
+	assertMessageReceived(t, target.Send, Message{
+		Type:    "system",
+		Content: "You were kicked by the administrator",
+	})
+	if _, ok := hub.Clients[target]; ok {
+		t.Fatal("kicked client remains registered")
+	}
+	select {
+	case _, ok := <-target.Send:
+		if ok {
+			t.Fatal("kick notification channel contains an unexpected extra message")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("kick notification channel was not closed")
+	}
+}
+
 func TestHubRejectsRegistrationWithoutNormalizedCode(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
@@ -180,6 +214,118 @@ func TestHubBroadcastsToAllRegisteredClients(t *testing.T) {
 
 	assertMessageReceived(t, first.Send, want)
 	assertMessageReceived(t, second.Send, want)
+}
+
+func TestHubRecallAllowsAuthorOrAdminAndRejectsUnrelatedUsers(t *testing.T) {
+	hub := NewHub()
+	hub.AdminCode = "admin01"
+	go hub.Run()
+
+	author := newTestClient(t, "Alice", "A001")
+	other := newTestClient(t, "Bob", "B002")
+	admin := newTestClient(t, "Admin", "ADMIN01")
+	for _, client := range []*Client{author, other, admin} {
+		if err := registerForTest(t, hub, client); err != nil {
+			t.Fatalf("register %s: %v", client.Username, err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		<-author.Send
+	}
+	for i := 0; i < 2; i++ {
+		<-other.Send
+	}
+	<-admin.Send
+
+	hub.Broadcast <- Message{Type: "chat", Username: author.Username, UserCode: author.UserCode, Content: "author message"}
+	for _, client := range []*Client{author, other, admin} {
+		assertMessageReceived(t, client.Send, Message{Type: "chat", MessageID: "1", Username: "Alice", UserCode: "A001", Content: "author message"})
+	}
+
+	hub.AdminAction <- AdminActionRequest{Sender: other, Action: "recall", MessageID: "1"}
+	assertMessageReceived(t, other.Send, Message{Type: "error", MessageID: "1", Content: "Only the message author or an administrator can recall this message"})
+	assertNoMessageReceived(t, author.Send)
+	assertNoMessageReceived(t, admin.Send)
+
+	hub.AdminAction <- AdminActionRequest{Sender: author, Action: "recall", MessageID: "1"}
+	for _, client := range []*Client{author, other, admin} {
+		assertMessageReceived(t, client.Send, Message{Type: "message_recalled", MessageID: "1"})
+	}
+
+	hub.AdminAction <- AdminActionRequest{Sender: admin, Action: "recall", MessageID: "1"}
+	assertMessageReceived(t, admin.Send, Message{Type: "error", MessageID: "1", Content: "Message already recalled"})
+}
+
+func TestHubRecordsOfflinePrivateMessageOwnerForRecall(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if err := store.Register("Bob", "B002"); err != nil {
+		t.Fatalf("register offline recipient: %v", err)
+	}
+	hub := NewHub()
+	hub.OfflineStore = store
+	go hub.Run()
+
+	author := newTestClient(t, "Alice", "A001")
+	if err := registerForTest(t, hub, author); err != nil {
+		t.Fatalf("register author: %v", err)
+	}
+	assertMessageReceived(t, author.Send, Message{Type: "system", Content: "Alice#A001 joined the chat"})
+
+	hub.Private <- PrivateMessageRequest{Sender: author, TargetCode: "B002", Content: "offline message"}
+	assertMessageReceived(t, author.Send, Message{Type: "private_chat", MessageID: "1", Username: "Alice", UserCode: "A001", TargetUserCode: "B002", Content: "offline message"})
+	assertMessageReceived(t, author.Send, Message{Type: "system", Content: "Private message saved for offline user"})
+
+	hub.AdminAction <- AdminActionRequest{Sender: author, Action: "recall", MessageID: "1"}
+	assertMessageReceived(t, author.Send, Message{Type: "message_recalled", MessageID: "1"})
+	offline, err := store.TakeOfflineMessages("B002")
+	if err != nil {
+		t.Fatalf("take recalled offline message: %v", err)
+	}
+	if len(offline) != 0 {
+		t.Fatalf("recalled offline messages = %+v, want none", offline)
+	}
+}
+
+func TestHubRecallStaysWithinOriginalRoomAndEchoesCorrelationID(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	author := newTestClient(t, "Alice", "A001")
+	roommate := newTestClient(t, "Bob", "B002")
+	outsider := newTestClient(t, "Carol", "C003")
+	for _, client := range []*Client{author, roommate, outsider} {
+		if err := registerForTest(t, hub, client); err != nil {
+			t.Fatalf("register %s: %v", client.Username, err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		<-author.Send
+	}
+	for i := 0; i < 2; i++ {
+		<-roommate.Send
+	}
+	<-outsider.Send
+
+	hub.RoomCreate <- RoomCreateRequest{Client: author, Room: "study", Private: false}
+	for i := 0; i < 3; i++ {
+		<-author.Send
+	}
+	<-roommate.Send
+	<-outsider.Send
+	hub.RoomJoin <- RoomRequest{Client: roommate, Room: "study"}
+	<-roommate.Send
+	<-roommate.Send
+	<-author.Send
+	<-outsider.Send
+
+	hub.Broadcast <- Message{Type: "chat", Username: author.Username, UserCode: author.UserCode, Content: "study only"}
+	assertMessageReceived(t, author.Send, Message{Type: "chat", MessageID: "1", Username: "Alice", UserCode: "A001", Content: "study only"})
+	assertMessageReceived(t, roommate.Send, Message{Type: "chat", MessageID: "1", Username: "Alice", UserCode: "A001", Content: "study only"})
+	assertNoMessageReceived(t, outsider.Send)
+
+	hub.AdminAction <- AdminActionRequest{Sender: author, Action: "recall", MessageID: "1", CommandID: "recall-study-1"}
+	assertMessageReceived(t, author.Send, Message{Type: "message_recalled", MessageID: "1", CommandID: "recall-study-1"})
+	assertMessageReceived(t, roommate.Send, Message{Type: "message_recalled", MessageID: "1", CommandID: "recall-study-1"})
+	assertNoMessageReceived(t, outsider.Send)
 }
 
 func TestHubRoutesPrivateMessageOnlyToSenderAndTarget(t *testing.T) {
@@ -738,6 +884,29 @@ func TestHubKeepsGroupChatInsideRoom(t *testing.T) {
 	assertMessageReceived(t, bob.Send, privateRoomMessage)
 	assertNoMessageReceived(t, alice.Send)
 	assertNoMessageReceived(t, charlie.Send)
+}
+
+func TestHubHistoryWorkerLoadsHistoryWithoutRunningTheHubLoop(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if err := store.SaveChatMessage(Message{
+		Type: "chat", MessageID: "history-worker-1", Username: "Alice", UserCode: "A001",
+		Room: "lobby", Content: "history worker", CreatedAt: "2026-08-22T10:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hub := NewHub()
+	job := historyJob{Store: store, Query: HistoryQuery{UserCode: "A001", Room: "lobby", Limit: 10}}
+	hub.HistoryJobs <- job
+
+	select {
+	case result := <-hub.HistoryResults:
+		if result.Err != nil || len(result.Page.Messages) != 1 || result.Page.Messages[0].MessageID != "history-worker-1" {
+			t.Fatalf("history worker result = %+v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("history worker did not complete asynchronously")
+	}
 }
 
 func TestHubRoomCreateJoinsAndListsRooms(t *testing.T) {

@@ -8,6 +8,7 @@ class BridgeProtocolTests final : public QObject {
 
 private slots:
     void acceptsRoomMessageCommand();
+    void acceptsPerformanceModeCommand();
     void acceptsRemoteConnectionWithoutCaFile();
     void rejectsMissingIdAndPayload();
     void rejectsWrongPayloadType();
@@ -28,6 +29,18 @@ void BridgeProtocolTests::acceptsRoomMessageCommand() {
     QVERIFY(error.isEmpty());
 }
 
+void BridgeProtocolTests::acceptsPerformanceModeCommand() {
+    const QJsonObject command{
+        {"id", "cmd-performance"},
+        {"type", "settings.setPerformanceMode"},
+        {"payload", QJsonObject{{"mode", "Power Saving"}}}
+    };
+
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
 void BridgeProtocolTests::acceptsRemoteConnectionWithoutCaFile() {
     const QJsonObject command{
         {"id", "cmd-remote"},
@@ -36,9 +49,7 @@ void BridgeProtocolTests::acceptsRemoteConnectionWithoutCaFile() {
                                  {"serverPort", 8888},
                                  {"username", "Alice"},
                                  {"userCode", "A001"},
-                                 {"password", "secret"},
-                                 {"caFile", ""},
-                                 {"registerAccount", false}}}
+                                 {"caFile", ""}}}
     };
 
     QString error;
