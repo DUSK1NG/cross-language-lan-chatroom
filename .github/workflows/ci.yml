@@ -68,7 +68,9 @@ jobs:
             '.\scripts\bootstrap-github.ps1',
             '.\scripts\build-modern.ps1',
             '.\scripts\install-modern-toolchain.ps1',
-            '.\scripts\start-gui.ps1'
+            '.\scripts\package-release.ps1',
+            '.\scripts\start-gui.ps1',
+            '.\scripts\test-member-package.ps1'
           )
           foreach ($script in $scripts) {
             $tokens = $null

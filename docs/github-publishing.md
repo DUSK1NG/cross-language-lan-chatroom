@@ -31,6 +31,14 @@ ctest --test-dir .\out\launcher-release --output-on-failure
 
 只包含已经部署的现代 GUI 和运行时文件。它不包含编译器、Node、Go SDK、源码、服务器、数据库、私钥或自动编译入口。成员只需要房主提供的 IPv4、端口和公开 `.crt`。
 
+在 Windows 发布机生成成员包：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
+```
+
+产物固定为 `release\LANChat-member-modern-x64\` 与 `release\LANChat-member-modern-x64.zip`。脚本会重建现代客户端，部署 Qt WebEngine、OpenSSL 与 MSVC 运行时，启动烟雾检查，并拒绝把服务端、证书、私钥、数据库、源码或构建工具打进包中。
+
 ## 严禁进入 GitHub 或 Release 资产的内容
 
 - `server-lan.key`、任何 `.key` / `.pem`
