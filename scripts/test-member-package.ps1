@@ -21,6 +21,20 @@ function Require-File([string]$RelativePath) {
     }
 }
 
+function Stop-SmokeRuntime([string]$Directory) {
+    $resolvedDirectory = [System.IO.Path]::GetFullPath($Directory).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    $prefix = $resolvedDirectory + [System.IO.Path]::DirectorySeparatorChar
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
+    })
+    foreach ($runtimeProcess in $processes) {
+        Stop-Process -Id $runtimeProcess.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($runtimeProcess in $processes) {
+        Wait-Process -Id $runtimeProcess.ProcessId -Timeout 3 -ErrorAction SilentlyContinue
+    }
+}
+
 foreach ($relativePath in @(
     'lan-chat-gui.exe',
     'Qt6Core.dll',
@@ -79,23 +93,59 @@ if ($forbiddenFiles.Count -gt 0) {
 }
 
 if ($Smoke) {
-    $guiExe = Join-Path $PackageDirectory 'lan-chat-gui.exe'
+    $smokeDirectory = Join-Path $env:TEMP ('LANChat-package-smoke-' + [Guid]::NewGuid().ToString('N'))
     $previousPath = $env:PATH
     $process = $null
     try {
+        New-Item -ItemType Directory -Force -Path $smokeDirectory | Out-Null
+        Copy-Item -Path (Join-Path $PackageDirectory '*') -Destination $smokeDirectory -Recurse -Force
+        $guiExe = Join-Path $smokeDirectory 'lan-chat-gui.exe'
         # Deliberately omit the developer Qt path: the packaged directory must
         # provide every application runtime dependency by itself.
-        $env:PATH = "$PackageDirectory;$env:SystemRoot\System32;$env:SystemRoot"
-        $process = Start-Process -FilePath $guiExe -WorkingDirectory $PackageDirectory -WindowStyle Hidden -PassThru
+        $env:PATH = "$smokeDirectory;$env:SystemRoot\System32;$env:SystemRoot"
+        $process = Start-Process -FilePath $guiExe -WorkingDirectory $smokeDirectory -WindowStyle Hidden -PassThru
         Start-Sleep -Milliseconds 3000
         $process.Refresh()
         if ($process.HasExited) {
             throw "Runtime GUI exited during smoke test with code $($process.ExitCode)."
         }
+        if ($AllowLocalHost.IsPresent) {
+            foreach ($relativePath in @(
+                'server-go\certs\server-lan.crt',
+                'server-go\certs\server-lan.key',
+                'server-go\chat.db'
+            )) {
+                if (-not (Test-Path -LiteralPath (Join-Path $smokeDirectory $relativePath) -PathType Leaf)) {
+                    throw "First-run local host initialization did not create: $relativePath"
+                }
+            }
+        }
     } finally {
         $env:PATH = $previousPath
         if ($null -ne $process -and -not $process.HasExited) {
             Stop-Process -Id $process.Id -Force
+            Wait-Process -Id $process.Id -Timeout 3 -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $smokeDirectory -PathType Container) {
+            $resolvedSmokeDirectory = (Resolve-Path -LiteralPath $smokeDirectory).Path
+            $tempRoot = (Resolve-Path -LiteralPath $env:TEMP).Path
+            if ($resolvedSmokeDirectory.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                (Split-Path -Leaf $resolvedSmokeDirectory) -like 'LANChat-package-smoke-*') {
+                Stop-SmokeRuntime $resolvedSmokeDirectory
+                $removed = $false
+                for ($attempt = 0; $attempt -lt 8; $attempt++) {
+                    try {
+                        Remove-Item -LiteralPath $resolvedSmokeDirectory -Recurse -Force -ErrorAction Stop
+                        $removed = $true
+                        break
+                    } catch {
+                        Start-Sleep -Milliseconds 250
+                    }
+                }
+                if (-not $removed -and (Test-Path -LiteralPath $resolvedSmokeDirectory -PathType Container)) {
+                    throw "Unable to remove temporary runtime smoke directory: $resolvedSmokeDirectory"
+                }
+            }
         }
     }
 }

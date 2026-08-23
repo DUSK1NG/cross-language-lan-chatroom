@@ -4,9 +4,9 @@
 
 ## 作为房主
 
-1. 双击 `lan-chat-gui.exe`，选择“创建本地聊天室”。
+1. 双击 `lan-chat-gui.exe`。第一次打开时，程序会先生成本机专用的 TLS 证书、私钥和数据库；随后选择“创建本地聊天室”。
 2. 填写用户名和用户代码，点击“启动并连接”。
-3. 程序会在 `server-go\certs\` 下首次生成本机专用的 `server-lan.crt` 和 `server-lan.key`，并在 `server-go\chat.db` 创建本地数据。
+3. 程序启动本机 Go Server 并连接；首次启动时生成的本机专用 `server-lan.crt`、`server-lan.key` 位于 `server-go\certs\`，本地数据位于 `server-go\chat.db`。
 4. 通过 `ipconfig` 获取真实局域网 IPv4，把 IPv4、端口 `8888` 和 **仅公开证书** `server-lan.crt` 发给成员。
 
 ## 作为成员

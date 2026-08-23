@@ -35,6 +35,8 @@ qt_add_executable(lan-chat-gui
     src/graphics_info.hpp
     src/host_path_resolver.cpp
     src/host_path_resolver.hpp
+    src/local_host_bootstrap.cpp
+    src/local_host_bootstrap.hpp
     src/performance_profile.cpp
     src/performance_profile.hpp
     src/gui_connection_worker.cpp
@@ -299,6 +301,25 @@ target_include_directories(host-path-resolver-tests PRIVATE
 
 add_test(NAME host-path-resolver-tests COMMAND host-path-resolver-tests)
 
+qt_add_executable(local-host-bootstrap-tests
+    tests/local_host_bootstrap_tests.cpp
+    src/host_path_resolver.cpp
+    src/host_path_resolver.hpp
+    src/local_host_bootstrap.cpp
+    src/local_host_bootstrap.hpp
+)
+
+target_link_libraries(local-host-bootstrap-tests PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+target_include_directories(local-host-bootstrap-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+add_test(NAME local-host-bootstrap-tests COMMAND local-host-bootstrap-tests)
+
 # CTest on Windows does not inherit the interactive PowerShell PATH used by
 # the direct test commands. Provide the Qt and build directories explicitly so
 # QtGui/QtQuick test processes can locate their runtime DLLs.
@@ -314,6 +335,7 @@ set_tests_properties(
     performance-sampler-tests
     performance-profile-tests
     host-path-resolver-tests
+    local-host-bootstrap-tests
     PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED}"
 )
 

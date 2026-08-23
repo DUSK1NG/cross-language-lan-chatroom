@@ -101,9 +101,14 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
         return;
     }
 
-    if (isLocalServerListening(kLocalHostProbeTimeoutMs)) {
+    const bool localIdentityReady = QFileInfo::exists(absoluteCertFile) && QFileInfo::exists(absoluteKeyFile);
+    if (isLocalServerListening(kLocalHostProbeTimeoutMs) && localIdentityReady) {
         connectToServerWithRetries(QStringLiteral("127.0.0.1"), kLocalHostPort,
                                    username, userCode, absoluteCertFile, 2);
+        return;
+    }
+    if (isLocalServerListening(kLocalHostProbeTimeoutMs)) {
+        emit connectionFailed(QStringLiteral("Local port 8888 is already in use before the local TLS identity was initialized."));
         return;
     }
 

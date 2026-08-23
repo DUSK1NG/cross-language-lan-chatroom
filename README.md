@@ -53,7 +53,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1
 
 1. 安装 `LANChat-Setup-x64.exe` 或完整解压 `LANChat-Windows-x64.zip`，启动现代客户端并选择“创建本地聊天室”。
 2. 填写自己的用户名和用户代码，点击“启动并连接”。
-3. 程序会在本机启动 Go Server；首次使用时生成服务器证书、私钥和数据库。
+3. 第一次打开完整客户端时，程序会先在本机生成服务器证书、私钥和数据库；随后启动 Go Server 并连接。
 4. 通过 `ipconfig` 获取本机真实局域网 IPv4，并将 IPv4、端口 `8888` 和公开证书 `server-lan.crt` 提供给成员。
 
 ### 成员：加入局域网聊天室

@@ -180,7 +180,12 @@ $pnpm = Find-CommandPath 'pnpm.cmd' @(
     (Join-Path $pnpmUserDirectory 'npm\pnpm.cmd'),
     (Join-Path $Root '.tools\pnpm\pnpm.cmd')
 )
-$go = Find-CommandPath 'go.exe' @('C:\Program Files\Go\bin\go.exe')
+$bundledGo = Join-Path $Root '.tools\go1.25.5\go\bin\go.exe'
+$go = if (Test-Path -LiteralPath $bundledGo -PathType Leaf) {
+    $bundledGo
+} else {
+    Find-CommandPath 'go.exe' @('C:\Program Files\Go\bin\go.exe')
+}
 $resolvedQtPrefix = Find-QtPrefix $QtPrefix
 $resolvedOpenSslRoot = Find-OpenSslRoot $OpenSslRoot
 

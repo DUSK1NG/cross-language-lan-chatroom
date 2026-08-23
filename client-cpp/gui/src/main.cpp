@@ -23,6 +23,7 @@
 #include "gui_chat_controller.hpp"
 #include "graphics_info.hpp"
 #include "host_path_resolver.hpp"
+#include "local_host_bootstrap.hpp"
 #include "performance_profile.hpp"
 #ifdef LAN_CHAT_ENABLE_PERF_OVERLAY
 #include "performance_sampler.hpp"
@@ -72,10 +73,16 @@ int main(int argc, char* argv[]) {
     }, Qt::DirectConnection);
     const HostPathResolver::HostPaths hostPaths =
         HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
-    const bool hostAvailable = hostPaths.available();
-    const QString hostUnavailableMessage = QStringLiteral("此安装包不包含本地服务端；请使用主机端创建聊天室，或选择加入局域网聊天室。");
+    const bool bundledHostAvailable = hostPaths.available();
+    const LocalHostBootstrap::Result bootstrap = bundledHostAvailable
+        ? LocalHostBootstrap::ensureInitialized(hostPaths)
+        : LocalHostBootstrap::Result{};
+    const bool hostAvailable = bundledHostAvailable && bootstrap.ready;
+    const QString hostUnavailableMessage = !bundledHostAvailable
+        ? QStringLiteral("此安装包不包含本地服务端；请使用主机端创建聊天室，或选择加入局域网聊天室。")
+        : QStringLiteral("Local host initialization failed: ") + bootstrap.error;
 
-    chatController.setBundledCaFile(hostPaths.certFile);
+    chatController.setBundledCaFile(hostAvailable ? hostPaths.certFile : QString());
 
     std::unique_ptr<QQmlApplicationEngine> qmlEngine;
     const auto startQml = [&]() {

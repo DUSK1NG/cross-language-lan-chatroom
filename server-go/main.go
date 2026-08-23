@@ -13,9 +13,17 @@ func main() {
 	certPath := flag.String("cert", "", "path to the TLS certificate PEM file")
 	keyPath := flag.String("key", "", "path to the TLS private key PEM file")
 	autoCert := flag.Bool("auto-cert", false, "generate a local self-signed certificate when both TLS files are absent")
+	initializeLocalHostOnly := flag.Bool("initialize-local-host", false, "create the local TLS identity and chat database, then exit")
 	dbPath := flag.String("db", "", "path to the SQLite account database")
 	adminCode := flag.String("admin-code", "", "user code granted administrator permissions")
 	flag.Parse()
+	if *initializeLocalHostOnly {
+		if err := initializeLocalHost(*certPath, *keyPath, *dbPath); err != nil {
+			log.Fatalf("local host initialization error: %v", err)
+		}
+		log.Printf("local host files initialized")
+		return
+	}
 	if *autoCert {
 		if err := ensureSelfSignedCertificate(*certPath, *keyPath); err != nil {
 			log.Fatalf("automatic TLS certificate setup error: %v", err)

@@ -7,7 +7,7 @@
 - 默认安装到当前用户的 `%LocalAppData%\Programs\LAN Chat`，不需要管理员权限。
 - 创建开始菜单“LAN Chat”快捷方式；默认勾选创建桌面快捷方式。
 - 在 Windows“设置 → 应用 → 已安装的应用”中登记 `LAN Chat` 卸载项。
-- 包含现代 GUI、Qt WebEngine 运行时和本地 Go Server；不包含初始证书、私钥、数据库、源码或编译器。
+- 包含现代 GUI、Qt WebEngine 运行时和本地 Go Server；不包含初始证书、私钥、数据库、源码或编译器。第一次打开完整客户端时，会在安装目录的 `server-go\` 下本机生成证书、私钥和数据库。
 
 ## 卸载行为
 
