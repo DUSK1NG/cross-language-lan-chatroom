@@ -11,7 +11,7 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Test)
 find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
 find_package(Threads REQUIRED)
 
-option(LAN_CHAT_ENABLE_WEB_UI "Build the React WebEngine UI" OFF)
+option(LAN_CHAT_ENABLE_WEB_UI "Build the React WebEngine UI" ON)
 option(LAN_CHAT_ENABLE_PERF_OVERLAY "Enable the debug-only frame performance overlay" OFF)
 
 if(MSVC)

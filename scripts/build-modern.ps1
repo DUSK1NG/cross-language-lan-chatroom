@@ -5,6 +5,7 @@ param(
     [string]$BuildDirectory = '',
     [string]$QtPrefix = $env:LAN_CHAT_QT_PREFIX,
     [string]$OpenSslRoot = $env:LAN_CHAT_OPENSSL_ROOT,
+    [switch]$Wait,
     [switch]$CheckOnly
 )
 
@@ -300,5 +301,19 @@ if ($Action -eq 'Launch') {
     $guiExe = Join-Path $BuildDirectory 'lan-chat-gui.exe'
     if (-not (Test-Path -LiteralPath $guiExe -PathType Leaf)) { throw "Modern client was not generated: $guiExe" }
     Write-Step 'Launch modern client'
-    Start-Process -FilePath $guiExe -WorkingDirectory $BuildDirectory
+    $runtimeDirectories = @(
+        (Join-Path $resolvedQtPrefix 'bin'),
+        (Join-Path $resolvedOpenSslRoot 'bin')
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
+    $previousPath = $env:PATH
+    try {
+        $env:PATH = (($runtimeDirectories + $previousPath) -join ';')
+        $process = Start-Process -FilePath $guiExe -WorkingDirectory $BuildDirectory -PassThru
+        if ($Wait) {
+            $process.WaitForExit()
+            exit $process.ExitCode
+        }
+    } finally {
+        $env:PATH = $previousPath
+    }
 }

@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QMessageBox>
 #include <QWebEnginePage>
 #include <QWebEngineView>
 
@@ -114,42 +115,57 @@ int main(int argc, char* argv[]) {
     const QCommandLineOption developmentOption(
         QStringLiteral("web-ui-dev"),
         QStringLiteral("Load the React UI from the loopback Vite development server."));
+    const QCommandLineOption legacyQmlOption(
+        QStringLiteral("legacy-qml"),
+        QStringLiteral("Diagnostic only: start the retained Qt Quick fallback UI."));
     parser.addOption(developmentOption);
+    parser.addOption(legacyQmlOption);
     parser.process(app);
 
     graphicsInfo.refresh();
     performanceProfile.updateGraphicsContext(graphicsInfo.hardwareAcceleration(),
                                              graphicsInfo.softwareRendering(),
                                              graphicsInfo.refreshRate());
+    if (parser.isSet(legacyQmlOption)) {
+        return startQml() ? app.exec() : -1;
+    }
+
     ChatBridge bridge(&chatController, &performanceProfile, &graphicsInfo);
     bridge.setHostDefaults(hostPaths.serverExe, hostPaths.certFile, hostPaths.keyFile,
                            hostPaths.dbFile, hostAvailable,
                            hostAvailable ? QString() : hostUnavailableMessage);
     WebUiHost webUiHost;
     QWebEngineView webView;
-    const bool bridgeRegistered = webUiHost.registerBridge(webView.page(), &bridge);
-    if (bridgeRegistered) {
-        QObject::connect(webView.page(), &QWebEnginePage::loadFinished,
-                         &app, [&](const bool ok) {
-            if (!ok && qmlEngine == nullptr) {
-                webView.hide();
-                startQml();
-            }
-        });
-
-        const bool loaded = parser.isSet(developmentOption)
-            ? webUiHost.loadDevelopment(&webView, QUrl("http://127.0.0.1:5173"))
-            : webUiHost.loadRelease(&webView);
-        if (loaded) {
-            webView.resize(1280, 800);
-            webView.show();
-            const int exitCode = app.exec();
-            return exitCode;
-        }
+    if (!webUiHost.registerBridge(webView.page(), &bridge)) {
+        QMessageBox::critical(nullptr, QStringLiteral("LAN Chat"),
+                              QStringLiteral("The modern UI bridge could not be initialized."));
+        return -1;
     }
+
+    QObject::connect(webView.page(), &QWebEnginePage::loadFinished,
+                     &app, [&](const bool ok) {
+        if (!ok) {
+            webView.hide();
+            QMessageBox::critical(nullptr, QStringLiteral("LAN Chat"),
+                                  QStringLiteral("The modern UI could not be loaded. "
+                                                 "Run the source launcher again to rebuild its resources."));
+            QCoreApplication::exit(-1);
+        }
+    });
+
+    const bool loaded = parser.isSet(developmentOption)
+        ? webUiHost.loadDevelopment(&webView, QUrl("http://127.0.0.1:5173"))
+        : webUiHost.loadRelease(&webView);
+    if (!loaded) {
+        QMessageBox::critical(nullptr, QStringLiteral("LAN Chat"),
+                              QStringLiteral("The modern UI resources are unavailable."));
+        return -1;
+    }
+
+    webView.resize(1280, 800);
+    webView.show();
+    return app.exec();
 #endif
 
-    startQml();
-    const int exitCode = app.exec();
-    return exitCode;
+    return startQml() ? app.exec() : -1;
 }
