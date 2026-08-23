@@ -30,6 +30,7 @@ certs/
 *.key
 *.pem
 release/
+out/
 
 # React frontend dependencies and generated bundles
 .npm-cache/

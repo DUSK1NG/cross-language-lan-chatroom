@@ -15,6 +15,7 @@ private slots:
     void returnsEmptyWhenNoCandidateExists();
     void marksMemberPackageWithoutServerAsUnavailable();
     void findsHostFilesFromDevelopmentBuildDirectory();
+    void findsHostFilesFromUnifiedOutputDirectory();
 };
 
 void HostPathResolverTests::prefersCertificateSiblingKey() {
@@ -67,6 +68,28 @@ void HostPathResolverTests::findsHostFilesFromDevelopmentBuildDirectory() {
     QVERIFY(temp.isValid());
     const QDir root(temp.path());
     const QString buildDir = root.filePath("client-cpp/gui/build-test");
+    const QString server = root.filePath("server-go/chat-server.exe");
+    const QString cert = root.filePath("server-go/certs/server-lan.crt");
+    const QString key = root.filePath("server-go/certs/server-lan.key");
+    QVERIFY(QDir().mkpath(buildDir));
+    QVERIFY(QDir().mkpath(QFileInfo(key).absolutePath()));
+    QVERIFY(QFile(server).open(QIODevice::WriteOnly));
+    QVERIFY(QFile(cert).open(QIODevice::WriteOnly));
+    QVERIFY(QFile(key).open(QIODevice::WriteOnly));
+
+    const HostPathResolver::HostPaths paths = HostPathResolver::resolveHostPaths(buildDir);
+
+    QCOMPARE(paths.serverExe, QFileInfo(server).absoluteFilePath());
+    QCOMPARE(paths.certFile, QFileInfo(cert).absoluteFilePath());
+    QCOMPARE(paths.keyFile, QFileInfo(key).absoluteFilePath());
+    QVERIFY(paths.available());
+}
+
+void HostPathResolverTests::findsHostFilesFromUnifiedOutputDirectory() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QDir root(temp.path());
+    const QString buildDir = root.filePath("out/modern-msvc-x64");
     const QString server = root.filePath("server-go/chat-server.exe");
     const QString cert = root.filePath("server-go/certs/server-lan.crt");
     const QString key = root.filePath("server-go/certs/server-lan.key");

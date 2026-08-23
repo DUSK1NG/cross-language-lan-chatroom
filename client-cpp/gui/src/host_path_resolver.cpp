@@ -33,12 +33,21 @@ bool HostPaths::available() const {
 }
 
 HostPaths resolveHostPaths(const QString& applicationDirectory) {
-    const QDir appDir(QDir::cleanPath(applicationDirectory));
-    const HostPaths repositoryPaths = pathsForRoot(appDir.filePath(QStringLiteral("../../..")));
-    if (!existingFile(repositoryPaths.serverExe).isEmpty()) {
-        return repositoryPaths;
+    QDir candidateRoot(QDir::cleanPath(applicationDirectory));
+
+    // The official source build lives in <repository>/out/modern-msvc-x64,
+    // while the legacy build directory lived under client-cpp/gui. Walk up
+    // from the executable instead of encoding either build layout.
+    for (int depth = 0; depth < 8; ++depth) {
+        const HostPaths candidatePaths = pathsForRoot(candidateRoot.absolutePath());
+        if (!existingFile(candidatePaths.serverExe).isEmpty()) {
+            return candidatePaths;
+        }
+        if (!candidateRoot.cdUp()) {
+            break;
+        }
     }
-    return pathsForRoot(appDir.absolutePath());
+    return pathsForRoot(QDir::cleanPath(applicationDirectory));
 }
 
 QString findPrivateKeyPath(const QString& serverExe, const QString& certFile) {
