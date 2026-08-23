@@ -61,7 +61,7 @@ jobs:
       - name: Test launcher dry run
         shell: pwsh
         run: ctest --test-dir .\out\ci-launcher -C Release --output-on-failure
-      - name: Test GUI launch switch forwarding
+      - name: Test GUI launcher regression
         shell: pwsh
         run: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\start-gui-wait-regression.ps1
       - name: Parse source launcher scripts

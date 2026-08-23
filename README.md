@@ -18,7 +18,7 @@ cd C:\path\to\chat_X
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1
 ```
 
-该入口会构建 React 界面、Go 服务端和现代 Qt WebEngine GUI，然后启动 `out\modern-msvc-x64\lan-chat-gui.exe`。首次构建会安装 Node.js 与 pnpm 等所需工具链，并在安装前征求一次确认；不会静默提权。
+该入口会优先启动已验证的 `out\modern-msvc-x64\lan-chat-gui.exe`；没有可用本地构建时，才会构建 React 界面、Go 服务端和现代 Qt WebEngine GUI。首次构建会安装 Node.js 与 pnpm 等所需工具链，并在安装前征求一次确认；不会静默提权。需要强制重建时使用：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1 -Rebuild`。
 
 ## 连接聊天室
 
