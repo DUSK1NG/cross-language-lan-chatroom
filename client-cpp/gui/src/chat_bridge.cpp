@@ -107,9 +107,11 @@ ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* perfor
 }
 
 void ChatBridge::setHostDefaults(const QString& serverExe, const QString& certFile,
-                                 const QString& keyFile, const QString& dbFile) {
+                                 const QString& keyFile, const QString& dbFile,
+                                 const bool available, const QString& unavailableReason) {
     hostDefaults_ = QJsonObject{{"serverExe", serverExe}, {"certFile", certFile},
-                                {"keyFile", keyFile}, {"dbFile", dbFile}};
+                                {"keyFile", keyFile}, {"dbFile", dbFile},
+                                {"available", available}, {"unavailableReason", unavailableReason}};
     rebuildStateSnapshot();
 }
 

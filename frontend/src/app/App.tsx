@@ -17,6 +17,8 @@ export function App({ bridge }: AppProps) {
   const [page, setPage] = useState(state.navigation.page);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('remote');
   const settings = useAppSettings();
+  const hostAvailable = state.hostDefaults?.available !== false;
+  const hostUnavailableReason = state.hostDefaults?.unavailableReason || '此安装包不包含本地服务端';
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.darkTheme ? 'dark' : 'light';
@@ -47,14 +49,18 @@ export function App({ bridge }: AppProps) {
       onRemote={() => { setConnectionMode('remote'); setPage('connect'); }}
       onGuest={() => { setConnectionMode('guest'); setPage('connect'); }}
       onLocalHost={() => setPage('host')}
+      hostAvailable={hostAvailable}
+      hostUnavailableReason={hostUnavailableReason}
     />
   );
 }
 
-function ModeSelectionPage({ onRemote, onGuest, onLocalHost }: {
+function ModeSelectionPage({ onRemote, onGuest, onLocalHost, hostAvailable, hostUnavailableReason }: {
   onRemote: () => void;
   onGuest: () => void;
   onLocalHost: () => void;
+  hostAvailable: boolean;
+  hostUnavailableReason: string;
 }) {
   return (
     <main className="app-shell mode-shell">
@@ -68,10 +74,10 @@ function ModeSelectionPage({ onRemote, onGuest, onLocalHost }: {
             <strong>远程服务器</strong>
             <span>连接已经部署好的 Go Server</span>
           </button>
-          <button className="mode-card" type="button" aria-label="local-host-mode" onClick={onLocalHost}>
+          <button className="mode-card" type="button" aria-label="local-host-mode" onClick={onLocalHost} disabled={!hostAvailable}>
             <span className="mode-icon" aria-hidden="true">⌂</span>
             <strong>创建本地聊天室</strong>
-            <span>当前电脑启动 Go Server，作为 Host</span>
+            <span>{hostAvailable ? '当前电脑启动 Go Server，作为 Host' : hostUnavailableReason}</span>
           </button>
           <button className="mode-card" type="button" aria-label="guest-mode" onClick={onGuest}>
             <span className="mode-icon" aria-hidden="true">◌</span>

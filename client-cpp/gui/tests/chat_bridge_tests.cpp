@@ -35,6 +35,7 @@ class ChatBridgeTests final : public QObject {
 
 private slots:
     void initialSnapshotHasSchemaAndDisconnectedState();
+    void snapshotMarksMemberPackageHostAsUnavailable();
     void snapshotContainsPerformanceAndGraphicsInfo();
     void performanceModeCommandUpdatesSnapshot();
     void snapshotContainsRoomAndMemberRoles();
@@ -69,6 +70,22 @@ void ChatBridgeTests::initialSnapshotHasSchemaAndDisconnectedState() {
              QStringLiteral("A001"));
     QCOMPARE(state.value("navigation").toObject().value("activeConversation")
                  .toObject().value("kind").toString(), QStringLiteral("room"));
+}
+
+void ChatBridgeTests::snapshotMarksMemberPackageHostAsUnavailable() {
+    GuiChatController controller;
+    ChatBridge bridge(&controller);
+    bridge.setHostDefaults("C:/member/server-go/chat-server.exe",
+                           "C:/member/server-go/certs/server-lan.crt",
+                           "C:/member/server-go/certs/server-lan.key",
+                           "C:/member/server-go/chat.db", false,
+                           QStringLiteral("成员端不包含本地服务端"));
+
+    const QJsonObject hostDefaults = QJsonDocument::fromJson(
+        bridge.currentStateJson().toUtf8()).object().value("hostDefaults").toObject();
+    QCOMPARE(hostDefaults.value("available").toBool(), false);
+    QCOMPARE(hostDefaults.value("unavailableReason").toString(),
+             QStringLiteral("成员端不包含本地服务端"));
 }
 
 void ChatBridgeTests::snapshotContainsPerformanceAndGraphicsInfo() {

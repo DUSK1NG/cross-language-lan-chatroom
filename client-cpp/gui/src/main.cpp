@@ -21,6 +21,7 @@
 
 #include "gui_chat_controller.hpp"
 #include "graphics_info.hpp"
+#include "host_path_resolver.hpp"
 #include "performance_profile.hpp"
 #ifdef LAN_CHAT_ENABLE_PERF_OVERLAY
 #include "performance_sampler.hpp"
@@ -68,15 +69,12 @@ int main(int argc, char* argv[]) {
         performanceSampler.detachWindow();
 #endif
     }, Qt::DirectConnection);
-    const QDir appDir(QCoreApplication::applicationDirPath());
-    QString packageRoot = QDir::cleanPath(appDir.filePath("../../.."));
-    const QString nestedServer = QDir(packageRoot).filePath("server-go/chat-server.exe");
-    if (!QFileInfo::exists(nestedServer)) {
-        packageRoot = appDir.absolutePath();
-    }
+    const HostPathResolver::HostPaths hostPaths =
+        HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
+    const bool hostAvailable = hostPaths.available();
+    const QString hostUnavailableMessage = QStringLiteral("此安装包不包含本地服务端；请使用主机端创建聊天室，或选择加入局域网聊天室。");
 
-    chatController.setBundledCaFile(
-        QDir::cleanPath(QDir(packageRoot).filePath("server-go/certs/server-lan.crt")));
+    chatController.setBundledCaFile(hostPaths.certFile);
 
     std::unique_ptr<QQmlApplicationEngine> qmlEngine;
     const auto startQml = [&]() {
@@ -87,14 +85,12 @@ int main(int argc, char* argv[]) {
 #ifdef LAN_CHAT_ENABLE_PERF_OVERLAY
         qmlEngine->rootContext()->setContextProperty("performanceSampler", &performanceSampler);
 #endif
-        qmlEngine->rootContext()->setContextProperty(
-            "hostServerExe", QDir::cleanPath(QDir(packageRoot).filePath("server-go/chat-server.exe")));
-        qmlEngine->rootContext()->setContextProperty(
-            "hostCertFile", QDir::cleanPath(QDir(packageRoot).filePath("server-go/certs/server-lan.crt")));
-        qmlEngine->rootContext()->setContextProperty(
-            "hostKeyFile", QDir::cleanPath(QDir(packageRoot).filePath("server-go/certs/server-lan.key")));
-        qmlEngine->rootContext()->setContextProperty(
-            "hostDbFile", QDir::cleanPath(QDir(packageRoot).filePath("server-go/chat.db")));
+        qmlEngine->rootContext()->setContextProperty("hostServerExe", hostPaths.serverExe);
+        qmlEngine->rootContext()->setContextProperty("hostCertFile", hostPaths.certFile);
+        qmlEngine->rootContext()->setContextProperty("hostKeyFile", hostPaths.keyFile);
+        qmlEngine->rootContext()->setContextProperty("hostDbFile", hostPaths.dbFile);
+        qmlEngine->rootContext()->setContextProperty("hostAvailable", hostAvailable);
+        qmlEngine->rootContext()->setContextProperty("hostUnavailableMessage", hostUnavailableMessage);
         QObject::connect(qmlEngine.get(), &QQmlApplicationEngine::objectCreationFailed,
                          &app, [] { QCoreApplication::exit(-1); },
                          Qt::QueuedConnection);
@@ -126,11 +122,9 @@ int main(int argc, char* argv[]) {
                                              graphicsInfo.softwareRendering(),
                                              graphicsInfo.refreshRate());
     ChatBridge bridge(&chatController, &performanceProfile, &graphicsInfo);
-    bridge.setHostDefaults(
-        QDir::cleanPath(QDir(packageRoot).filePath("server-go/chat-server.exe")),
-        QDir::cleanPath(QDir(packageRoot).filePath("server-go/certs/server-lan.crt")),
-        QDir::cleanPath(QDir(packageRoot).filePath("server-go/certs/server-lan.key")),
-        QDir::cleanPath(QDir(packageRoot).filePath("server-go/chat.db")));
+    bridge.setHostDefaults(hostPaths.serverExe, hostPaths.certFile, hostPaths.keyFile,
+                           hostPaths.dbFile, hostAvailable,
+                           hostAvailable ? QString() : hostUnavailableMessage);
     WebUiHost webUiHost;
     QWebEngineView webView;
     const bool bridgeRegistered = webUiHost.registerBridge(webView.page(), &bridge);

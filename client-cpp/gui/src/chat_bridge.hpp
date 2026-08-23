@@ -22,7 +22,8 @@ public:
                GraphicsInfo* graphicsInfo, QObject* parent = nullptr);
 
     void setHostDefaults(const QString& serverExe, const QString& certFile,
-                         const QString& keyFile, const QString& dbFile);
+                         const QString& keyFile, const QString& dbFile,
+                         bool available, const QString& unavailableReason = {});
     Q_INVOKABLE QString currentStateJson() const { return latestStateJson_; }
     qint64 lastStateBuildDurationUs() const { return lastStateBuildDurationUs_; }
     int lastSerializedModelCount() const { return lastSerializedModelCount_; }

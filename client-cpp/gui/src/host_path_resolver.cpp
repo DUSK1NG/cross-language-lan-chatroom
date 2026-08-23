@@ -12,9 +12,34 @@ QString existingFile(const QString& path) {
     }
     return {};
 }
+
+HostPathResolver::HostPaths pathsForRoot(const QString& root) {
+    const QDir directory(root);
+    return {
+        QDir::cleanPath(directory.filePath(QStringLiteral("server-go/chat-server.exe"))),
+        QDir::cleanPath(directory.filePath(QStringLiteral("server-go/certs/server-lan.crt"))),
+        QDir::cleanPath(directory.filePath(QStringLiteral("server-go/certs/server-lan.key"))),
+        QDir::cleanPath(directory.filePath(QStringLiteral("server-go/chat.db")))
+    };
+}
 }
 
 namespace HostPathResolver {
+
+bool HostPaths::available() const {
+    return !existingFile(serverExe).isEmpty()
+        && !existingFile(certFile).isEmpty()
+        && !existingFile(keyFile).isEmpty();
+}
+
+HostPaths resolveHostPaths(const QString& applicationDirectory) {
+    const QDir appDir(QDir::cleanPath(applicationDirectory));
+    const HostPaths repositoryPaths = pathsForRoot(appDir.filePath(QStringLiteral("../../..")));
+    if (!existingFile(repositoryPaths.serverExe).isEmpty()) {
+        return repositoryPaths;
+    }
+    return pathsForRoot(appDir.absolutePath());
+}
 
 QString findPrivateKeyPath(const QString& serverExe, const QString& certFile) {
     QVector<QString> candidates;

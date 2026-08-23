@@ -6,6 +6,9 @@ import LanChatGui
 Item {
     id: root
     signal modeSelected(string mode)
+    property bool localHostAvailable: typeof hostAvailable !== "undefined" && hostAvailable
+    property string localHostUnavailableMessage: typeof hostUnavailableMessage !== "undefined"
+                                               ? hostUnavailableMessage : "此安装包不包含本地服务端"
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -41,8 +44,9 @@ Item {
 
             ModeCard {
                 title: "创建本地聊天室"
-                subtitle: "当前电脑作为 Host"
+                subtitle: root.localHostAvailable ? "当前电脑作为 Host" : root.localHostUnavailableMessage
                 iconSource: "qrc:/qt/qml/LanChatGui/qml/icons/network.svg"
+                available: root.localHostAvailable
                 onClicked: root.modeSelected("Local Host")
             }
 
@@ -60,14 +64,16 @@ Item {
         property string title: ""
         property string subtitle: ""
         property string iconSource: ""
+        property bool available: true
         signal clicked()
         Layout.fillWidth: true
         Layout.preferredHeight: 196
         radius: Theme.radiusLarge
-        color: mouse.containsMouse ? Theme.surfaceRaised : Theme.surface
-        border.color: mouse.containsMouse ? Theme.accent : Theme.border
+        color: available && mouse.containsMouse ? Theme.surfaceRaised : Theme.surface
+        border.color: available && mouse.containsMouse ? Theme.accent : Theme.border
         border.width: 1
-        scale: mouse.pressed ? 0.985 : mouse.containsMouse ? 1.01 : 1.0
+        opacity: available ? 1.0 : 0.52
+        scale: available && mouse.pressed ? 0.985 : available && mouse.containsMouse ? 1.01 : 1.0
         Behavior on color { ColorAnimation { duration: Theme.animationNormal } }
         Behavior on border.color { ColorAnimation { duration: Theme.animationNormal } }
         Behavior on scale { NumberAnimation { duration: Theme.animationFast; easing.type: Easing.OutCubic } }
@@ -102,6 +108,7 @@ Item {
             id: mouse
             anchors.fill: parent
             hoverEnabled: true
+            enabled: card.available
             onClicked: card.clicked()
         }
     }

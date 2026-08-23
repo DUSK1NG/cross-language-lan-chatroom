@@ -29,6 +29,7 @@ ApplicationWindow {
         currentPage = "connect"
     }
     function openHostSetup() {
+        if (!hostAvailable) return
         selectedMode = "Local Host"
         currentPage = "host"
     }

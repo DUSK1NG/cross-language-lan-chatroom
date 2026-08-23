@@ -49,6 +49,8 @@ export type HostDefaults = {
   certFile: string;
   keyFile: string;
   dbFile: string;
+  available?: boolean;
+  unavailableReason?: string;
 };
 
 export type PerformanceState = {

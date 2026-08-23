@@ -17,7 +17,9 @@ const disconnectedState: BridgeState = {
     serverExe: 'C:/chat/server-go/chat-server.exe',
     certFile: 'C:/chat/certs/server-lan.crt',
     keyFile: 'C:/chat/certs/server-lan.key',
-    dbFile: 'C:/chat/server-go/chat.db'
+    dbFile: 'C:/chat/server-go/chat.db',
+    available: true,
+    unavailableReason: ''
   }
 };
 
@@ -30,6 +32,21 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'remote-mode' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'local-host-mode' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'guest-mode' })).toBeEnabled();
+  });
+
+  it('disables local hosting when a member package has no bundled server', () => {
+    const bridge = createFakeBridge({
+      ...disconnectedState,
+      hostDefaults: {
+        ...disconnectedState.hostDefaults,
+        available: false,
+        unavailableReason: '成员端不包含本地服务端'
+      } as unknown as BridgeState['hostDefaults']
+    });
+    render(<App bridge={bridge} />);
+
+    expect(screen.getByRole('button', { name: 'local-host-mode' })).toBeDisabled();
+    expect(screen.getByText('成员端不包含本地服务端')).toBeInTheDocument();
   });
 
   it('opens the guest form with a guest identity and dispatches a remote connection', () => {
