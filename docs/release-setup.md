@@ -1,60 +1,47 @@
-# LAN Chat Windows 单包使用说明
+# LAN Chat 发布与局域网使用说明
 
-下载并解压发布包后，运行根目录的 `lan-chat-gui.exe`。同一个程序既可作为房主创建聊天室，也可作为成员加入已有聊天室。
+LAN Chat 使用现代 React + Qt WebEngine 客户端。发布时分为两个用途明确的包，避免把房主密钥或开发工具发给成员。
 
-发布包不包含 TLS 证书、私钥、数据库或聊天记录，避免房主私钥和本地数据被意外分享。
-
-## 先判断你的角色
-
-| 你的目的 | 在程序首页选择 | 是否需要 Go Server |
-| --- | --- | --- |
-| 在本机创建聊天室，供局域网成员加入 | 创建本地聊天室 | 程序会自动启动包内 Go Server |
-| 加入其他电脑创建的聊天室 | 加入局域网聊天室 | 不需要，本机只运行 GUI |
+| 包 | 用途 | 包含内容 | 不包含内容 |
+| --- | --- | --- | --- |
+| `LANChat-Source-Launcher-windows-x64.zip` | 房主、开发者 | 源码与 `LANChat-Launcher.exe` | 私钥、数据库、聊天记录 |
+| `LANChat-member-modern-x64.zip` | 另一台电脑的成员测试 | 已部署现代 GUI、Qt 运行时、公开 CA 证书位置说明 | 源码、编译器、Go Server、私钥、数据库、自动编译入口 |
 
 ## 房主：创建本地聊天室
 
-1. 确认当前电脑在局域网中的 IPv4 地址，例如 `192.168.1.10`：
+1. 解压源码启动器包，双击 `LANChat-Launcher.exe`。
+2. 第一次启动会检查 Node.js、pnpm、Go、MSVC、Qt WebEngine 与 OpenSSL。缺失时会说明将安装的内容，输入 `Y` 后才会继续。
+3. 现代客户端启动后选择“创建本地聊天室”，填写自己的用户名和用户代码。
+4. 点击“启动并连接”。程序会启动本机 Go Server；首次使用时生成证书、私钥和数据库。
+5. 用 `ipconfig` 查看房主的 IPv4，把 **IPv4、端口 `8888`、`server-lan.crt`** 发给成员。
 
-   ```powershell
-   ipconfig
-   ```
+首次 Windows 防火墙询问时，只允许 `chat-server.exe` 通过“专用网络”。不要关闭整个防火墙。
 
-2. 不需要安装 OpenSSL，也不需要手动创建证书。运行 `lan-chat-gui.exe`，首页选择 **创建本地聊天室**。
-3. 输入自己的用户名和用户代码。下列路径默认指向发布包中的正确位置，通常无需改动：
+## 成员：加入局域网聊天室
 
-   ```text
-   server-go\chat-server.exe
-   certs\server-lan.crt
-   certs\server-lan.key
-   server-go\chat.db
-   ```
+1. 解压 `LANChat-member-modern-x64.zip`，双击根目录 `lan-chat-gui.exe`。
+2. 选择“加入局域网聊天室”。
+3. 填写房主的真实 IPv4、端口 `8888`、自己的用户名和用户代码。
+4. 选择房主提供的公开证书 `server-lan.crt`，然后连接。
 
-4. 点击 **启动本地聊天室**。当证书和私钥都不存在时，程序会自动生成 `certs\server-lan.crt` 与 `certs\server-lan.key`，证书包含 `localhost`、`127.0.0.1` 和当前电脑的局域网 IPv4 地址。
-5. 程序会启动本机 Go TLS Server 并自动以房主身份连接。将本机 IPv4 地址、端口 `8888` 和 `certs\server-lan.crt` 发给成员。只发送 `.crt`，绝不发送 `.key`。
-6. 首次被 Windows 防火墙询问时，只允许 `chat-server.exe` 通过**专用网络**；不要关闭整个防火墙。
+同机测试可填 `127.0.0.1`；跨电脑测试不能填该地址。成员包不启动服务器，也不执行自动编译。
 
-## 成员：加入房主的聊天室
+## 连接失败排查
 
-1. 从房主获得房主的 IPv4 地址（例如 `192.168.1.10`）和公开证书 `server-lan.crt`。
-2. 将收到的证书保存为程序目录中的 `certs\server-lan.crt`。不要索取或保存 `server-lan.key`。
-3. 运行 `lan-chat-gui.exe`，选择 **加入局域网聊天室**。
-4. 填写房主 IPv4、端口 `8888`、自己的用户名和用户代码，并选择刚保存的 `.crt` 文件。
-5. 点击 **连接**。成功后即可加入 `lobby`、创建/加入频道、发送群聊或私聊消息。
+在成员电脑运行：
 
-## 本机测试与局域网测试
+```powershell
+Test-NetConnection <房主IPv4> -Port 8888
+```
 
-- 同一台电脑测试时，成员可以填写 `127.0.0.1`；证书会在房主首次启动本地聊天室时自动生成。
-- 两台电脑测试时，成员必须填写房主电脑的真实 IPv4，不能填写 `127.0.0.1`。
-- Wi-Fi 与网线设备可以互通；连接失败时可先在成员电脑运行：
+若失败，按顺序检查：
 
-  ```powershell
-  Test-NetConnection <房主IPv4> -Port 8888
-  ```
+1. 房主客户端是否仍在运行，且 Go Server 是否监听 `0.0.0.0:8888`。
+2. 房主 IPv4 是否正确，而不是 `127.0.0.1`。
+3. 房主网络是否为“专用网络”，防火墙是否允许 TCP 8888。
+4. 路由器是否开启 AP/Client Isolation，或成员是否在访客网络、隔离 VLAN。
+5. 成员选择的是否为当前房主提供的 `server-lan.crt`。
 
-  然后检查防火墙、路由器 AP/Client Isolation 与 VLAN 设置。
+## 私钥规则
 
-## 安全规则
-
-- `server-lan.key` 只能留在房主电脑，不能发给成员，也不能上传 GitHub。
-- 房主 IPv4 变更后，删除房主包内的 `certs\server-lan.crt` 和 `certs\server-lan.key`，再次启动本地聊天室会生成新证书；随后把新的 `.crt` 发给成员。
-- 每个在线用户的“用户代码”不区分大小写且必须唯一；用户名可重复。
+`server-lan.key` 是服务器身份凭据，只能保存在房主电脑。不要发送给成员，不要放进压缩包，不要上传 GitHub。房主 IP 变化后，可在房主机删除旧的 `server-lan.crt` 与 `server-lan.key`，再创建本地聊天室生成新的证书；随后重新把新的 `.crt` 发给成员。

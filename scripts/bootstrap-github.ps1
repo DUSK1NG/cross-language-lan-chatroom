@@ -30,7 +30,7 @@ try {
     if ($toolchainIncomplete) {
         if ($NonInteractive) { throw 'The build toolchain is not installed. Run this script without -NonInteractive to configure it.' }
         Write-Host ''
-        Write-Host 'First build installs Node.js, Go, MSVC Build Tools, Qt 6 WebEngine, and OpenSSL.' -ForegroundColor Yellow
+        Write-Host 'First build installs Node.js, pnpm, Go, MSVC Build Tools, Qt 6 WebEngine, and OpenSSL.' -ForegroundColor Yellow
         Write-Host 'The first setup downloads several GB and may request administrator approval.' -ForegroundColor Yellow
         $answer = Read-Host 'Install now? Type Y to continue'
         if ($answer -notmatch '^(?i:y|yes)$') {

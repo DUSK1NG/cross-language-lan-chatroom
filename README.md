@@ -1,161 +1,78 @@
-# Cross-Language LAN Chatroom
+# LAN Chat
 
-一个面向 Windows 局域网的跨语言多人聊天室：Go 负责 TLS/TCP 服务端，C++20 + Qt 6 负责桌面客户端。项目使用自定义的“4 字节大端长度头 + UTF-8 JSON”应用层协议，避免 TCP 字节流产生的粘包、拆包和半包问题。
+面向 Windows 局域网的多人聊天程序。正式桌面客户端使用 **React + Qt WebEngine + QWebChannel**；Go 服务端提供 TLS/TCP、账号、频道、私信、离线私信、管理员与频道权限。
 
-> 适合学习 TCP Socket、跨语言协议、Go 并发、Windows 网络开发与 Qt Quick 桌面界面设计。
+> 旧命令行客户端和旧 QML 界面不再是默认用户入口。它们只保留为内部网络层复用与故障诊断能力。
 
-## 项目亮点
+## 使用方式
 
-- Go TLS Server：监听 `0.0.0.0:8888`，支持 Wi-Fi 与以太网设备互通。
-- C++/Qt 6 GUI Client：独立接收线程与 QML 界面线程分离，收消息不会阻塞输入。
-- 多客户端群聊：用户名可重复，但“用户代码”忽略大小写且全局唯一，例如 `Alice#A001`。
-- 频道与私聊：公开/私有频道、创建者权限、邀请成员、移除成员、删除频道、在线成员列表、自动刷新和未读提示。
-- 可靠协议：4-byte Big-Endian 长度头、UTF-8 JSON、`send_all` / `recv_all` 与 64 KiB 上限。
-- 安全连接：Go 服务端与 C++ 客户端通过 TLS 通信；私钥只保存在运行服务端的主机。
-- 消息体验：发送者名称、代码与时间；自己消息靠右、他人消息靠左；支持 Emoji、复制、引用和本地删除。
+| 场景 | 获取内容 | 启动方式 | 是否需要编译器 |
+| --- | --- | --- | --- |
+| 房主 / 开发者 | `LANChat-Source-Launcher-windows-x64.zip` | 双击 `LANChat-Launcher.exe` | 首次按确认自动准备，之后增量构建 |
+| 局域网成员测试 | `LANChat-member-modern-x64.zip` | 双击 `lan-chat-gui.exe` | 不需要 |
 
-## 界面展示
-
-私聊：双方消息各自显示发送者、用户代码和时间，自己发送的消息右对齐。
-
-![Alice 与 Bob 的私聊界面](screenshots/v1-private-chat.png)
-
-创建频道：频道名称只允许字母、数字和下划线。
-
-![创建频道对话框](screenshots/v1-channel-dialog.png)
-
-频道群聊：不同客户端可加入同一频道并实时收发消息。
-
-![频道群聊](screenshots/v1-channel-chat.png)
-
-## 架构
-
-```text
-Qt 6 Client A ─┐
-Qt 6 Client B ─┼── TLS / TCP :8888 ── Go Server
-Qt 6 Client C ─┘
-```
-
-服务端采用 Hub 模型：Hub goroutine 串行管理客户端、注册、注销和广播；每位客户端分别拥有读写流程。客户端使用 Winsock2/OpenSSL 处理网络与 TLS，Qt Worker Thread 处理收发，QML 只负责界面呈现。
-
-## 通信协议
-
-```text
-┌──────────────────────┬──────────────────────────┐
-│ 4-byte payload size  │ UTF-8 JSON payload       │
-│ uint32, big-endian   │ {"type":"chat", ...}   │
-└──────────────────────┴──────────────────────────┘
-```
-
-长度字段表示 JSON 的**字节数**，而不是字符数量；最大消息体为 64 KiB。完整字段与消息类型见 [docs/protocol.md](docs/protocol.md)。
-
-## 环境要求
-
-- Windows 11
-- Go 1.25 或更高版本
-- Qt 6.11 MinGW 64-bit
-- CMake 3.21+、Ninja
-- OpenSSL 3.x 运行库
-
-## 本机构建
-
-构建并测试 Go 服务端：
+发布资产尚未生成前，克隆源码后的本地启动命令是：
 
 ```powershell
-cd server-go
-go test ./...
-go build -o chat-server.exe .
+cd C:\path\to\chat_X
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1
 ```
 
-构建 Qt GUI：
+该入口会构建 React 界面、Go 服务端和现代 Qt WebEngine GUI，然后启动 `out\modern-msvc-x64\lan-chat-gui.exe`。首次构建会安装 Node.js 与 pnpm 等所需工具链，并在安装前征求一次确认；不会静默提权。
+
+## 连接聊天室
+
+- **创建本地聊天室（房主）**：在现代客户端首页选择“创建本地聊天室”。程序在本机启动 Go Server，并在首次需要时生成本机的证书、私钥和数据库。
+- **加入局域网聊天室（成员）**：向房主索取 IPv4、端口 `8888` 与公开证书 `server-lan.crt`；在客户端填写这些信息后连接。
+- **远程服务器**：填写已经部署的 Go TLS Server 地址和其公开 CA 证书。
+
+同机测试可以填 `127.0.0.1`；另一台电脑必须填写房主真实的局域网 IPv4。成员机可先运行：
 
 ```powershell
-cd client-cpp\gui
-cmake -S . -B build -G Ninja
-cmake --build build --parallel 2
+Test-NetConnection <房主IPv4> -Port 8888
 ```
 
-## 运行方式
+详细的房主与成员操作见 [发布与局域网使用说明](docs/release-setup.md)。
 
-先启动服务端。证书和私钥只应位于服务端主机的本地目录，且不能提交到 GitHub。
+## 功能
+
+- TLS/TCP 安全连接，4-byte big-endian 长度帧与 UTF-8 JSON 协议
+- 大厅、公开/私有频道、频道邀请与成员管理
+- 一对一私信、离线私信、历史消息与消息撤回
+- 管理员禁言、踢出和频道权限
+- 中文现代桌面 UI、表情、复制、引用、未读提示与连接状态
+
+当前不提供文件、图片、音频或视频上传。
+
+## 安全边界
+
+`server-lan.key` 是房主的 TLS 私钥。它只能留在房主电脑：
+
+- 可以共享：房主 IPv4、端口与 `server-lan.crt` 公共证书。
+- 绝不能共享或提交到 GitHub：`server-lan.key`、`chat.db`、聊天记录、访问令牌、构建输出。
+
+这不是禁止上传 GitHub；源码、构建脚本、测试、文档和公开证书的使用说明都可以公开。限制的是会让他人伪装为房主或泄露本地数据的敏感材料。
+
+## 开发与验证
+
+统一现代构建与测试：
 
 ```powershell
-.\server-go\chat-server.exe -addr 0.0.0.0:8888 `
-  -cert .\certs\server-lan.crt `
-  -key .\certs\server-lan.key `
-  -db .\server-go\chat.db
+cd C:\path\to\chat_X
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
 ```
 
-然后启动 GUI：
+该命令会构建前端、Go Server 和 Qt WebEngine GUI，并运行 CTest。构建产物固定在 `out\modern-msvc-x64`，不会提交到 Git。
 
-```powershell
-.\client-cpp\gui\build\lan-chat-gui.exe
-```
-
-本机测试时填写 `127.0.0.1:8888`。局域网测试时，客户端应填写运行 Go Server 那台电脑的 IPv4 地址与端口 `8888`，并选择同一份 `server-lan.crt` 作为 CA 文件；客户端不需要、也不应获得私钥。
-
-## 正式发布包：房主与成员使用同一个程序
-
-正式版提供单一 Windows 包：`LANChat-v1.0.1-Windows-x64.zip`。解压后运行 `lan-chat-gui.exe`，在首页按角色选择：
-
-- **创建本地聊天室（房主）**：本机启动包内的 Go TLS Server；生成并保管证书、私钥和数据库。
-- **加入局域网聊天室（成员）**：填写房主电脑的 IPv4 与端口 `8888`，仅使用房主提供的公开证书 `server-lan.crt`。
-- **远程服务器**：连接已经部署好的 Go TLS Server。
-
-公开包不会包含证书、私钥、数据库或聊天记录。私钥 `server-lan.key` 只能留在房主电脑，成员绝不能获取。完整的中文步骤、PowerShell 命令和局域网排错方式见 [docs/release-setup.md](docs/release-setup.md)。
-
-## 局域网测试
-
-在服务端主机查看 IPv4：
-
-```powershell
-ipconfig
-```
-
-在另一台电脑测试 TCP 可达性：
-
-```powershell
-Test-NetConnection <服务端IPv4> -Port 8888
-```
-
-若连接失败，请检查 Windows 防火墙的 Private Network 入站规则、路由器 AP/Client Isolation、VLAN 和网络是否允许设备互访；不要关闭整个防火墙。
+架构和开发边界见 [architecture.md](docs/architecture.md)，GitHub 发布清单见 [github-publishing.md](docs/github-publishing.md)。
 
 ## 项目结构
 
 ```text
-server-go/          Go TLS/TCP 服务端、Hub、协议与账户存储
-client-cpp/         C++ Socket/TLS 协议客户端
-client-cpp/gui/     Qt 6 / QML 桌面客户端
-docs/               协议、架构、局域网测试与设计文档
-scripts/            PowerShell 构建、启动与打包脚本
-screenshots/        README 使用的真实测试截图
+frontend/             React / TypeScript / Vite 现代界面
+client-cpp/gui/       Qt 6、QWebChannel 与既有 C++ 网络控制器
+server-go/            Go TLS/TCP 服务端、Hub 与 SQLite 存储
+scripts/              统一构建、启动和发布脚本
+tools/bootstrap/      静态源码启动器
+docs/                 使用、架构与发布文档
 ```
-
-## 已验证内容
-
-- localhost 双客户端登录、群聊、私聊与 UTF-8 中文消息
-- 自定义频道创建、切换和成员列表刷新
-- Alice 主机与 Bob 客户端的 TLS 连接
-- 发送者名称、用户代码、时间与左右消息布局
-- Wi-Fi 客户端连接以太网服务端的局域网测试
-- Go 服务端单元测试与 Qt/CMake 构建
-- 管理员与频道创建者权限：私有频道邀请、移除成员和删除频道
-
-## 当前限制
-
-- 仅支持群聊和一对一私聊；无公网 NAT 穿透。
-- 无文件、图片、语音或视频传输。
-- 消息历史已支持 SQLite 持久化和按会话游标分页；暂未提供全文搜索。
-- 频道定义和邀请名单目前存于服务端内存；服务端重启后需要重新创建频道和邀请成员。
-- 局域网环境使用自签名证书；更换服务端 IP 后需重新签发包含该 IP 的证书。
-
-## 后续方向
-
-- 将频道定义、邀请名单和管理审计记录持久化到 SQLite。
-- 完善文本、表情和消息交互能力；暂不加入文件上传。
-- 增加房间密码、TLS 证书管理与正式部署配置。
-- 探索 Linux、Android 或 Web 客户端。
-
-## 简历描述参考
-
-独立开发 Go 与 C++ 跨语言局域网多人聊天室，基于 TCP Socket 设计 4 字节长度头 + JSON 协议解决粘包与拆包；Go 服务端利用 goroutine/channel 管理并发连接与广播，C++ 客户端使用 Winsock2、OpenSSL 与 Qt 6 实现 TLS 异步收发、频道和私聊，并完成跨 Wi-Fi/以太网设备通信验证。

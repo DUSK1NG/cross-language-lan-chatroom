@@ -45,11 +45,24 @@ function Resolve-Git {
     throw 'Git was installed but is not available to this process. Close this window and run LANChat-Launcher.exe again.'
 }
 
+function Resolve-Npm {
+    $command = Get-Command 'npm.cmd' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $command) { return $command.Source }
+    $candidate = 'C:\Program Files\nodejs\npm.cmd'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    throw 'Node.js was installed but npm.cmd is not available to this process. Close this window and run LANChat-Launcher.exe again.'
+}
+
 Require-Winget
 Install-WingetPackage 'OpenJS.NodeJS.LTS'
 Install-WingetPackage 'GoLang.Go'
 Install-WingetPackage 'Git.Git'
 Install-WingetPackage 'Python.Python.3.12'
+
+$npm = Resolve-Npm
+Write-Step 'Install pnpm 11.19.0'
+& $npm install --global 'pnpm@11.19.0'
+if ($LASTEXITCODE -ne 0) { throw "pnpm installation failed with exit code $LASTEXITCODE." }
 
 if (-not (Test-Path -LiteralPath $VsConfig -PathType Leaf)) { throw "Missing MSVC configuration: $VsConfig" }
 Install-WingetPackage 'Microsoft.VisualStudio.2022.BuildTools' @('--override', "--wait --passive --norestart --config `"$VsConfig`"")

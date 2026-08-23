@@ -175,16 +175,18 @@ $vsNinja = Find-VsCmakeTool $vsDevCmd 'Common7\IDE\CommonExtensions\Microsoft\CM
 $cmake = if (-not [string]::IsNullOrWhiteSpace($vsCmake)) { $vsCmake } else { Find-CommandPath 'cmake.exe' }
 $ninja = if (-not [string]::IsNullOrWhiteSpace($vsNinja)) { $vsNinja } else { Find-CommandPath 'ninja.exe' }
 $node = Find-CommandPath 'node.exe' @('C:\Program Files\nodejs\node.exe')
-$npm = Find-CommandPath 'npm.cmd' @('C:\Program Files\nodejs\npm.cmd')
-$pnpm = Find-CommandPath 'pnpm.cmd'
-$frontendPackageManager = if (-not [string]::IsNullOrWhiteSpace($npm)) { $npm } else { $pnpm }
+$pnpmUserDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+$pnpm = Find-CommandPath 'pnpm.cmd' @(
+    (Join-Path $pnpmUserDirectory 'npm\pnpm.cmd'),
+    (Join-Path $Root '.tools\pnpm\pnpm.cmd')
+)
 $go = Find-CommandPath 'go.exe' @('C:\Program Files\Go\bin\go.exe')
 $resolvedQtPrefix = Find-QtPrefix $QtPrefix
 $resolvedOpenSslRoot = Find-OpenSslRoot $OpenSslRoot
 
 $requirements = [ordered]@{
     'Node.js LTS (node.exe)' = $node
-    'npm or pnpm package manager' = $frontendPackageManager
+    'pnpm package manager (pnpm.cmd)' = $pnpm
     'Go toolchain (go.exe)' = $go
     'CMake (cmake.exe)' = $cmake
     'Ninja (ninja.exe)' = $ninja
@@ -209,31 +211,17 @@ if ($missing.Count -gt 0) {
 
 $showIncludesPrefix = Get-ShowIncludesPrefix $vsDevCmd
 
-if (-not [string]::IsNullOrWhiteSpace($npm)) {
-    $dependencyMarker = Join-Path $FrontendDirectory 'node_modules\.lan-chat-npm-lock.sha256'
-    $dependencyInput = Join-Path $FrontendDirectory 'package-lock.json'
-    if (-not (Test-DependencyMarker $dependencyInput $dependencyMarker)) {
-        Write-Step 'Install React dependencies (npm ci)'
-        & $npm --prefix $FrontendDirectory ci
-        if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE." }
-        Set-DependencyMarker $dependencyInput $dependencyMarker
-    }
-    Write-Step 'Build React interface (npm run build)'
-    & $npm --prefix $FrontendDirectory run build
-    if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE." }
-} else {
-    $dependencyMarker = Join-Path $FrontendDirectory 'node_modules\.lan-chat-pnpm-lock.sha256'
-    $dependencyInput = Join-Path $FrontendDirectory 'pnpm-lock.yaml'
-    if (-not (Test-DependencyMarker $dependencyInput $dependencyMarker)) {
-        Write-Step 'Install React dependencies (pnpm install)'
-        & $pnpm --dir $FrontendDirectory install --frozen-lockfile
-        if ($LASTEXITCODE -ne 0) { throw "pnpm install failed with exit code $LASTEXITCODE." }
-        Set-DependencyMarker $dependencyInput $dependencyMarker
-    }
-    Write-Step 'Build React interface (pnpm run build)'
-    & $pnpm --dir $FrontendDirectory run build
-    if ($LASTEXITCODE -ne 0) { throw "pnpm run build failed with exit code $LASTEXITCODE." }
+$dependencyMarker = Join-Path $FrontendDirectory 'node_modules\.lan-chat-pnpm-lock.sha256'
+$dependencyInput = Join-Path $FrontendDirectory 'pnpm-lock.yaml'
+if (-not (Test-DependencyMarker $dependencyInput $dependencyMarker)) {
+    Write-Step 'Install React dependencies (pnpm install)'
+    & $pnpm --dir $FrontendDirectory install --frozen-lockfile
+    if ($LASTEXITCODE -ne 0) { throw "pnpm install failed with exit code $LASTEXITCODE." }
+    Set-DependencyMarker $dependencyInput $dependencyMarker
 }
+Write-Step 'Build React interface (pnpm run build)'
+& $pnpm --dir $FrontendDirectory run build
+if ($LASTEXITCODE -ne 0) { throw "pnpm run build failed with exit code $LASTEXITCODE." }
 
 Write-Step 'Build Go server'
 $goBuildCache = Join-Path $Root '.tools\go-build-cache'

@@ -103,7 +103,7 @@ int runLauncher(int argc, wchar_t* argv[]) {
     return 0;
 }
 
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+int runFromProcessCommandLine() {
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv == nullptr) {
@@ -113,3 +113,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     LocalFree(argv);
     return result;
 }
+
+#if defined(__MINGW32__)
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+    return runFromProcessCommandLine();
+}
+#else
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    return runFromProcessCommandLine();
+}
+#endif

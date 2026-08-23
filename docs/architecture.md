@@ -1,57 +1,47 @@
-# System Architecture
+# LAN Chat 架构
 
-## Overall architecture
+## 正式客户端路径
 
-~~~mermaid
+```mermaid
 flowchart LR
-    A["C++ Client A<br/>Winsock2 + std::thread"] -->|"TCP 8888<br/>4-byte big-endian length + JSON"| S["Go Server<br/>net + goroutine + channel"]
-    B["C++ Client B<br/>Winsock2 + std::thread"] -->|"TCP 8888"| S
-    C["C++ Client C<br/>Winsock2 + std::thread"] -->|"TCP 8888"| S
-    S --> H["Hub goroutine<br/>register / unregister / broadcast"]
-    H --> W["Per-client writer<br/>Client.Send channel"]
-~~~
+    UI["React / TypeScript\nQt WebEngine"]
+    Channel["QWebChannel"]
+    Bridge["ChatBridge\n状态快照与命令校验"]
+    Controller["GuiChatController"]
+    Worker["GuiConnectionWorker\n独立收发线程"]
+    TLS["C++ TLS / TCP\n4-byte length + UTF-8 JSON"]
+    Server["Go Server\nHub + SQLite"]
 
-## Go server concurrency
+    UI <--> Channel <--> Bridge <--> Controller <--> Worker <--> TLS <--> Server
+```
 
-~~~mermaid
+正式用户界面为 React + Qt WebEngine。React 只负责界面状态和用户交互，不直接处理 socket、TLS、证书、密码、线程或数据库。`ChatBridge` 是 Web UI 与既有 C++ 业务层之间唯一的桥接边界。
+
+React 生产资源先由 Vite 构建，再嵌入 Qt 资源系统，运行时从 `qrc:/frontend/index.html` 加载。因此发布包不需要 Node.js，开发者源码路径才需要 Node.js 用于构建。
+
+## Go 服务端
+
+```mermaid
 flowchart TD
-    L["net.Listen 0.0.0.0:8888"] --> A["Accept loop"]
-    A --> C["One connection goroutine"]
-    C --> R["Login + readPump"]
-    R --> H["Hub channel events"]
-    H --> B["Broadcast / users response / unregister"]
-    B --> Q["Client.Send"]
-    Q --> P["writePump"]
-~~~
+    Listener["TLS listener :8888"] --> Accept["Accept loop"]
+    Accept --> Connection["每个连接一个 goroutine"]
+    Connection --> Read["登录与 read pump"]
+    Read --> Hub["Hub goroutine"]
+    Hub --> Writer["每客户端 Send 队列"]
+    Writer --> Write["write pump"]
+```
 
-Hub 是客户端 map、Send channel 和 user_code 集合的唯一所有者，避免多个 goroutine 随意修改共享 map 或向已关闭 channel 写入。
+服务端负责 TLS 连接、账号校验、频道/私信分发、离线私信、管理员操作和 SQLite 消息持久化。Hub 是在线连接与广播状态的唯一拥有者，避免多个 goroutine 并发修改共享状态。
 
-## C++ client concurrency
+## 发布边界
 
-~~~mermaid
-flowchart LR
-    M["Main thread<br/>input"] -->|"thread-safe send"| CS["ConnectionState<br/>socket + login state"]
-    CS --> N["Current Winsock TCP socket"]
-    N --> R["Receive thread<br/>recv frame + parse JSON"]
-    R --> RC["Reconnect loop<br/>1/2/4/8/16/30s backoff"]
-    RC -->|"login + login_ok"| CS
-    R --> O["UTF-8 console output"]
-    M --> X["running + reconnect_enabled"]
-    R --> X
-    X --> J["stop + join + one socket close + WSACleanup"]
-~~~
+| 路径 | 面向对象 | 是否携带私钥 / 数据库 | 是否自动编译 |
+| --- | --- | --- | --- |
+| 源码启动器包 | 房主、开发者 | 否；房主本机运行时生成 | 首次确认后允许 |
+| 成员测试包 | 局域网成员 | 否 | 否 |
 
-## Network topology
+`server-lan.key` 只存在于房主机。成员仅使用房主提供的 IPv4、端口和 `server-lan.crt`。
 
-~~~mermaid
-flowchart TB
-    Router["Router / LAN<br/>192.168.0.1"]
-    Ethernet["Ethernet Server<br/>192.168.0.3:8888"]
-    WifiA["Wi-Fi Client<br/>192.168.0.108"]
-    WifiB["Wi-Fi Client B"]
-    Router --- Ethernet
-    Router --- WifiA
-    Router --- WifiB
-~~~
+## 兼容与诊断
 
-Stage 9 已验证 Ethernet 服务端 192.168.0.3 与 Wi-Fi 客户端 192.168.0.108 可以建立 TCP 连接并完成聊天。
+QML 代码仍保留在源码中，仅用于内部故障诊断：现代构建默认启动 WebEngine，运行 `lan-chat-gui.exe --legacy-qml` 才会显式进入 QML 回退界面。旧 CLI 客户端不再属于 README、发布包或默认构建入口。
