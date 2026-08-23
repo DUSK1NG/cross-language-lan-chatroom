@@ -64,6 +64,8 @@ server-go/main.go                           Go Server 参数与 TLS 监听
 server-go/auto_cert.go                      首次 TLS 证书生成
 scripts/build-modern.ps1                    现代构建、CTest
 scripts/package-unified-release.ps1         单一房主/成员运行包
+scripts/package-installer.ps1                Inno Setup 安装器构建与预检
+installer/LANChat.iss                        每用户安装、快捷方式和卸载项定义
 scripts/test-member-package.ps1             运行包安全与烟雾检查
 docs/release-setup.md                       面向用户的局域网使用说明
 ```

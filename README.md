@@ -21,13 +21,15 @@
 
 | 场景 | 获取内容 | 启动方式 | 是否需要编译器 |
 | --- | --- | --- | --- |
-| 房主和局域网成员 | `LANChat-Windows-x64.zip` | 双击 `lan-chat-gui.exe` | 不需要；同一程序可创建本地聊天室或加入局域网聊天室 |
+| 房主和局域网成员（推荐） | `LANChat-Setup-x64.exe` | 双击安装；创建桌面/开始菜单快捷方式 | 不需要；同一程序可创建本地聊天室或加入局域网聊天室 |
+| 房主和局域网成员（便携） | `LANChat-Windows-x64.zip` | 解压后双击 `lan-chat-gui.exe` | 不需要；同一程序可创建本地聊天室或加入局域网聊天室 |
 | 开发者（可选） | `LANChat-Source-Launcher-windows-x64.zip` | 双击 `LANChat-Launcher.exe` | 首次明确确认后自动准备工具链，后续增量构建 |
 
 标准 Windows 统一运行包由维护者在 Windows 发布机构建：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1
 ```
 
 GitHub 源码启动器仅供开发者使用，由维护者在 Windows 发布机构建：
@@ -49,14 +51,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1
 
 ### 房主：创建本地聊天室
 
-1. 启动现代客户端，选择“创建本地聊天室”。
+1. 安装 `LANChat-Setup-x64.exe` 或完整解压 `LANChat-Windows-x64.zip`，启动现代客户端并选择“创建本地聊天室”。
 2. 填写自己的用户名和用户代码，点击“启动并连接”。
 3. 程序会在本机启动 Go Server；首次使用时生成服务器证书、私钥和数据库。
 4. 通过 `ipconfig` 获取本机真实局域网 IPv4，并将 IPv4、端口 `8888` 和公开证书 `server-lan.crt` 提供给成员。
 
 ### 成员：加入局域网聊天室
 
-1. 完整解压 `LANChat-Windows-x64.zip`，不要只复制单个 EXE。
+1. 安装 `LANChat-Setup-x64.exe`，或完整解压 `LANChat-Windows-x64.zip`；不要只复制单个 EXE。
 2. 启动 `lan-chat-gui.exe`，选择“加入局域网聊天室”。
 3. 填写房主的真实局域网 IPv4、端口 `8888`、自己的用户名/用户代码，并选择房主提供的 `server-lan.crt`。
 

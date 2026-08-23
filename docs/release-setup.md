@@ -4,20 +4,22 @@ LAN Chat 使用现代 React + Qt WebEngine 客户端。标准 Windows 交付是�
 
 | 包 | 用途 | 包含内容 | 不包含内容 |
 | --- | --- | --- | --- |
-| `LANChat-Windows-x64.zip` | 房主和局域网成员 | 现代 GUI、Qt 运行时与 `server-go\chat-server.exe` | 初始私钥、证书、数据库、源码、编译器、自动编译入口 |
+| `LANChat-Setup-x64.exe` | 房主和局域网成员（推荐） | 统一运行包的安装器、开始菜单/桌面快捷方式、卸载项 | 初始私钥、证书、数据库、源码、编译器、自动编译入口 |
+| `LANChat-Windows-x64.zip` | 房主和局域网成员（便携） | 现代 GUI、Qt 运行时与 `server-go\chat-server.exe` | 初始私钥、证书、数据库、源码、编译器、自动编译入口 |
 | `LANChat-Source-Launcher-windows-x64.zip` | 开发者（可选） | 源码与 `LANChat-Launcher.exe` | 私钥、数据库、聊天记录 |
 
 维护者生成标准统一运行包的命令：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1
 ```
 
 统一运行包面向所有普通用户：双击即可运行，不需要构建工具。源码启动器仍作为开发者可选工具，双击后可以在明确确认依赖安装后自动构建。
 
 ## 房主：创建本地聊天室
 
-1. 解压 `LANChat-Windows-x64.zip`，双击根目录 `lan-chat-gui.exe`。
+1. 运行 `LANChat-Setup-x64.exe` 安装，或解压 `LANChat-Windows-x64.zip` 后双击根目录 `lan-chat-gui.exe`。
 2. 选择“创建本地聊天室”，填写自己的用户名和用户代码。
 3. 点击“启动并连接”。程序会启动本机 Go Server；首次使用时在 `server-go\certs` 与 `server-go\chat.db` 自动生成证书、私钥和数据库。
 4. 用 `ipconfig` 查看房主的 IPv4，把 **IPv4、端口 `8888`、`server-lan.crt`** 发给成员。
@@ -26,12 +28,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-re
 
 ## 成员：加入局域网聊天室
 
-1. 解压 `LANChat-Windows-x64.zip`，双击根目录 `lan-chat-gui.exe`。
+1. 运行 `LANChat-Setup-x64.exe` 安装，或解压 `LANChat-Windows-x64.zip` 后双击根目录 `lan-chat-gui.exe`。
 2. 选择“加入局域网聊天室”。
 3. 填写房主的真实 IPv4、端口 `8888`、自己的用户名和用户代码。
 4. 选择房主提供的公开证书 `server-lan.crt`，然后连接。
 
 同机测试可填 `127.0.0.1`；跨电脑测试不能填该地址。成员使用同一程序加入房主，只有房主选择“创建本地聊天室”时才会启动本地服务端。
+
+## 卸载
+
+通过 Windows“设置 → 应用 → 已安装的应用”卸载 `LAN Chat`，或运行安装目录中的 `unins000.exe`。卸载器会删除程序与快捷方式，但会保留房主运行后生成的证书、私钥和数据库，避免静默删除聊天数据；确认不再需要时再手动删除安装目录残留的 `server-go` 文件夹。
 
 ## 连接失败排查
 

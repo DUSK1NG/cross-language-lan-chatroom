@@ -16,9 +16,12 @@ cd C:\path\to\chat_X
 git status --short
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -ValidateOnly
 ```
 
 验收要求：工作树只包含预期文档或源码改动；现代构建的 CTest 通过；统一运行 ZIP 的安全检查与烟雾检查通过。
+
+安装器可用时还应手工确认：安装完成后桌面和开始菜单快捷方式都可启动现代 GUI；Windows“已安装的应用”出现 `LAN Chat`；卸载后程序与快捷方式被移除，而房主生成的证书和数据库不会被静默删除。
 
 ## 交付边界
 

@@ -16,13 +16,20 @@ ctest --test-dir .\out\launcher-release --output-on-failure
 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-source-launcher.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1
 ```
 
 要求：工作区只包含预期改动；现代构建与全部 CTest 通过；源码启动器 dry-run 测试通过。
 
 ## 发布资产
 
-### 1. 统一运行包
+### 1. Windows 安装器
+
+文件名：`LANChat-Setup-x64.exe`
+
+使用 `scripts\package-installer.ps1` 从已经验证的统一运行目录生成。安装器按当前用户安装，不请求管理员权限；默认创建桌面与开始菜单快捷方式，并在 Windows“已安装的应用”中注册卸载项。卸载程序与快捷方式时保留房主运行后生成的私钥和数据库，避免静默删除数据。
+
+### 2. 统一运行包（便携）
 
 文件名：`LANChat-Windows-x64.zip`
 
@@ -32,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-re
 
 产物固定为 `release\LANChat-Windows-x64\` 与 `release\LANChat-Windows-x64.zip`。脚本会部署 Qt WebEngine、OpenSSL 与 MSVC 运行时，加入已构建的 Go Server，执行烟雾检查，并拒绝把证书、私钥、数据库、源码或构建工具打进包中。
 
-### 2. 源码启动器包（开发者可选）
+### 3. 源码启动器包（开发者可选）
 
 文件名：`LANChat-Source-Launcher-windows-x64.zip`
 
