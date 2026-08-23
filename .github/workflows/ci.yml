@@ -61,6 +61,9 @@ jobs:
       - name: Test launcher dry run
         shell: pwsh
         run: ctest --test-dir .\out\ci-launcher -C Release --output-on-failure
+      - name: Test GUI launch switch forwarding
+        shell: pwsh
+        run: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\start-gui-wait-regression.ps1
       - name: Parse source launcher scripts
         shell: pwsh
         run: |
@@ -70,7 +73,8 @@ jobs:
             '.\scripts\install-modern-toolchain.ps1',
             '.\scripts\package-release.ps1',
             '.\scripts\start-gui.ps1',
-            '.\scripts\test-member-package.ps1'
+            '.\scripts\test-member-package.ps1',
+            '.\scripts\tests\start-gui-wait-regression.ps1'
           )
           foreach ($script in $scripts) {
             $tokens = $null

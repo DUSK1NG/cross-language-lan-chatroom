@@ -11,5 +11,16 @@ if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
     throw "Missing modern build script: $buildScript"
 }
 
-& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $buildScript -Action Launch -Wait:$Wait
+$buildArguments = @(
+    '-NoLogo',
+    '-NoProfile',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', $buildScript,
+    '-Action', 'Launch'
+)
+if ($Wait.IsPresent) {
+    $buildArguments += '-Wait'
+}
+
+& powershell.exe @buildArguments
 exit $LASTEXITCODE
