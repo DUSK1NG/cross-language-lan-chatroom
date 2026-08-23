@@ -96,11 +96,6 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
     stopReceiveLoop();
     connection_.reset();
 
-    if (!QFileInfo::exists(absoluteCertFile) || !QFileInfo::exists(absoluteKeyFile)) {
-        emit connectionFailed(QStringLiteral("Local Host certificate or private key file is missing."));
-        return;
-    }
-
     if (!QFileInfo::exists(absoluteServerExe)) {
         emit connectionFailed(QStringLiteral("本地 Go Server 文件不存在，请检查 Host 路径"));
         return;
@@ -154,6 +149,11 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
         emit connectionFailed(QStringLiteral("本地 Go Server 启动后退出") +
                               (error.isEmpty() ? QString() : QStringLiteral("：") + error));
         hostProcess_.reset();
+        return;
+    }
+    if (!QFileInfo::exists(absoluteCertFile) || !QFileInfo::exists(absoluteKeyFile)) {
+        emit connectionFailed(QStringLiteral("本地 Go Server 未生成 TLS 证书，请检查 Host 路径和目录写入权限。"));
+        stopHostedServer();
         return;
     }
     connectToServerWithRetries(QStringLiteral("127.0.0.1"), kLocalHostPort,

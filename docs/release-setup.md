@@ -1,39 +1,37 @@
 # LAN Chat 发布与局域网使用说明
 
-LAN Chat 使用现代 React + Qt WebEngine 客户端。发布时分为两个用途明确的包，避免把房主密钥或开发工具发给成员。
+LAN Chat 使用现代 React + Qt WebEngine 客户端。标准 Windows 交付是统一运行包：同一份包可在任意电脑上作为房主创建本地聊天室，也可作为成员加入局域网聊天室。
 
 | 包 | 用途 | 包含内容 | 不包含内容 |
 | --- | --- | --- | --- |
-| `LANChat-Source-Launcher-windows-x64.zip` | 房主、开发者 | 源码与 `LANChat-Launcher.exe` | 私钥、数据库、聊天记录 |
-| `LANChat-member-modern-x64.zip` | 另一台电脑的成员测试 | 已部署现代 GUI、Qt 运行时、公开 CA 证书位置说明 | 源码、编译器、Go Server、私钥、数据库、自动编译入口 |
+| `LANChat-Windows-x64.zip` | 房主和局域网成员 | 现代 GUI、Qt 运行时与 `server-go\chat-server.exe` | 初始私钥、证书、数据库、源码、编译器、自动编译入口 |
+| `LANChat-Source-Launcher-windows-x64.zip` | 开发者（可选） | 源码与 `LANChat-Launcher.exe` | 私钥、数据库、聊天记录 |
 
-维护者生成两个包的命令：
+维护者生成标准统一运行包的命令：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-source-launcher.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
 ```
 
-第一个包面向 GitHub 下载者：双击后可以在明确确认依赖安装后自动构建。第二个包只面向局域网成员测试：双击即可运行，但绝不包含自动编译或服务端能力。
+统一运行包面向所有普通用户：双击即可运行，不需要构建工具。源码启动器仍作为开发者可选工具，双击后可以在明确确认依赖安装后自动构建。
 
 ## 房主：创建本地聊天室
 
-1. 解压源码启动器包，双击 `LANChat-Launcher.exe`。
-2. 第一次启动会检查 Node.js、pnpm、Go、MSVC、Qt WebEngine 与 OpenSSL。缺失时会说明将安装的内容，输入 `Y` 后才会继续。
-3. 现代客户端启动后选择“创建本地聊天室”，填写自己的用户名和用户代码。
-4. 点击“启动并连接”。程序会启动本机 Go Server；首次使用时生成证书、私钥和数据库。
-5. 用 `ipconfig` 查看房主的 IPv4，把 **IPv4、端口 `8888`、`server-lan.crt`** 发给成员。
+1. 解压 `LANChat-Windows-x64.zip`，双击根目录 `lan-chat-gui.exe`。
+2. 选择“创建本地聊天室”，填写自己的用户名和用户代码。
+3. 点击“启动并连接”。程序会启动本机 Go Server；首次使用时在 `server-go\certs` 与 `server-go\chat.db` 自动生成证书、私钥和数据库。
+4. 用 `ipconfig` 查看房主的 IPv4，把 **IPv4、端口 `8888`、`server-lan.crt`** 发给成员。
 
 首次 Windows 防火墙询问时，只允许 `chat-server.exe` 通过“专用网络”。不要关闭整个防火墙。
 
 ## 成员：加入局域网聊天室
 
-1. 解压 `LANChat-member-modern-x64.zip`，双击根目录 `lan-chat-gui.exe`。
+1. 解压 `LANChat-Windows-x64.zip`，双击根目录 `lan-chat-gui.exe`。
 2. 选择“加入局域网聊天室”。
 3. 填写房主的真实 IPv4、端口 `8888`、自己的用户名和用户代码。
 4. 选择房主提供的公开证书 `server-lan.crt`，然后连接。
 
-同机测试可填 `127.0.0.1`；跨电脑测试不能填该地址。成员包不启动服务器，也不执行自动编译。
+同机测试可填 `127.0.0.1`；跨电脑测试不能填该地址。成员使用同一程序加入房主，只有房主选择“创建本地聊天室”时才会启动本地服务端。
 
 ## 连接失败排查
 

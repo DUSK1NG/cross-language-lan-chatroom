@@ -27,9 +27,11 @@ HostPathResolver::HostPaths pathsForRoot(const QString& root) {
 namespace HostPathResolver {
 
 bool HostPaths::available() const {
-    return !existingFile(serverExe).isEmpty()
-        && !existingFile(certFile).isEmpty()
-        && !existingFile(keyFile).isEmpty();
+    // A unified runtime package ships the server but intentionally ships no
+    // host certificate or private key. The server receives -auto-cert and
+    // creates that pair locally on the first host start, so only the server
+    // executable determines whether Local Host is available.
+    return !existingFile(serverExe).isEmpty();
 }
 
 HostPaths resolveHostPaths(const QString& applicationDirectory) {

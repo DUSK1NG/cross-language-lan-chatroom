@@ -37,10 +37,10 @@ flowchart TD
 
 | 路径 | 面向对象 | 是否携带私钥 / 数据库 | 是否自动编译 |
 | --- | --- | --- | --- |
-| 源码启动器包 | 房主、开发者 | 否；房主本机运行时生成 | 首次确认后允许 |
-| 成员测试包 | 局域网成员 | 否 | 否 |
+| 统一运行包 `LANChat-Windows-x64.zip` | 房主和局域网成员 | 否；仅房主本机首次运行时生成 | 否 |
+| 源码启动器包（可选） | 开发者 | 否；房主本机运行时生成 | 首次确认后允许 |
 
-`server-lan.key` 只存在于房主机。成员仅使用房主提供的 IPv4、端口和 `server-lan.crt`。
+统一运行包包含已部署 GUI 与 `server-go\chat-server.exe`，但不包含初始证书、私钥或数据库。房主选择“创建本地聊天室”后，Go Server 以 `-auto-cert` 在本机生成 `server-lan.key`、`server-lan.crt` 和 `chat.db`。成员仅使用房主提供的 IPv4、端口和 `server-lan.crt`。
 
 ## 兼容与诊断
 

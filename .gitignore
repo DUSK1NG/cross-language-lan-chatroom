@@ -5,6 +5,7 @@ server-go/.gocache*/
 
 # Stage build outputs
 server-go/chat-server.exe
+server-go/*.exe~
 client-cpp/chat-client.exe
 client-cpp/protocol-tests.exe
 client-cpp/*-direct.exe

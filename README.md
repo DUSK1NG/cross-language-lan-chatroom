@@ -13,7 +13,7 @@
 | 网络与加密 | C++、OpenSSL 3、TLS/TCP | 负责连接、证书校验、消息帧读写与后台工作线程。 |
 | 服务端与存储 | Go 1.20、SQLite（modernc.org/sqlite） | 负责账号、房间、私信、权限、离线消息和本地持久化。 |
 | 协议 | 4-byte big-endian 长度帧、UTF-8 JSON | 跨 Go/C++ 的确定性消息边界，单条载荷上限 64 KiB。 |
-| 构建与交付 | CMake、Ninja、pnpm、PowerShell、GitHub Actions | 统一构建、测试、源码启动器和 Windows 成员端打包。 |
+| 构建与交付 | CMake、Ninja、pnpm、PowerShell、GitHub Actions | 统一构建、测试、源码启动器和 Windows 统一运行包打包。 |
 
 核心链路：`React/TypeScript → QWebChannel → C++ 控制器 → TLS/TCP → Go Server → SQLite`
 
@@ -21,10 +21,16 @@
 
 | 场景 | 获取内容 | 启动方式 | 是否需要编译器 |
 | --- | --- | --- | --- |
-| 房主 / 开发者 | `LANChat-Source-Launcher-windows-x64.zip` | 双击 `LANChat-Launcher.exe` | 首次明确确认后自动准备工具链，后续增量构建 |
-| 局域网成员 | `LANChat-member-modern-x64.zip` | 双击 `lan-chat-gui.exe` | 不需要；它不能编译或启动服务端 |
+| 房主和局域网成员 | `LANChat-Windows-x64.zip` | 双击 `lan-chat-gui.exe` | 不需要；同一程序可创建本地聊天室或加入局域网聊天室 |
+| 开发者（可选） | `LANChat-Source-Launcher-windows-x64.zip` | 双击 `LANChat-Launcher.exe` | 首次明确确认后自动准备工具链，后续增量构建 |
 
-GitHub 源码启动器包由维护者在 Windows 发布机构建：
+标准 Windows 统一运行包由维护者在 Windows 发布机构建：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
+```
+
+GitHub 源码启动器仅供开发者使用，由维护者在 Windows 发布机构建：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-source-launcher.ps1
@@ -50,7 +56,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1
 
 ### 成员：加入局域网聊天室
 
-1. 完整解压成员包，不要只复制单个 EXE。
+1. 完整解压 `LANChat-Windows-x64.zip`，不要只复制单个 EXE。
 2. 启动 `lan-chat-gui.exe`，选择“加入局域网聊天室”。
 3. 填写房主的真实局域网 IPv4、端口 `8888`、自己的用户名/用户代码，并选择房主提供的 `server-lan.crt`。
 

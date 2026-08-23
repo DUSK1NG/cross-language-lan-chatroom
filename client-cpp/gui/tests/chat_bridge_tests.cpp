@@ -262,7 +262,7 @@ void ChatBridgeTests::serverConnectionCompletesWithoutMessageLifetimeCorruption(
     QVERIFY2(winsock.result() == 0, "WSAStartup failed");
     const HostPathResolver::HostPaths hostPaths =
         HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
-    if (!hostPaths.available()) {
+    if (!hostPaths.available() || !QFileInfo::exists(hostPaths.certFile)) {
         QSKIP("TLS integration certificate is not available in this checkout");
     }
 

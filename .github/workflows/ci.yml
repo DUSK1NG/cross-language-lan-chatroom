@@ -72,6 +72,7 @@ jobs:
             '.\scripts\build-modern.ps1',
             '.\scripts\install-modern-toolchain.ps1',
             '.\scripts\package-release.ps1',
+            '.\scripts\package-unified-release.ps1',
             '.\scripts\start-gui.ps1',
             '.\scripts\test-member-package.ps1',
             '.\scripts\tests\start-gui-wait-regression.ps1'

@@ -14,6 +14,7 @@ private slots:
     void findsBundledServerKey();
     void returnsEmptyWhenNoCandidateExists();
     void marksMemberPackageWithoutServerAsUnavailable();
+    void marksBundledServerAsAvailableBeforeFirstCertificate();
     void findsHostFilesFromDevelopmentBuildDirectory();
     void findsHostFilesFromUnifiedOutputDirectory();
 };
@@ -61,6 +62,21 @@ void HostPathResolverTests::marksMemberPackageWithoutServerAsUnavailable() {
 
     QCOMPARE(paths.certFile, QFileInfo(cert).absoluteFilePath());
     QVERIFY(!paths.available());
+}
+
+void HostPathResolverTests::marksBundledServerAsAvailableBeforeFirstCertificate() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString server = QDir(temp.path()).filePath("server-go/chat-server.exe");
+    QVERIFY(QDir().mkpath(QFileInfo(server).absolutePath()));
+    QVERIFY(QFile(server).open(QIODevice::WriteOnly));
+
+    const HostPathResolver::HostPaths paths = HostPathResolver::resolveHostPaths(temp.path());
+
+    QCOMPARE(paths.serverExe, QFileInfo(server).absoluteFilePath());
+    QVERIFY(!QFileInfo::exists(paths.certFile));
+    QVERIFY(!QFileInfo::exists(paths.keyFile));
+    QVERIFY(paths.available());
 }
 
 void HostPathResolverTests::findsHostFilesFromDevelopmentBuildDirectory() {

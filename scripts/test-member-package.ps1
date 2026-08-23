@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)]
     [string]$PackageDirectory,
-    [switch]$Smoke
+    [switch]$Smoke,
+    [switch]$AllowLocalHost
 )
 
 Set-StrictMode -Version Latest
@@ -16,7 +17,7 @@ if (-not (Test-Path -LiteralPath $PackageDirectory -PathType Container)) {
 function Require-File([string]$RelativePath) {
     $path = Join-Path $PackageDirectory $RelativePath
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Member package is missing required file: $RelativePath"
+        throw "Runtime package is missing required file: $RelativePath"
     }
 }
 
@@ -30,38 +31,51 @@ foreach ($relativePath in @(
     'platforms\qwindows.dll',
     'resources\icudtl.dat',
     'resources\qtwebengine_resources.pak',
-    'resources\v8_context_snapshot.bin',
-    'README-member.md'
+    'resources\v8_context_snapshot.bin'
 )) {
     Require-File $relativePath
 }
 
+if ($AllowLocalHost.IsPresent) {
+    Require-File 'server-go\chat-server.exe'
+    Require-File 'README.md'
+} else {
+    Require-File 'README-member.md'
+}
+
 foreach ($pattern in @('libssl-*.dll', 'libcrypto-*.dll', 'msvcp140*.dll', 'vcruntime140*.dll')) {
     if (@(Get-ChildItem -LiteralPath $PackageDirectory -Filter $pattern -File).Count -eq 0) {
-        throw "Member package is missing runtime matching: $pattern"
+        throw "Runtime package is missing runtime matching: $pattern"
     }
 }
 
 $localesDirectory = Join-Path $PackageDirectory 'translations\qtwebengine_locales'
 if (@(Get-ChildItem -LiteralPath $localesDirectory -Filter '*.pak' -File -ErrorAction SilentlyContinue).Count -eq 0) {
-    throw 'Member package is missing Qt WebEngine locales.'
+    throw 'Runtime package is missing Qt WebEngine locales.'
 }
 
-foreach ($forbiddenDirectory in @('server-go', '.git', 'frontend', 'client-cpp', 'scripts', 'tools')) {
+foreach ($forbiddenDirectory in @('.git', 'frontend', 'client-cpp', 'scripts', 'tools')) {
     if (Test-Path -LiteralPath (Join-Path $PackageDirectory $forbiddenDirectory)) {
-        throw "Member package contains forbidden directory: $forbiddenDirectory"
+        throw "Runtime package contains forbidden directory: $forbiddenDirectory"
     }
+}
+if (-not $AllowLocalHost.IsPresent -and (Test-Path -LiteralPath (Join-Path $PackageDirectory 'server-go'))) {
+    throw 'Member package contains forbidden directory: server-go'
+}
+if ($AllowLocalHost.IsPresent -and (Test-Path -LiteralPath (Join-Path $PackageDirectory 'server-go\certs'))) {
+    throw 'Unified runtime package must not contain a host certificate directory.'
 }
 
 $forbiddenFiles = @(Get-ChildItem -LiteralPath $PackageDirectory -Recurse -File |
     Where-Object {
         $_.Name -like '*.key' -or $_.Name -like '*.pem' -or $_.Name -like '*.crt' -or
-        $_.Name -like '*.db' -or $_.Name -eq 'chat-server.exe' -or $_.Name -eq 'LANChat-Launcher.exe' -or
+        $_.Name -like '*.db' -or ($_.Name -eq 'chat-server.exe' -and -not $AllowLocalHost.IsPresent) -or
+        $_.Name -eq 'LANChat-Launcher.exe' -or
         $_.Name -eq 'node.exe' -or $_.Name -eq 'npm.cmd' -or $_.Name -eq 'pnpm.cmd' -or $_.Name -eq 'go.exe'
     })
 if ($forbiddenFiles.Count -gt 0) {
     $names = ($forbiddenFiles | ForEach-Object { $_.FullName }) -join '; '
-    throw "Member package contains forbidden files: $names"
+    throw "Runtime package contains forbidden files: $names"
 }
 
 if ($Smoke) {
@@ -76,7 +90,7 @@ if ($Smoke) {
         Start-Sleep -Milliseconds 3000
         $process.Refresh()
         if ($process.HasExited) {
-            throw "Member GUI exited during smoke test with code $($process.ExitCode)."
+            throw "Runtime GUI exited during smoke test with code $($process.ExitCode)."
         }
     } finally {
         $env:PATH = $previousPath
@@ -86,4 +100,8 @@ if ($Smoke) {
     }
 }
 
-Write-Host "Member package validation passed: $PackageDirectory" -ForegroundColor Green
+if ($AllowLocalHost.IsPresent) {
+    Write-Host "Unified runtime package validation passed: $PackageDirectory" -ForegroundColor Green
+} else {
+    Write-Host "Member package validation passed: $PackageDirectory" -ForegroundColor Green
+}

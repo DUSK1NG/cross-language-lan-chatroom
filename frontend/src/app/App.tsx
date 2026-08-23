@@ -207,7 +207,7 @@ function LocalHostPage({ bridge, state, onBack }: {
               <input id="key-file" value={keyFile} onChange={(event) => { setKeyFile(event.target.value); setKeyFileManuallyEdited(true); }} />
               <button className="secondary-button" type="button" aria-label="auto-detect-private-key" onClick={autoDetectKeyFile}>自动检测</button>
             </div>
-            <small className="field-hint">{keyFileManuallyEdited ? '已使用手动私钥路径' : keyFile ? '已自动检测私钥路径' : '未找到私钥，请手动填写'}</small>
+            <small className="field-hint">{keyFileManuallyEdited ? '已使用手动私钥路径' : '首次启动时会在此路径自动生成私钥'}</small>
           </div>
           <label htmlFor="database-file">数据库文件</label>
           <input id="database-file" value={dbFile} onChange={(event) => setDbFile(event.target.value)} />
