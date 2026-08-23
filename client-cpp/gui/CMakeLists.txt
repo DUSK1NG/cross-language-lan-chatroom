@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Test)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Test Network)
 find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
 find_package(Threads REQUIRED)
 
@@ -107,6 +107,7 @@ qt_add_qml_module(lan-chat-gui
 target_link_libraries(lan-chat-gui PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
+    Qt6::Network
     ws2_32
     Threads::Threads
     OpenSSL::SSL
@@ -230,6 +231,7 @@ target_link_libraries(chat-bridge-tests PRIVATE
     Qt6::Gui
     Qt6::Quick
     Qt6::Test
+    Qt6::Network
     ws2_32
     Threads::Threads
     OpenSSL::SSL

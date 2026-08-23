@@ -2,6 +2,7 @@
 #include "gui_chat_controller.hpp"
 #include "gui_connection_worker.hpp"
 #include "graphics_info.hpp"
+#include "host_path_resolver.hpp"
 #include "performance_profile.hpp"
 
 #include <QJsonDocument>
@@ -259,34 +260,27 @@ void ChatBridgeTests::workerDisconnectRunsOnWorkerThread() {
 void ChatBridgeTests::serverConnectionCompletesWithoutMessageLifetimeCorruption() {
     WinsockScope winsock;
     QVERIFY2(winsock.result() == 0, "WSAStartup failed");
-    const QString projectRoot = QDir::cleanPath(
-        QDir(QCoreApplication::applicationDirPath()).filePath("../../.."));
-    const QString certFile = QDir(projectRoot).filePath("server-go/certs/server-lan.crt");
-    if (!QFileInfo::exists(certFile)) {
+    const HostPathResolver::HostPaths hostPaths =
+        HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
+    if (!hostPaths.available()) {
         QSKIP("TLS integration certificate is not available in this checkout");
     }
 
     GuiChatController controller;
     QSignalSpy connectedSpy(&controller, &GuiChatController::connectedChanged);
     QSignalSpy failedSpy(&controller, &GuiChatController::connectionFailed);
-    controller.connectToServer("127.0.0.1", 8888, "Alice", "A001", certFile);
+    controller.connectToServer("127.0.0.1", 8888, "Alice", "A001", hostPaths.certFile);
 
     QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() > 0 || failedSpy.count() > 0, 10000);
-    QVERIFY2(connectedSpy.count() > 0 || failedSpy.count() > 0,
-             "local Host did not report a connection result");
+    QVERIFY2(connectedSpy.count() > 0, "local Host connection did not succeed");
     controller.disconnectFromServer();
     QTest::qWait(100);
 }
 
 void ChatBridgeTests::localHostConnectionCompletesWithoutMessageLifetimeCorruption() {
-    const QString projectRoot = QDir::cleanPath(
-        QDir(QCoreApplication::applicationDirPath()).filePath("../../.."));
-    const QString serverExe = QDir(projectRoot).filePath("server-go/chat-server.exe");
-    const QString certFile = QDir(projectRoot).filePath("server-go/certs/server-lan.crt");
-    const QString keyFile = QDir(projectRoot).filePath("server-go/certs/server-lan.key");
-    const QString dbFile = QDir(projectRoot).filePath("server-go/chat.db");
-    if (!QFileInfo::exists(serverExe) || !QFileInfo::exists(certFile) ||
-        !QFileInfo::exists(keyFile) || !QFileInfo::exists(dbFile)) {
+    const HostPathResolver::HostPaths hostPaths =
+        HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
+    if (!hostPaths.available() || !QFileInfo::exists(hostPaths.dbFile)) {
         QSKIP("Local Host integration files are not available in this checkout");
     }
 
@@ -295,11 +289,11 @@ void ChatBridgeTests::localHostConnectionCompletesWithoutMessageLifetimeCorrupti
     GuiChatController controller;
     QSignalSpy connectedSpy(&controller, &GuiChatController::connectedChanged);
     QSignalSpy failedSpy(&controller, &GuiChatController::connectionFailed);
-    controller.connectToLocalHost(serverExe, certFile, keyFile, dbFile, "Alice", "A001");
+    controller.connectToLocalHost(hostPaths.serverExe, hostPaths.certFile, hostPaths.keyFile,
+                                  hostPaths.dbFile, "Alice", "A001");
 
     QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() > 0 || failedSpy.count() > 0, 12000);
-    QVERIFY2(connectedSpy.count() > 0 || failedSpy.count() > 0,
-             "local Host did not report a connection result");
+    QVERIFY2(connectedSpy.count() > 0, "local Host connection did not succeed");
     controller.disconnectFromServer();
     QTest::qWait(100);
 }

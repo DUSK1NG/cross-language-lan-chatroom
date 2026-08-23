@@ -64,6 +64,14 @@ signals:
                          bool isPrivate, const QVariantList& messages, bool hasMore);
 
 private:
+    bool connectToServerWithRetries(const QString& serverIp,
+                                    int serverPort,
+                                    const QString& username,
+                                    const QString& userCode,
+                                    const QString& caFile,
+                                    int attempts);
+    bool isLocalServerListening(int timeoutMs) const;
+    void stopHostedServer();
     void receiveLoop();
     void stopReceiveLoop();
 

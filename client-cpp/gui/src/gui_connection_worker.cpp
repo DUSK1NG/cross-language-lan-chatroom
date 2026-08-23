@@ -3,14 +3,25 @@
 #include <utility>
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
+#include <QTcpSocket>
 #include <QThread>
 #include <QVariantMap>
+
+namespace {
+constexpr int kLocalHostPort = 8888;
+constexpr int kLocalHostProbeTimeoutMs = 150;
+constexpr int kLocalHostStartupTimeoutMs = 4000;
+constexpr int kLocalHostRetryAttempts = 8;
+constexpr int kLocalHostRetryDelayMs = 150;
+}
 
 GuiConnectionWorker::GuiConnectionWorker(QObject* parent) : QObject(parent) {}
 
 GuiConnectionWorker::~GuiConnectionWorker() {
     stopReceiveLoop();
+    stopHostedServer();
 }
 
 void GuiConnectionWorker::connectToServer(const QString& serverIp,
@@ -20,31 +31,50 @@ void GuiConnectionWorker::connectToServer(const QString& serverIp,
                                           const QString& caFile) {
     stopReceiveLoop();
 
-    connection::Config config{
-        serverIp.toStdString(),
-        serverPort,
-        username.toStdString(),
-        userCode.toStdString(),
-        caFile.toStdString(),
-    };
-    connection_ = std::make_unique<connection::ConnectionState>(std::move(config));
+    connectToServerWithRetries(serverIp, serverPort, username, userCode, caFile, 1);
+}
 
-    message::Message loginResponse;
+bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
+                                                      int serverPort,
+                                                      const QString& username,
+                                                      const QString& userCode,
+                                                      const QString& caFile,
+                                                      const int attempts) {
+    const int boundedAttempts = qMax(1, attempts);
+    QString lastReason;
     connection::LoginResult loginResult = connection::LoginResult::kRetryableFailure;
-    if (!connection_->connect_and_login(loginResponse, loginResult)) {
-        const QString reason = QString::fromStdString(connection_->last_error());
+
+    for (int attempt = 0; attempt < boundedAttempts; ++attempt) {
+        connection::Config config{
+            serverIp.toStdString(),
+            serverPort,
+            username.toStdString(),
+            userCode.toStdString(),
+            caFile.toStdString(),
+        };
+        connection_ = std::make_unique<connection::ConnectionState>(std::move(config));
+
+        message::Message loginResponse;
+        if (connection_->connect_and_login(loginResponse, loginResult)) {
+            running_.store(true);
+            receiveThread_ = std::thread(&GuiConnectionWorker::receiveLoop, this);
+            emit connected(loginResponse.is_admin);
+            return true;
+        }
+
+        lastReason = QString::fromStdString(connection_->last_error());
         connection_.reset();
         if (loginResult == connection::LoginResult::kRejected) {
-            emit connectionFailed(QStringLiteral("Login rejected: ") + reason);
-        } else {
-            emit connectionFailed(reason);
+            emit connectionFailed(QStringLiteral("Login rejected: ") + lastReason);
+            return true;
         }
-        return;
+        if (attempt + 1 < boundedAttempts) {
+            QThread::msleep(kLocalHostRetryDelayMs);
+        }
     }
 
-    running_.store(true);
-    receiveThread_ = std::thread(&GuiConnectionWorker::receiveLoop, this);
-    emit connected(loginResponse.is_admin);
+    emit connectionFailed(lastReason.isEmpty() ? QStringLiteral("Connection failed") : lastReason);
+    return false;
 }
 
 void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
@@ -63,12 +93,28 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
     const QString absoluteKeyFile = resolvePath(keyFile);
     const QString absoluteDbFile = resolvePath(dbFile);
 
+    stopReceiveLoop();
+    connection_.reset();
+
+    if (!QFileInfo::exists(absoluteCertFile) || !QFileInfo::exists(absoluteKeyFile)) {
+        emit connectionFailed(QStringLiteral("Local Host certificate or private key file is missing."));
+        return;
+    }
+
     if (!QFileInfo::exists(absoluteServerExe)) {
         emit connectionFailed(QStringLiteral("本地 Go Server 文件不存在，请检查 Host 路径"));
         return;
     }
 
+    if (isLocalServerListening(kLocalHostProbeTimeoutMs)) {
+        connectToServerWithRetries(QStringLiteral("127.0.0.1"), kLocalHostPort,
+                                   username, userCode, absoluteCertFile, 2);
+        return;
+    }
+
+    stopHostedServer();
     hostProcess_ = std::make_unique<QProcess>();
+    hostProcess_->setProcessChannelMode(QProcess::SeparateChannels);
     hostProcess_->setProgram(absoluteServerExe);
     hostProcess_->setWorkingDirectory(QFileInfo(absoluteServerExe).absolutePath());
     hostProcess_->setArguments({"-cert", absoluteCertFile, "-key", absoluteKeyFile, "-auto-cert", "-db", absoluteDbFile,
@@ -79,7 +125,30 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
         hostProcess_.reset();
         return;
     }
-    QThread::msleep(700);
+    QString startupLog;
+    QElapsedTimer startupTimer;
+    startupTimer.start();
+    bool listening = false;
+    while (startupTimer.elapsed() < kLocalHostStartupTimeoutMs) {
+        const int remaining = kLocalHostStartupTimeoutMs - static_cast<int>(startupTimer.elapsed());
+        hostProcess_->waitForReadyRead(qMin(200, qMax(1, remaining)));
+        startupLog += QString::fromLocal8Bit(hostProcess_->readAllStandardError());
+        startupLog += QString::fromLocal8Bit(hostProcess_->readAllStandardOutput());
+        if (hostProcess_->state() == QProcess::NotRunning) break;
+        if (isLocalServerListening(kLocalHostProbeTimeoutMs)) {
+            listening = true;
+            break;
+        }
+    }
+    if (!listening) {
+        startupLog += QString::fromLocal8Bit(hostProcess_->readAllStandardError());
+        startupLog += QString::fromLocal8Bit(hostProcess_->readAllStandardOutput());
+        const QString detail = startupLog.trimmed();
+        emit connectionFailed(QStringLiteral("Local Go Server did not become ready") +
+                              (detail.isEmpty() ? QString() : QStringLiteral(": ") + detail));
+        stopHostedServer();
+        return;
+    }
     if (hostProcess_->state() != QProcess::Running) {
         const QString error = QString::fromLocal8Bit(hostProcess_->readAllStandardError()).trimmed();
         emit connectionFailed(QStringLiteral("本地 Go Server 启动后退出") +
@@ -87,18 +156,35 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
         hostProcess_.reset();
         return;
     }
-    connectToServer(QStringLiteral("127.0.0.1"), 8888, username, userCode, absoluteCertFile);
+    connectToServerWithRetries(QStringLiteral("127.0.0.1"), kLocalHostPort,
+                               username, userCode, absoluteCertFile, kLocalHostRetryAttempts);
 }
 
 void GuiConnectionWorker::disconnectFromServer() {
     stopReceiveLoop();
     connection_.reset();
-    if (hostProcess_) {
-        hostProcess_->terminate();
-        if (!hostProcess_->waitForFinished(1500)) hostProcess_->kill();
-        hostProcess_.reset();
-    }
+    stopHostedServer();
     emit disconnected();
+}
+
+bool GuiConnectionWorker::isLocalServerListening(const int timeoutMs) const {
+    QTcpSocket probe;
+    probe.connectToHost(QStringLiteral("127.0.0.1"), kLocalHostPort);
+    const bool connected = probe.waitForConnected(qMax(1, timeoutMs));
+    probe.abort();
+    return connected;
+}
+
+void GuiConnectionWorker::stopHostedServer() {
+    if (!hostProcess_) return;
+    if (hostProcess_->state() != QProcess::NotRunning) {
+        hostProcess_->terminate();
+        if (!hostProcess_->waitForFinished(1500)) {
+            hostProcess_->kill();
+            hostProcess_->waitForFinished(500);
+        }
+    }
+    hostProcess_.reset();
 }
 
 void GuiConnectionWorker::sendChat(const QString& content) {
