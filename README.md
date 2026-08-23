@@ -11,6 +11,12 @@
 | 房主 / 开发者 | `LANChat-Source-Launcher-windows-x64.zip` | 双击 `LANChat-Launcher.exe` | 首次按确认自动准备，之后增量构建 |
 | 局域网成员测试 | `LANChat-member-modern-x64.zip` | 双击 `lan-chat-gui.exe` | 不需要 |
 
+GitHub 源码启动器包由维护者在 Windows 发布机构建：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-source-launcher.ps1
+```
+
 发布资产尚未生成前，克隆源码后的本地启动命令是：
 
 ```powershell
@@ -64,7 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -
 
 该命令会构建前端、Go Server 和 Qt WebEngine GUI，并运行 CTest。构建产物固定在 `out\modern-msvc-x64`，不会提交到 Git。
 
-架构和开发边界见 [architecture.md](docs/architecture.md)，GitHub 发布清单见 [github-publishing.md](docs/github-publishing.md)。
+架构和开发边界见 [architecture.md](docs/architecture.md)，GitHub 发布清单见 [github-publishing.md](docs/github-publishing.md)，本次发布前验收项见 [release-acceptance.md](docs/release-acceptance.md)。
 
 ## 项目结构
 

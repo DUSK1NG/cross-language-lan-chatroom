@@ -7,6 +7,15 @@ LAN Chat 使用现代 React + Qt WebEngine 客户端。发布时分为两个用�
 | `LANChat-Source-Launcher-windows-x64.zip` | 房主、开发者 | 源码与 `LANChat-Launcher.exe` | 私钥、数据库、聊天记录 |
 | `LANChat-member-modern-x64.zip` | 另一台电脑的成员测试 | 已部署现代 GUI、Qt 运行时、公开 CA 证书位置说明 | 源码、编译器、Go Server、私钥、数据库、自动编译入口 |
 
+维护者生成两个包的命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-source-launcher.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
+```
+
+第一个包面向 GitHub 下载者：双击后可以在明确确认依赖安装后自动构建。第二个包只面向局域网成员测试：双击即可运行，但绝不包含自动编译或服务端能力。
+
 ## 房主：创建本地聊天室
 
 1. 解压源码启动器包，双击 `LANChat-Launcher.exe`。

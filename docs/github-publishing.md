@@ -13,6 +13,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -
 cmake -S .\tools\bootstrap -B .\out\launcher-release -G Ninja
 cmake --build .\out\launcher-release --target LANChat-Launcher --parallel 4
 ctest --test-dir .\out\launcher-release --output-on-failure
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-source-launcher.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
 ```
 
 要求：工作区只包含预期改动；现代构建与全部 CTest 通过；源码启动器 dry-run 测试通过。
@@ -23,7 +26,9 @@ ctest --test-dir .\out\launcher-release --output-on-failure
 
 文件名：`LANChat-Source-Launcher-windows-x64.zip`
 
-应包含完整源码、`scripts/`、`tools/bootstrap/` 和预编译的静态 `LANChat-Launcher.exe`。用户双击该 EXE 后，由 `scripts/bootstrap-github.ps1` 检查依赖、征求首次安装确认、安装 Node.js/pnpm 等工具链、增量构建并启动现代 GUI。
+使用 `scripts\package-source-launcher.ps1` 生成。它只复制 Git 跟踪的源码，并在压缩前后验证不含证书、私钥、数据库、构建输出和本机依赖缓存；随后把预编译的静态 `LANChat-Launcher.exe` 放在包根目录。
+
+用户双击该 EXE 后，由 `scripts/bootstrap-github.ps1` 检查依赖、征求首次安装确认、安装 Node.js/pnpm 等工具链、增量构建并启动现代 GUI。
 
 ### 2. 成员测试包
 
@@ -37,7 +42,7 @@ ctest --test-dir .\out\launcher-release --output-on-failure
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
 ```
 
-产物固定为 `release\LANChat-member-modern-x64\` 与 `release\LANChat-member-modern-x64.zip`。脚本会重建现代客户端，部署 Qt WebEngine、OpenSSL 与 MSVC 运行时，启动烟雾检查，并拒绝把服务端、证书、私钥、数据库、源码或构建工具打进包中。
+产物固定为 `release\LANChat-member-modern-x64\` 与 `release\LANChat-member-modern-x64.zip`。脚本会重建现代客户端，部署 Qt WebEngine、OpenSSL 与 MSVC 运行时，启动烟雾检查，并拒绝把服务端、证书、私钥、数据库、源码或构建工具打进包中。成员包只用于加入房主已创建的聊天室，不能自动编译或启动服务端。
 
 ## 严禁进入 GitHub 或 Release 资产的内容
 
