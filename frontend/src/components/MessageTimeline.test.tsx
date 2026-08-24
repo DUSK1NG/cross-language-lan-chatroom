@@ -1,4 +1,4 @@
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createFakeBridge } from '../bridge/chatBridge';
@@ -25,6 +25,18 @@ function message(messageId: string): MessageItemData {
   return { messageId, displayName: 'Alice', userCode: 'A001', time: '10:01', content: messageId, selfMessage: true, systemMessage: false };
 }
 
+function receivedMessage(messageId: string): MessageItemData {
+  return { messageId, displayName: 'Bob', userCode: 'B002', time: '10:01', content: messageId, selfMessage: false, systemMessage: false };
+}
+
+function setScrollableGeometry(element: HTMLElement, scrollTop: number) {
+  Object.defineProperties(element, {
+    scrollHeight: { configurable: true, value: 1000 },
+    clientHeight: { configurable: true, value: 200 },
+    scrollTop: { configurable: true, writable: true, value: scrollTop }
+  });
+}
+
 describe('MessageTimeline motion budget', () => {
   afterEach(() => {
     cleanup();
@@ -47,5 +59,49 @@ describe('MessageTimeline motion budget', () => {
     rerender(<MessageTimeline bridge={createFakeBridge(nextState)} state={nextState} />);
 
     expect(animateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a reader in history and reports how many received messages arrived', () => {
+    const firstState = { ...baseState, activeMessages: [receivedMessage('history-1')] };
+    const { rerender } = render(<MessageTimeline bridge={createFakeBridge(firstState)} state={firstState} />);
+    const timeline = screen.getByTestId('message-timeline');
+    setScrollableGeometry(timeline, 0);
+    fireEvent.scroll(timeline);
+
+    const nextState = { ...firstState, activeMessages: [...firstState.activeMessages, receivedMessage('new-1')] };
+    rerender(<MessageTimeline bridge={createFakeBridge(nextState)} state={nextState} />);
+
+    expect(screen.getByRole('button', { name: '查看 1 条新消息' })).toBeInTheDocument();
+    expect(timeline.scrollTop).toBe(0);
+  });
+
+  it('jumps to the latest message when the new-message indicator is selected', () => {
+    const firstState = { ...baseState, activeMessages: [receivedMessage('history-1')] };
+    const { rerender } = render(<MessageTimeline bridge={createFakeBridge(firstState)} state={firstState} />);
+    const timeline = screen.getByTestId('message-timeline');
+    setScrollableGeometry(timeline, 0);
+    fireEvent.scroll(timeline);
+
+    const nextState = { ...firstState, activeMessages: [...firstState.activeMessages, receivedMessage('new-1')] };
+    rerender(<MessageTimeline bridge={createFakeBridge(nextState)} state={nextState} />);
+    const indicator = document.querySelector<HTMLButtonElement>('.timeline-new-messages');
+    expect(indicator).not.toBeNull();
+    fireEvent.click(indicator!);
+
+    expect(timeline.scrollTop).toBe(1000);
+    expect(document.querySelector('.timeline-new-messages')).toBeNull();
+  });
+
+  it('follows the latest message for the sender even after they reviewed history', () => {
+    const firstState = { ...baseState, activeMessages: [receivedMessage('history-1')] };
+    const { rerender } = render(<MessageTimeline bridge={createFakeBridge(firstState)} state={firstState} />);
+    const timeline = screen.getByTestId('message-timeline');
+    setScrollableGeometry(timeline, 0);
+    fireEvent.scroll(timeline);
+
+    const nextState = { ...firstState, activeMessages: [...firstState.activeMessages, message('self-1')] };
+    rerender(<MessageTimeline bridge={createFakeBridge(nextState)} state={nextState} />);
+
+    expect(timeline.scrollTop).toBe(1000);
   });
 });

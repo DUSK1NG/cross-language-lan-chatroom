@@ -71,7 +71,7 @@ ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* perfor
     });
     connect(controller_, &GuiChatController::activeRoomCanManageChanged, this, &ChatBridge::scheduleStateUpdate);
     connect(controller_, &GuiChatController::savedConnectionChanged, this, &ChatBridge::scheduleStateUpdate);
-    connect(controller_, &GuiChatController::pendingDeviceApprovalsChanged, this, &ChatBridge::scheduleStateUpdate);
+    connect(controller_, &GuiChatController::pendingConnectionApprovalsChanged, this, &ChatBridge::scheduleStateUpdate);
     connect(lanDiscovery_.get(), &LanDiscoveryService::hostsChanged,
             this, &ChatBridge::scheduleStateUpdate);
     connect(lanDiscovery_.get(), &LanDiscoveryService::scanningChanged,
@@ -258,7 +258,7 @@ QJsonObject ChatBridge::buildState() {
         {"activeMessages", snapshotFor(controller_->activeMessageModel())},
         {"members", snapshotFor(controller_->memberModel())},
         {"permissions", QJsonObject{{"activeRoomCanManage", controller_->activeRoomCanManage()}}},
-        {"deviceApprovals", QJsonArray::fromVariantList(controller_->pendingDeviceApprovals())},
+        {"connectionApprovals", QJsonArray::fromVariantList(controller_->pendingConnectionApprovals())},
         {"performance", performance},
         {"graphics", graphics},
         {"savedConnection", QJsonObject{{"serverIp", controller_->savedServerIp()},

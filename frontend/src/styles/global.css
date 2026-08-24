@@ -160,7 +160,10 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .member-toggle { display: flex; align-items: center; gap: 10px; padding: 7px 12px 7px 8px; border-color: rgba(164, 182, 255, .16); }
 .member-toggle:hover { color: #f5f7ff; border-color: rgba(55, 246, 208, .35); background: rgba(55, 246, 208, .08); }
 .avatar-stack { display: flex; }
-.message-timeline { min-height: 0; padding: 26px 34px; overflow: auto; overscroll-behavior: contain; }
+.message-timeline-shell { position: relative; min-height: 0; }
+.message-timeline { box-sizing: border-box; height: 100%; min-height: 0; padding: 26px 34px; overflow: auto; overscroll-behavior: contain; }
+.timeline-new-messages { position: absolute; right: 34px; bottom: 18px; z-index: 2; border: 1px solid rgba(55, 246, 208, .36); border-radius: 999px; padding: 9px 13px; color: #07131a; background: #37f6d0; box-shadow: 0 10px 28px rgba(0, 0, 0, .32); cursor: pointer; font: inherit; font-size: 12px; font-weight: 800; }
+.timeline-new-messages:hover { background: #75ffe2; }
 .message { display: flex; margin-bottom: 20px; }
 .message--self { justify-content: flex-end; }
 .message-cluster { display: flex; max-width: min(78%, 720px); flex-direction: column; gap: 6px; }
@@ -216,10 +219,10 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .admin-profile p { margin: 0; color: #8190b0; font-size: 13px; }
 .admin-member-input { width: 100%; margin-top: 16px; padding: 11px 12px; border: 1px solid rgba(164, 182, 255, .2); border-radius: 10px; color: #f5f7ff; background: #0b1228; outline: none; }
 .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-.device-approval-list { display: grid; gap: 12px; margin-top: 16px; }
-.device-approval-item { padding: 13px; border: 1px solid rgba(164, 182, 255, .18); border-radius: 13px; background: rgba(8, 17, 41, .7); color: #d9e1f5; }
-.device-approval-item p { margin: 7px 0 0; color: #9daccd; font-size: 13px; line-height: 1.45; }
-.device-approval-item .admin-actions { margin-top: 12px; }
+.connection-approval-list { display: grid; gap: 12px; margin-top: 16px; }
+.connection-approval-item { padding: 13px; border: 1px solid rgba(164, 182, 255, .18); border-radius: 13px; background: rgba(8, 17, 41, .7); color: #d9e1f5; }
+.connection-approval-item p { margin: 7px 0 0; color: #9daccd; font-size: 13px; line-height: 1.45; }
+.connection-approval-item .admin-actions { margin-top: 12px; }
 .danger-button { min-height: 38px; padding: 0 14px; border: 0; border-radius: 11px; color: #fff1f6; background: #a53d63; font: inherit; font-weight: 700; cursor: pointer; }
 .danger-button:hover { background: #c04c78; }
 .danger-button:disabled, .admin-actions button:disabled { cursor: not-allowed; opacity: .5; }
@@ -250,6 +253,7 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
   .modal-surface .conversation-sidebar, .modal-surface .member-panel { display: block; min-width: 0; padding: 0; border: 0; background: transparent; }
   .chat-header { padding: 22px 18px 18px; }
   .message-timeline { padding: 20px 18px; }
+  .timeline-new-messages { right: 18px; bottom: 14px; }
   .composer-area { margin: 0 18px 18px; }
   .identity-card--fixed { bottom: 18px; left: 70px; }
   .message-cluster { max-width: 90%; }

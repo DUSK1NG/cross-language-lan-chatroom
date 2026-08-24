@@ -102,8 +102,31 @@ type AdminActionRequest struct {
 	CommandID  string
 }
 
-type DeviceApprovalRequest struct {
-	Request DeviceRequest
+// ConnectionApprovalRequest represents one live member connection waiting for
+// a room owner decision. It is intentionally in-memory only: approving a
+// connection must never grant a device a permanent pass.
+type ConnectionApprovalRequest struct {
+	Username       string
+	UserCode       string
+	NormalizedCode string
+	RemoteAddress  string
+	Created        chan string
+	Decision       chan ConnectionApprovalDecision
+}
+
+type ConnectionApprovalDecision struct {
+	Approved bool
+	Reason   string
+}
+
+type pendingConnectionApproval struct {
+	ID             string
+	Username       string
+	UserCode       string
+	NormalizedCode string
+	RemoteAddress  string
+	CreatedAt      time.Time
+	Decision       chan ConnectionApprovalDecision
 }
 
 // MessageRecord is the minimum server-side state needed to authorize a recall.
@@ -172,61 +195,66 @@ func (c *Client) closeSend() {
 // Hub 是聊天室中客户端集合和广播消息的唯一管理者。
 // Clients、ActiveCodes 和 UsedCodes 只能由 Run goroutine 访问。
 type Hub struct {
-	Clients         map[*Client]bool
-	Register        chan RegisterRequest
-	Unregister      chan *Client
-	Broadcast       chan Message
-	Outbound        chan OutboundMessage
-	RequestUsers    chan *Client
-	Private         chan PrivateMessageRequest
-	RoomJoin        chan RoomRequest
-	RoomCreate      chan RoomCreateRequest
-	RoomAction      chan RoomActionRequest
-	RoomLeave       chan *Client
-	RequestRooms    chan *Client
-	History         chan HistoryRequest
-	HistoryJobs     chan historyJob
-	HistoryResults  chan historyResult
-	AdminAction     chan AdminActionRequest
-	DeviceApproval  chan DeviceApprovalRequest
-	ActiveCodes     map[string]*Client
-	UsedCodes       map[string]struct{}
-	Rooms           map[string]map[*Client]bool
-	RoomNames       map[string]struct{}
-	RoomDefinitions map[string]*RoomDefinition
-	OfflineStore    *AuthStore
-	AdminCode       string
-	NextMessageID   uint64
-	MessageRecords  map[string]MessageRecord
+	Clients                    map[*Client]bool
+	Register                   chan RegisterRequest
+	Unregister                 chan *Client
+	Broadcast                  chan Message
+	Outbound                   chan OutboundMessage
+	RequestUsers               chan *Client
+	Private                    chan PrivateMessageRequest
+	RoomJoin                   chan RoomRequest
+	RoomCreate                 chan RoomCreateRequest
+	RoomAction                 chan RoomActionRequest
+	RoomLeave                  chan *Client
+	RequestRooms               chan *Client
+	History                    chan HistoryRequest
+	HistoryJobs                chan historyJob
+	HistoryResults             chan historyResult
+	AdminAction                chan AdminActionRequest
+	ConnectionApproval         chan ConnectionApprovalRequest
+	CancelConnectionApproval   chan string
+	ActiveCodes                map[string]*Client
+	UsedCodes                  map[string]struct{}
+	Rooms                      map[string]map[*Client]bool
+	RoomNames                  map[string]struct{}
+	RoomDefinitions            map[string]*RoomDefinition
+	OfflineStore               *AuthStore
+	AdminCode                  string
+	NextMessageID              uint64
+	MessageRecords             map[string]MessageRecord
+	PendingConnectionApprovals map[string]pendingConnectionApproval
+	NextConnectionApprovalID   uint64
 }
 
 func NewHub() *Hub {
 	hub := &Hub{
-		Clients:        make(map[*Client]bool),
-		Register:       make(chan RegisterRequest),
-		Unregister:     make(chan *Client),
-		Broadcast:      make(chan Message),
-		Outbound:       make(chan OutboundMessage),
-		RequestUsers:   make(chan *Client),
-		Private:        make(chan PrivateMessageRequest),
-		RoomJoin:       make(chan RoomRequest),
-		RoomCreate:     make(chan RoomCreateRequest),
-		RoomAction:     make(chan RoomActionRequest),
-		RoomLeave:      make(chan *Client),
-		RequestRooms:   make(chan *Client),
-		History:        make(chan HistoryRequest),
-		HistoryJobs:    make(chan historyJob, 32),
-		HistoryResults: make(chan historyResult, 32),
-		AdminAction:    make(chan AdminActionRequest),
-		DeviceApproval: make(chan DeviceApprovalRequest),
-		ActiveCodes:    make(map[string]*Client),
-		UsedCodes:      make(map[string]struct{}),
-		Rooms:          make(map[string]map[*Client]bool),
-		RoomNames:      map[string]struct{}{defaultRoomName: {}},
+		Clients:                  make(map[*Client]bool),
+		Register:                 make(chan RegisterRequest),
+		Unregister:               make(chan *Client),
+		Broadcast:                make(chan Message),
+		Outbound:                 make(chan OutboundMessage),
+		RequestUsers:             make(chan *Client),
+		Private:                  make(chan PrivateMessageRequest),
+		RoomJoin:                 make(chan RoomRequest),
+		RoomCreate:               make(chan RoomCreateRequest),
+		RoomAction:               make(chan RoomActionRequest),
+		RoomLeave:                make(chan *Client),
+		RequestRooms:             make(chan *Client),
+		History:                  make(chan HistoryRequest),
+		HistoryJobs:              make(chan historyJob, 32),
+		HistoryResults:           make(chan historyResult, 32),
+		AdminAction:              make(chan AdminActionRequest),
+		ConnectionApproval:       make(chan ConnectionApprovalRequest),
+		CancelConnectionApproval: make(chan string, 128),
+		ActiveCodes:              make(map[string]*Client),
+		UsedCodes:                make(map[string]struct{}),
+		Rooms:                    make(map[string]map[*Client]bool),
+		RoomNames:                map[string]struct{}{defaultRoomName: {}},
 		RoomDefinitions: map[string]*RoomDefinition{
 			defaultRoomName: {Name: defaultRoomName, Allowed: make(map[string]bool)},
 		},
-		MessageRecords: make(map[string]MessageRecord),
+		MessageRecords:             make(map[string]MessageRecord),
+		PendingConnectionApprovals: make(map[string]pendingConnectionApproval),
 	}
 	go hub.historyWorker()
 	return hub
@@ -288,8 +316,11 @@ func (h *Hub) Run() {
 		case request := <-h.AdminAction:
 			h.handleAdminAction(request)
 
-		case request := <-h.DeviceApproval:
-			h.handleDeviceApproval(request)
+		case request := <-h.ConnectionApproval:
+			h.handleConnectionApproval(request)
+
+		case approvalID := <-h.CancelConnectionApproval:
+			h.cancelConnectionApproval(approvalID)
 		}
 	}
 }
@@ -336,13 +367,9 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 	h.Clients[client] = true
 	h.addToRoom(client, client.Room)
 	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined the chat"))
-	if client.IsAdmin && h.OfflineStore != nil {
-		if pending, err := h.OfflineStore.PendingDeviceRequests(); err != nil {
-			log.Printf("failed to load pending device approvals: %v", err)
-		} else {
-			for _, deviceRequest := range pending {
-				h.deliverPendingDeviceRequest(client, deviceRequest)
-			}
+	if client.IsAdmin {
+		for _, pending := range h.PendingConnectionApprovals {
+			h.deliverPendingConnectionApproval(client, pending)
 		}
 	}
 	log.Printf("client registered: %s", client.Username)
@@ -395,28 +422,30 @@ func (h *Hub) handleAdminAction(request AdminActionRequest) {
 		h.deliverError(sender, "Administrator permission required")
 		return
 	}
-	if request.Action == "approve_device" || request.Action == "deny_device" {
-		if h.OfflineStore == nil {
-			h.deliverError(sender, "Device approvals are unavailable", request.MessageID, request.CommandID)
+	if request.Action == "approve_connection" || request.Action == "deny_connection" {
+		pending, found := h.PendingConnectionApprovals[request.MessageID]
+		if !found {
+			h.deliverError(sender, "Connection request is no longer pending", request.MessageID, request.CommandID)
 			return
 		}
-		requestID, err := strconv.ParseInt(request.MessageID, 10, 64)
-		if err != nil || requestID < 1 {
-			h.deliverError(sender, "Invalid device approval request", request.MessageID, request.CommandID)
-			return
+		delete(h.PendingConnectionApprovals, request.MessageID)
+		status := "denied"
+		decision := ConnectionApprovalDecision{Approved: false, Reason: "The room owner declined this connection"}
+		if request.Action == "approve_connection" {
+			status = "approved"
+			decision = ConnectionApprovalDecision{Approved: true}
 		}
-		resolved, err := h.OfflineStore.ResolveDeviceRequest(requestID, request.Action == "approve_device", sender.NormalizedCode)
-		if err != nil {
-			h.deliverError(sender, "Device request could not be resolved", request.MessageID, request.CommandID)
-			return
-		}
-		result := Message{Type: "device_approval_result", MessageID: request.MessageID,
-			Username: resolved.Username, UserCode: resolved.UserCode, Content: resolved.Status,
+		result := Message{Type: "connection_approval_result", MessageID: request.MessageID,
+			Username: pending.Username, UserCode: pending.UserCode, Content: status,
 			CommandID: request.CommandID}
 		for client := range h.Clients {
 			if client.IsAdmin {
 				h.deliver(client, result)
 			}
+		}
+		select {
+		case pending.Decision <- decision:
+		default:
 		}
 		return
 	}
@@ -448,19 +477,55 @@ func (h *Hub) handleAdminAction(request AdminActionRequest) {
 	}
 }
 
-func (h *Hub) handleDeviceApproval(event DeviceApprovalRequest) {
+func (h *Hub) handleConnectionApproval(request ConnectionApprovalRequest) {
+	if request.Username == "" || request.UserCode == "" || request.NormalizedCode == "" || request.Decision == nil {
+		if request.Created != nil {
+			request.Created <- ""
+		}
+		return
+	}
+	h.NextConnectionApprovalID++
+	id := "connection-" + strconv.FormatUint(h.NextConnectionApprovalID, 10)
+	pending := pendingConnectionApproval{
+		ID:             id,
+		Username:       request.Username,
+		UserCode:       request.UserCode,
+		NormalizedCode: request.NormalizedCode,
+		RemoteAddress:  request.RemoteAddress,
+		CreatedAt:      time.Now().UTC(),
+		Decision:       request.Decision,
+	}
+	h.PendingConnectionApprovals[id] = pending
 	for client := range h.Clients {
 		if client.IsAdmin {
-			h.deliverPendingDeviceRequest(client, event.Request)
+			h.deliverPendingConnectionApproval(client, pending)
+		}
+	}
+	if request.Created != nil {
+		request.Created <- id
+	}
+}
+
+func (h *Hub) cancelConnectionApproval(approvalID string) {
+	pending, found := h.PendingConnectionApprovals[approvalID]
+	if !found {
+		return
+	}
+	delete(h.PendingConnectionApprovals, approvalID)
+	result := Message{Type: "connection_approval_result", MessageID: approvalID,
+		Username: pending.Username, UserCode: pending.UserCode, Content: "expired"}
+	for client := range h.Clients {
+		if client.IsAdmin {
+			h.deliver(client, result)
 		}
 	}
 }
 
-func (h *Hub) deliverPendingDeviceRequest(client *Client, request DeviceRequest) {
-	if client == nil || request.ID < 1 {
+func (h *Hub) deliverPendingConnectionApproval(client *Client, request pendingConnectionApproval) {
+	if client == nil || request.ID == "" {
 		return
 	}
-	h.deliver(client, Message{Type: "device_approval_request", MessageID: strconv.FormatInt(request.ID, 10),
+	h.deliver(client, Message{Type: "connection_approval_request", MessageID: request.ID,
 		Username: request.Username, UserCode: request.UserCode,
 		Content: request.CreatedAt.UTC().Format(time.RFC3339Nano)})
 }

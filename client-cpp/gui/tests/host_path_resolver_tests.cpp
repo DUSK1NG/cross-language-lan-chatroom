@@ -69,12 +69,23 @@ void HostPathResolverTests::marksMemberPackageWithoutServerAsUnavailable() {
 
 void HostPathResolverTests::marksBundledServerAsAvailableBeforeFirstCertificate() {
     QTemporaryDir temp;
+    QTemporaryDir hostDataRoot;
     QVERIFY(temp.isValid());
+    QVERIFY(hostDataRoot.isValid());
     const QString server = QDir(temp.path()).filePath("server-go/chat-server.exe");
     QVERIFY(QDir().mkpath(QFileInfo(server).absolutePath()));
     QVERIFY(QFile(server).open(QIODevice::WriteOnly));
 
+    constexpr auto variableName = "LAN_CHAT_TEST_HOST_DATA_ROOT";
+    const bool hadPreviousValue = qEnvironmentVariableIsSet(variableName);
+    const QByteArray previousValue = qgetenv(variableName);
+    qputenv(variableName, hostDataRoot.path().toUtf8());
     const HostPathResolver::HostPaths paths = HostPathResolver::resolveHostPaths(temp.path());
+    if (hadPreviousValue) {
+        qputenv(variableName, previousValue);
+    } else {
+        qunsetenv(variableName);
+    }
 
     QCOMPARE(paths.serverExe, QFileInfo(server).absoluteFilePath());
     QVERIFY(!QFileInfo::exists(paths.certFile));

@@ -51,8 +51,7 @@ QJsonValue withoutSecrets(const QJsonValue& value) {
 
     static const QSet<QString> secretKeys{
         QStringLiteral("password"), QStringLiteral("privateKey"),
-        QStringLiteral("privateKeyFile"), QStringLiteral("keyFile"),
-        QStringLiteral("deviceToken"), QStringLiteral("device_token")
+        QStringLiteral("privateKeyFile"), QStringLiteral("keyFile")
     };
     const QJsonObject object = value.toObject();
     QJsonObject result;

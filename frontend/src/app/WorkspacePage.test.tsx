@@ -249,23 +249,23 @@ describe('WorkspacePage', () => {
     }));
   });
 
-  it('lets an administrator resolve a pending device approval', () => {
+  it('lets an administrator resolve a pending member connection', () => {
     const state: BridgeState = {
       ...workspaceState,
       identity: { ...workspaceState.identity, admin: true },
-      deviceApprovals: [{ id: '42', displayName: 'Cara', userCode: 'C003', requestedAt: '2026-08-24T10:00:00Z' }]
+      connectionApprovals: [{ id: '42', displayName: 'Cara', userCode: 'C003', requestedAt: '2026-08-24T10:00:00Z' }]
     };
     const bridge = createFakeBridge(state);
     render(<WorkspacePage bridge={bridge} state={state} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '设备审批' }));
-    const dialog = screen.getByRole('dialog', { name: '设备审批' });
+    fireEvent.click(screen.getByRole('button', { name: '连接审批' }));
+    const dialog = screen.getByRole('dialog', { name: '连接审批' });
     expect(within(dialog).getByText('Cara#C003')).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: '批准' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '允许连接' }));
 
     expect(bridge.commands).toContainEqual(expect.objectContaining({
       type: 'admin.action',
-      payload: { action: 'approve_device', targetUserCode: 'C003', messageId: '42' }
+      payload: { action: 'approve_connection', targetUserCode: 'C003', messageId: '42' }
     }));
   });
 

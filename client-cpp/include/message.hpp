@@ -58,7 +58,6 @@ struct Message {
     std::vector<OnlineUser> user_details{};
     std::vector<RoomInfo> room_details{};
     std::string password;
-    std::string device_token;
     std::string message_id;
     std::string command_id;
     std::string created_at;

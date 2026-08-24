@@ -449,14 +449,14 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
         return;
     }
 
-    if (type == QStringLiteral("device_approval_request")) {
+    if (type == QStringLiteral("connection_approval_request")) {
         if (messageId.isEmpty() || username.isEmpty() || userCode.isEmpty()) {
             return;
         }
         QVariantMap request{{"id", messageId}, {"displayName", username}, {"userCode", userCode},
                             {"requestedAt", content}};
         bool replaced = false;
-        for (QVariant& value : pendingDeviceApprovals_) {
+        for (QVariant& value : pendingConnectionApprovals_) {
             if (value.toMap().value("id").toString() == messageId) {
                 value = request;
                 replaced = true;
@@ -464,26 +464,28 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
             }
         }
         if (!replaced) {
-            pendingDeviceApprovals_.append(request);
+            pendingConnectionApprovals_.append(request);
         }
-        emit pendingDeviceApprovalsChanged();
+        emit pendingConnectionApprovalsChanged();
         return;
     }
 
-    if (type == QStringLiteral("device_approval_result")) {
+    if (type == QStringLiteral("connection_approval_result")) {
         bool removed = false;
-        for (int index = pendingDeviceApprovals_.size() - 1; index >= 0; --index) {
-            if (pendingDeviceApprovals_.at(index).toMap().value("id").toString() == messageId) {
-                pendingDeviceApprovals_.removeAt(index);
+        for (int index = pendingConnectionApprovals_.size() - 1; index >= 0; --index) {
+            if (pendingConnectionApprovals_.at(index).toMap().value("id").toString() == messageId) {
+                pendingConnectionApprovals_.removeAt(index);
                 removed = true;
             }
         }
         if (removed) {
-            emit pendingDeviceApprovalsChanged();
+            emit pendingConnectionApprovalsChanged();
         }
-        appendSystemMessage(content == QStringLiteral("approved")
-                                ? QStringLiteral("Device approved. The member can connect again.")
-                                : QStringLiteral("Device request denied."));
+        if (content == QStringLiteral("approved")) {
+            appendSystemMessage(QStringLiteral("已批准成员连接，成员正在加入聊天室。"));
+        } else if (content == QStringLiteral("denied")) {
+            appendSystemMessage(QStringLiteral("已拒绝成员连接请求。"));
+        }
         return;
     }
 

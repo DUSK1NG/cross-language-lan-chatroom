@@ -6,23 +6,8 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 )
-
-const testDeviceToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-
-func approveTestDevice(t *testing.T, store *AuthStore, username, userCode string) {
-	t.Helper()
-	authentication, err := store.AuthenticateDevice(username, userCode, testDeviceToken, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !authentication.Approved {
-		t.Fatalf("device authentication = %+v, want approved", authentication)
-	}
-}
 
 func newTestAuthStore(t *testing.T) (*AuthStore, string) {
 	t.Helper()
@@ -95,11 +80,15 @@ func TestAuthStorePersistsAcrossRestart(t *testing.T) {
 	}
 }
 
-func TestHandleConnectionSupportsPasswordlessLogin(t *testing.T) {
+func TestHandleConnectionWaitsForRoomOwnerApproval(t *testing.T) {
 	store, _ := newTestAuthStore(t)
-	approveTestDevice(t, store, "Alice", "ALICE01")
 	hub := NewHub()
+	admin := newTestClient(t, "Host", "HOST01")
+	admin.IsAdmin = true
+	hub.Clients[admin] = true
+	hub.ActiveCodes[admin.NormalizedCode] = admin
 	go hub.Run()
+
 	serverConn, clientConn := net.Pipe()
 	done := make(chan struct{})
 	go func() {
@@ -107,92 +96,83 @@ func TestHandleConnectionSupportsPasswordlessLogin(t *testing.T) {
 		close(done)
 	}()
 
-	if err := sendMessage(clientConn, Message{Type: "login", Username: "Alice", UserCode: "ALICE01", DeviceToken: testDeviceToken}); err != nil {
+	if err := sendMessage(clientConn, Message{Type: "login", Username: "Bob", UserCode: "BOB001"}); err != nil {
 		t.Fatal(err)
 	}
+	pending := receiveClientTestMessage(t, clientConn)
+	if pending.Type != "login_pending" || pending.MessageID == "" {
+		t.Fatalf("pending login response = %+v", pending)
+	}
+	approval := <-admin.Send
+	if approval.Type != "connection_approval_request" || approval.MessageID != pending.MessageID ||
+		approval.Username != "Bob" || approval.UserCode != "BOB001" {
+		t.Fatalf("connection approval notification = %+v", approval)
+	}
+
+	hub.AdminAction <- AdminActionRequest{Sender: admin, Action: "approve_connection", MessageID: pending.MessageID}
+	assertMessageReceived(t, admin.Send, Message{Type: "connection_approval_result", MessageID: pending.MessageID,
+		Username: "Bob", UserCode: "BOB001", Content: "approved"})
 	loginOK := receiveClientTestMessage(t, clientConn)
-	if loginOK.Type != "login_ok" || loginOK.Username != "Alice" || loginOK.UserCode != "ALICE01" {
-		t.Fatalf("login response = %+v", loginOK)
+	if loginOK.Type != "login_ok" || loginOK.Username != "Bob" || loginOK.UserCode != "BOB001" {
+		t.Fatalf("approved login response = %+v", loginOK)
+	}
+	if found, err := store.HasUserCode("BOB001"); err != nil || !found {
+		t.Fatalf("approved identity persisted = %t, error = %v", found, err)
 	}
 	_ = clientConn.Close()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("authenticated connection did not stop")
+	waitForHandler(t, done, "approved connection")
+}
+
+func TestResolveConnectionIdentityDoesNotPersistBeforeApproval(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	account, err := store.ResolveConnectionIdentity("Cara", "C003")
+	if err != nil || account.Username != "Cara" || account.UserCode != "C003" {
+		t.Fatalf("resolved connection identity = %+v, error = %v", account, err)
+	}
+	if found, err := store.HasUserCode("C003"); err != nil || found {
+		t.Fatalf("unapproved identity persisted = %t, error = %v", found, err)
 	}
 }
 
-func TestHandleConnectionAllowsAuthenticatedAccountToReconnect(t *testing.T) {
+func TestExistingMemberConnectionStillRequiresRoomOwnerApproval(t *testing.T) {
 	store, _ := newTestAuthStore(t)
-	if _, err := store.EnsureIdentity("Alice", "ALICE01"); err != nil {
-		t.Fatal(err)
+	if _, err := store.EnsureIdentity("Bob", "BOB001"); err != nil {
+		t.Fatalf("seed existing member: %v", err)
 	}
-	approveTestDevice(t, store, "Alice", "ALICE01")
+
 	hub := NewHub()
+	admin := newTestClient(t, "Host", "HOST01")
+	admin.IsAdmin = true
+	hub.Clients[admin] = true
+	hub.ActiveCodes[admin.NormalizedCode] = admin
 	go hub.Run()
 
-	firstServer, firstClient := net.Pipe()
-	firstDone := make(chan struct{})
+	serverConn, clientConn := net.Pipe()
+	done := make(chan struct{})
 	go func() {
-		handleConnectionWithStore(firstServer, hub, store)
-		close(firstDone)
+		handleConnectionWithStore(serverConn, hub, store)
+		close(done)
 	}()
-	if err := sendMessage(firstClient, Message{Type: "login", Username: "Alice", UserCode: "ALICE01", DeviceToken: testDeviceToken}); err != nil {
-		t.Fatal(err)
-	}
-	firstLogin := receiveClientTestMessage(t, firstClient)
-	if firstLogin.Type != "login_ok" || firstLogin.UserCode != "ALICE01" {
-		t.Fatalf("first login response = %+v", firstLogin)
-	}
-	_ = firstClient.Close()
-	waitForHandler(t, firstDone, "first authenticated connection")
 
-	secondServer, secondClient := net.Pipe()
-	secondDone := make(chan struct{})
-	go func() {
-		handleConnectionWithStore(secondServer, hub, store)
-		close(secondDone)
-	}()
-	if err := sendMessage(secondClient, Message{Type: "login", Username: "alice", UserCode: "alice01", DeviceToken: testDeviceToken}); err != nil {
+	if err := sendMessage(clientConn, Message{Type: "login", Username: "Bob", UserCode: "BOB001"}); err != nil {
 		t.Fatal(err)
 	}
-	secondLogin := receiveClientTestMessage(t, secondClient)
-	if secondLogin.Type != "login_ok" || secondLogin.Username != "Alice" || secondLogin.UserCode != "ALICE01" {
-		t.Fatalf("second login response = %+v", secondLogin)
+	pending := receiveClientTestMessage(t, clientConn)
+	if pending.Type != "login_pending" || pending.MessageID == "" {
+		t.Fatalf("existing member did not wait for approval: %+v", pending)
 	}
-	_ = secondClient.Close()
-	waitForHandler(t, secondDone, "second authenticated connection")
-}
+	approval := <-admin.Send
+	if approval.Type != "connection_approval_request" || approval.MessageID != pending.MessageID {
+		t.Fatalf("existing member approval notification = %+v", approval)
+	}
 
-func TestAuthStoreRequiresApprovalForNewRemoteDevice(t *testing.T) {
-	store, _ := newTestAuthStore(t)
-	remoteToken := strings.Repeat("B", 43)
-	pending, err := store.AuthenticateDevice("Bob", "BOB001", remoteToken, false)
-	if err != nil {
-		t.Fatal(err)
+	hub.AdminAction <- AdminActionRequest{Sender: admin, Action: "deny_connection", MessageID: pending.MessageID}
+	loginError := receiveClientTestMessage(t, clientConn)
+	if loginError.Type != "login_error" || loginError.Content != "The room owner declined this connection" {
+		t.Fatalf("denied existing member response = %+v", loginError)
 	}
-	if pending.Approved || pending.Request.ID < 1 || pending.Request.Status != "pending" {
-		t.Fatalf("pending authentication = %+v", pending)
-	}
-	requests, err := store.PendingDeviceRequests()
-	if err != nil || len(requests) != 1 || requests[0].ID != pending.Request.ID {
-		t.Fatalf("pending requests = %+v, error = %v", requests, err)
-	}
-	if _, err := store.ResolveDeviceRequest(pending.Request.ID, true, "ADMIN01"); err != nil {
-		t.Fatal(err)
-	}
-	approved, err := store.AuthenticateDevice("Bob", "BOB001", remoteToken, false)
-	if err != nil || !approved.Approved || approved.Account.UserCode != "BOB001" {
-		t.Fatalf("approved authentication = %+v, error = %v", approved, err)
-	}
-}
-
-func TestDeviceTokenHashRejectsMalformedCredentials(t *testing.T) {
-	for _, token := range []string{"", strings.Repeat("A", 42), strings.Repeat("A", 44), strings.Repeat("!", 43)} {
-		if _, err := deviceTokenHash(token); err == nil {
-			t.Fatalf("deviceTokenHash(%q) unexpectedly succeeded", token)
-		}
-	}
+	_ = clientConn.Close()
+	waitForHandler(t, done, "denied existing member connection")
 }
 
 func TestAuthStoreUsesConfiguredDatabasePath(t *testing.T) {

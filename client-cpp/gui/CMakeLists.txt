@@ -31,8 +31,6 @@ qt_add_executable(lan-chat-gui
     src/chat_model.hpp
     src/conversation_filter_model.cpp
     src/conversation_filter_model.hpp
-    src/device_identity.cpp
-    src/device_identity.hpp
     src/graphics_info.cpp
     src/graphics_info.hpp
     src/host_path_resolver.cpp
@@ -117,8 +115,6 @@ target_link_libraries(lan-chat-gui PRIVATE
     Qt6::QuickControls2
     Qt6::Network
     ws2_32
-    bcrypt
-    crypt32
     Threads::Threads
     OpenSSL::SSL
     OpenSSL::Crypto
@@ -240,8 +236,6 @@ qt_add_executable(chat-bridge-tests
     src/chat_model.hpp
     src/conversation_filter_model.cpp
     src/conversation_filter_model.hpp
-    src/device_identity.cpp
-    src/device_identity.hpp
     src/host_path_resolver.cpp
     src/host_path_resolver.hpp
     src/openssl_runtime.cpp
@@ -268,8 +262,6 @@ target_link_libraries(chat-bridge-tests PRIVATE
     Threads::Threads
     OpenSSL::SSL
     OpenSSL::Crypto
-    bcrypt
-    crypt32
 )
 
 # Qt WebEngine also brings its own TLS stack. Loading the vcpkg OpenSSL DLLs
@@ -345,25 +337,6 @@ target_include_directories(host-path-resolver-tests PRIVATE
 
 add_test(NAME host-path-resolver-tests COMMAND host-path-resolver-tests)
 
-qt_add_executable(device-identity-tests
-    tests/device_identity_tests.cpp
-    src/device_identity.cpp
-    src/device_identity.hpp
-)
-
-target_link_libraries(device-identity-tests PRIVATE
-    Qt6::Core
-    Qt6::Test
-    bcrypt
-    crypt32
-)
-
-target_include_directories(device-identity-tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-add_test(NAME device-identity-tests COMMAND device-identity-tests)
-
 qt_add_executable(local-host-bootstrap-tests
     tests/local_host_bootstrap_tests.cpp
     src/host_path_resolver.cpp
@@ -421,7 +394,6 @@ set_tests_properties(
     performance-sampler-tests
     performance-profile-tests
     host-path-resolver-tests
-    device-identity-tests
     local-host-bootstrap-tests
     lan-discovery-service-tests
     PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED}"

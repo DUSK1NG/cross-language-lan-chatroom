@@ -127,37 +127,41 @@ func TestHubKickQueuesNotificationBeforeDisconnect(t *testing.T) {
 	}
 }
 
-func TestHubAdministratorCanResolvePendingDeviceApproval(t *testing.T) {
-	store, _ := newTestAuthStore(t)
+func TestHubAdministratorCanResolvePendingConnectionApproval(t *testing.T) {
 	hub := NewHub()
-	hub.OfflineStore = store
 	admin := newTestClient(t, "Alice", "A001")
 	admin.IsAdmin = true
 	hub.Clients[admin] = true
-
-	pending, err := store.AuthenticateDevice("Cara", "C003", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", false)
-	if err != nil || pending.Approved || pending.Request.ID < 1 {
-		t.Fatalf("pending device authentication = %+v, error = %v", pending, err)
+	decision := make(chan ConnectionApprovalDecision, 1)
+	created := make(chan string, 1)
+	hub.handleConnectionApproval(ConnectionApprovalRequest{
+		Username: "Cara", UserCode: "C003", NormalizedCode: "c003",
+		RemoteAddress: "192.168.1.20:50000", Created: created, Decision: decision,
+	})
+	requestID := <-created
+	if requestID == "" {
+		t.Fatal("connection approval did not receive an id")
 	}
-
-	hub.handleDeviceApproval(DeviceApprovalRequest{Request: pending.Request})
 	requestMessage := <-admin.Send
-	if requestMessage.Type != "device_approval_request" || requestMessage.MessageID != "1" ||
+	if requestMessage.Type != "connection_approval_request" || requestMessage.MessageID != requestID ||
 		requestMessage.Username != "Cara" || requestMessage.UserCode != "C003" || requestMessage.Content == "" {
-		t.Fatalf("device approval notification = %+v", requestMessage)
+		t.Fatalf("connection approval notification = %+v", requestMessage)
 	}
 
 	hub.handleAdminAction(AdminActionRequest{
-		Sender: admin, Action: "approve_device", MessageID: "1", CommandID: "approve-cara",
+		Sender: admin, Action: "approve_connection", MessageID: requestID, CommandID: "approve-cara",
 	})
 	assertMessageReceived(t, admin.Send, Message{
-		Type: "device_approval_result", MessageID: "1", Username: "Cara", UserCode: "C003",
+		Type: "connection_approval_result", MessageID: requestID, Username: "Cara", UserCode: "C003",
 		Content: "approved", CommandID: "approve-cara",
 	})
-
-	approved, err := store.AuthenticateDevice("Cara", "C003", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", false)
-	if err != nil || !approved.Approved || approved.Account.UserCode != "C003" {
-		t.Fatalf("approved device authentication = %+v, error = %v", approved, err)
+	select {
+	case resolved := <-decision:
+		if !resolved.Approved {
+			t.Fatalf("connection decision = %+v, want approval", resolved)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("connection approval decision was not delivered")
 	}
 }
 

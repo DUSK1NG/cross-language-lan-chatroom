@@ -5,10 +5,11 @@ import (
 	"io"
 	"log"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 )
+
+const connectionApprovalTimeout = 60 * time.Second
 
 func isLoopbackRemote(address net.Addr) bool {
 	if address == nil {
@@ -74,24 +75,60 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 			if store != nil {
 				bootstrapAdmin := hub != nil && hub.AdminCode != "" &&
 					strings.EqualFold(loginMessage.UserCode, hub.AdminCode) && isLoopbackRemote(conn.RemoteAddr())
-				authentication, err := store.AuthenticateDevice(loginMessage.Username, loginMessage.UserCode,
-					loginMessage.DeviceToken, bootstrapAdmin)
+				account, err := store.ResolveConnectionIdentity(loginMessage.Username, loginMessage.UserCode)
 				if err != nil {
-					log.Printf("device authentication rejected for %s: %v", remoteAddress, err)
-					_ = sendMessage(conn, Message{Type: "login_error", Content: "Device authentication failed"})
+					log.Printf("connection identity rejected for %s: %v", remoteAddress, err)
+					_ = sendMessage(conn, Message{Type: "login_error", Content: "Connection identity failed"})
 					return
 				}
-				if !authentication.Approved {
-					if hub != nil && authentication.Request.ID > 0 {
-						hub.DeviceApproval <- DeviceApprovalRequest{Request: authentication.Request}
+				if !bootstrapAdmin {
+					if hub == nil {
+						_ = sendMessage(conn, Message{Type: "login_error", Content: "Connection approval is unavailable"})
+						return
+					}
+					created := make(chan string, 1)
+					decision := make(chan ConnectionApprovalDecision, 1)
+					hub.ConnectionApproval <- ConnectionApprovalRequest{
+						Username: account.Username, UserCode: account.UserCode,
+						NormalizedCode: strings.ToLower(account.UserCode), RemoteAddress: remoteAddress,
+						Created: created, Decision: decision,
+					}
+					approvalID := <-created
+					if approvalID == "" {
+						_ = sendMessage(conn, Message{Type: "login_error", Content: "Connection approval could not be created"})
+						return
 					}
 					_ = sendMessage(conn, Message{Type: "login_pending",
-						MessageID: strconv.FormatInt(authentication.Request.ID, 10),
-						Content:   "Waiting for the room owner to approve this device"})
+						MessageID: approvalID,
+						Content:   "Waiting for the room owner to approve this connection"})
+					_ = conn.SetDeadline(time.Now().Add(connectionApprovalTimeout))
+					approved := false
+					reason := "The room owner did not approve the connection in time"
+					select {
+					case resolution := <-decision:
+						approved = resolution.Approved
+						if resolution.Reason != "" {
+							reason = resolution.Reason
+						}
+					case <-time.After(connectionApprovalTimeout):
+					}
+					select {
+					case hub.CancelConnectionApproval <- approvalID:
+					default:
+					}
+					if !approved {
+						_ = sendMessage(conn, Message{Type: "login_error", Content: reason})
+						return
+					}
+				}
+				account, err = store.EnsureIdentity(account.Username, account.UserCode)
+				if err != nil {
+					log.Printf("failed to persist approved identity for %s: %v", remoteAddress, err)
+					_ = sendMessage(conn, Message{Type: "login_error", Content: "Approved connection could not be completed"})
 					return
 				}
-				normalizedCode, _ := normalizeUserCode(authentication.Account.UserCode)
-				client = newClient(conn, authentication.Account.Username, authentication.Account.UserCode, normalizedCode)
+				normalizedCode, _ := normalizeUserCode(account.UserCode)
+				client = newClient(conn, account.Username, account.UserCode, normalizedCode)
 				client.AccountBacked = true
 			} else {
 				normalizedCode, _ := normalizeUserCode(loginMessage.UserCode)

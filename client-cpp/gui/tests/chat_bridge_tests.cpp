@@ -52,7 +52,7 @@ private slots:
     void localHostConnectionCompletesWithoutMessageLifetimeCorruption();
     void usersResponseUsesBulkModelUpdates();
     void roomsResponseUsesBulkModelUpdates();
-    void deviceApprovalStateIsExposedAndCleared();
+    void connectionApprovalStateIsExposedAndCleared();
     void successfulConnectionClearsPreviousError();
     void recallRejectsAnUnrelatedMessageBeforeReportingSuccess();
     void recallReportsServerAcceptanceOrRejectionInsteadOfDispatchSuccess();
@@ -351,38 +351,38 @@ void ChatBridgeTests::roomsResponseUsesBulkModelUpdates() {
     QCOMPARE(controller.roomModel()->valueAt(1, "roomName").toString(), QStringLiteral("study"));
 }
 
-void ChatBridgeTests::deviceApprovalStateIsExposedAndCleared() {
+void ChatBridgeTests::connectionApprovalStateIsExposedAndCleared() {
     GuiChatController controller;
     ChatBridge bridge(&controller);
 
     QVERIFY(QMetaObject::invokeMethod(
         &controller, "handleMessage", Qt::DirectConnection,
-        Q_ARG(QString, QStringLiteral("device_approval_request")), Q_ARG(QString, QStringLiteral("42")),
+        Q_ARG(QString, QStringLiteral("connection_approval_request")), Q_ARG(QString, QStringLiteral("42")),
         Q_ARG(QString, QString()), Q_ARG(QString, QStringLiteral("Cara")), Q_ARG(QString, QStringLiteral("C003")),
         Q_ARG(QString, QStringLiteral("2026-08-24T10:00:00Z")), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
         Q_ARG(QStringList, QStringList()), Q_ARG(QStringList, QStringList()),
         Q_ARG(QVariantList, QVariantList()), Q_ARG(QVariantList, QVariantList()), Q_ARG(bool, false)));
 
-    QTRY_COMPARE(controller.pendingDeviceApprovals().size(), 1);
+    QTRY_COMPARE(controller.pendingConnectionApprovals().size(), 1);
     QTRY_VERIFY(QJsonDocument::fromJson(bridge.currentStateJson().toUtf8()).object()
-                    .value("deviceApprovals").toArray().size() == 1);
+                    .value("connectionApprovals").toArray().size() == 1);
     const QJsonArray approvals = QJsonDocument::fromJson(bridge.currentStateJson().toUtf8()).object()
-                                     .value("deviceApprovals").toArray();
+                                     .value("connectionApprovals").toArray();
     QCOMPARE(approvals.size(), 1);
     QCOMPARE(approvals.at(0).toObject().value("id").toString(), QStringLiteral("42"));
     QCOMPARE(approvals.at(0).toObject().value("displayName").toString(), QStringLiteral("Cara"));
 
     QVERIFY(QMetaObject::invokeMethod(
         &controller, "handleMessage", Qt::DirectConnection,
-        Q_ARG(QString, QStringLiteral("device_approval_result")), Q_ARG(QString, QStringLiteral("42")),
+        Q_ARG(QString, QStringLiteral("connection_approval_result")), Q_ARG(QString, QStringLiteral("42")),
         Q_ARG(QString, QString()), Q_ARG(QString, QStringLiteral("Cara")), Q_ARG(QString, QStringLiteral("C003")),
         Q_ARG(QString, QStringLiteral("approved")), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
         Q_ARG(QStringList, QStringList()), Q_ARG(QStringList, QStringList()),
         Q_ARG(QVariantList, QVariantList()), Q_ARG(QVariantList, QVariantList()), Q_ARG(bool, false)));
 
-    QTRY_VERIFY(controller.pendingDeviceApprovals().isEmpty());
+    QTRY_VERIFY(controller.pendingConnectionApprovals().isEmpty());
     QTRY_VERIFY(QJsonDocument::fromJson(bridge.currentStateJson().toUtf8()).object()
-                    .value("deviceApprovals").toArray().isEmpty());
+                    .value("connectionApprovals").toArray().isEmpty());
 }
 
 void ChatBridgeTests::successfulConnectionClearsPreviousError() {
