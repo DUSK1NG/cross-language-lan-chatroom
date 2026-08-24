@@ -21,7 +21,7 @@ export function ChatHeader({ state, onMembers, canManage = false, onManageRoom, 
       </div>
       <div className="chat-header__actions">
         {canManage && <button className="secondary-button header-action-button" type="button" aria-label="频道管理" onClick={onManageRoom}>频道管理</button>}
-        {state.identity.admin && approvalCount > 0 && <button className="secondary-button header-action-button" type="button" aria-label="连接审批" onClick={onConnectionApprovals}>连接审批 ({approvalCount})</button>}
+        {state.identity.admin && <button className="secondary-button header-action-button" type="button" aria-label="连接审批" onClick={onConnectionApprovals}>连接审批{approvalCount > 0 ? ` (${approvalCount})` : ''}</button>}
         <button className="member-toggle" type="button" aria-label="members-toggle" onClick={onMembers}>
           <span className="avatar-stack"><span className="avatar avatar--tiny">A</span><span className="avatar avatar--tiny avatar--offset">B</span></span>
           <span>{onlineCount} 名在线成员</span>

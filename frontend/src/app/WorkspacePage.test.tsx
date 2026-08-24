@@ -269,6 +269,48 @@ describe('WorkspacePage', () => {
     }));
   });
 
+  it('opens connection approval immediately when an administrator receives a member request', () => {
+    const state: BridgeState = {
+      ...workspaceState,
+      identity: { ...workspaceState.identity, admin: true },
+      connectionApprovals: [{ id: '42', displayName: 'Cara', userCode: 'C003', requestedAt: '2026-08-24T10:00:00Z' }]
+    };
+    const bridge = createFakeBridge(state);
+    render(<WorkspacePage bridge={bridge} state={state} />);
+
+    expect(screen.getByRole('dialog', { name: '连接审批' })).toBeInTheDocument();
+    expect(screen.getByText('Cara#C003')).toBeInTheDocument();
+  });
+
+  it('requires an owner decision before an active connection approval can close', () => {
+    const state: BridgeState = {
+      ...workspaceState,
+      identity: { ...workspaceState.identity, admin: true },
+      connectionApprovals: [{ id: '42', displayName: 'Cara', userCode: 'C003', requestedAt: '2026-08-24T10:00:00Z' }]
+    };
+    const bridge = createFakeBridge(state);
+    render(<WorkspacePage bridge={bridge} state={state} />);
+
+    const dialog = screen.getByRole('dialog', { name: '连接审批' });
+    fireEvent.click(dialog.parentElement!);
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.getByRole('dialog', { name: '连接审批' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'close' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the administrator connection approval inbox available when it is empty', () => {
+    const state: BridgeState = {
+      ...workspaceState,
+      identity: { ...workspaceState.identity, admin: true },
+      connectionApprovals: []
+    };
+    const bridge = createFakeBridge(state);
+    render(<WorkspacePage bridge={bridge} state={state} />);
+
+    expect(screen.getByRole('button', { name: '连接审批' })).toBeInTheDocument();
+  });
+
   it('opens a member profile with online state and admin badge', () => {
     const bridge = createFakeBridge(workspaceState);
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);

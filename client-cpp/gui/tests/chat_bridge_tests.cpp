@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QTcpSocket>
 #include <QThread>
 #include <QSignalSpy>
 #include <QtTest>
@@ -50,6 +51,7 @@ private slots:
     void workerDisconnectRunsOnWorkerThread();
     void serverConnectionCompletesWithoutMessageLifetimeCorruption();
     void localHostConnectionCompletesWithoutMessageLifetimeCorruption();
+    void approvedLanMemberConnectionCompletesAfterLoginPending();
     void usersResponseUsesBulkModelUpdates();
     void roomsResponseUsesBulkModelUpdates();
     void connectionApprovalStateIsExposedAndCleared();
@@ -303,6 +305,55 @@ void ChatBridgeTests::localHostConnectionCompletesWithoutMessageLifetimeCorrupti
     QVERIFY2(connectedSpy.count() > 0, "local Host connection did not succeed");
     controller.disconnectFromServer();
     QTest::qWait(100);
+}
+
+void ChatBridgeTests::approvedLanMemberConnectionCompletesAfterLoginPending() {
+    const HostPathResolver::HostPaths hostPaths =
+        HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
+    if (!hostPaths.available()) {
+        QSKIP("Local Host executable is not available in this checkout");
+    }
+
+    QTcpSocket portProbe;
+    portProbe.connectToHost(QStringLiteral("127.0.0.1"), 8888);
+    if (portProbe.waitForConnected(100)) {
+        QSKIP("Local port 8888 is occupied by an interactive host");
+    }
+
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString certFile = temporary.filePath(QStringLiteral("certs/server-lan.crt"));
+    const QString keyFile = temporary.filePath(QStringLiteral("certs/server-lan.key"));
+    const QString dbFile = temporary.filePath(QStringLiteral("chat.db"));
+    QVERIFY(QDir().mkpath(QFileInfo(certFile).absolutePath()));
+
+    WinsockScope winsock;
+    QVERIFY2(winsock.result() == 0, "WSAStartup failed");
+    GuiChatController host;
+    QSignalSpy hostConnectedSpy(&host, &GuiChatController::connectedChanged);
+    QSignalSpy hostFailedSpy(&host, &GuiChatController::connectionFailed);
+    host.connectToLocalHost(hostPaths.serverExe, certFile, keyFile, dbFile, "Alice", "A001");
+    QTRY_VERIFY_WITH_TIMEOUT(hostConnectedSpy.count() > 0 || hostFailedSpy.count() > 0, 12000);
+    QVERIFY2(host.connected(), qPrintable(host.statusText()));
+    QVERIFY(host.admin());
+
+    GuiChatController member;
+    QSignalSpy memberConnectedSpy(&member, &GuiChatController::connectedChanged);
+    QSignalSpy memberFailedSpy(&member, &GuiChatController::connectionFailed);
+    member.connectToServerWithTlsName("127.0.0.1", 8888, "Bob", "B001", certFile, "localhost");
+
+    QTRY_VERIFY_WITH_TIMEOUT(!host.pendingConnectionApprovals().isEmpty(), 5000);
+    const QVariantMap request = host.pendingConnectionApprovals().front().toMap();
+    QCOMPARE(request.value("displayName").toString(), QStringLiteral("Bob"));
+    QCOMPARE(request.value("userCode").toString(), QStringLiteral("B001"));
+    QVERIFY(!request.value("id").toString().isEmpty());
+
+    host.sendAdminAction("approve_connection", request.value("userCode").toString(),
+                         request.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(memberConnectedSpy.count() > 0 || memberFailedSpy.count() > 0, 12000);
+    QVERIFY2(member.connected(), qPrintable(member.statusText()));
+    member.disconnectFromServer();
+    host.disconnectFromServer();
 }
 
 void ChatBridgeTests::usersResponseUsesBulkModelUpdates() {

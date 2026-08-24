@@ -46,6 +46,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
   const pendingAdminActionIdRef = useRef<string | null>(null);
   const pendingAdminActionUnsubscribeRef = useRef<(() => void) | null>(null);
   const canManageRoom = state.identity.admin || state.permissions.activeRoomCanManage;
+  const hasBlockingConnectionApproval = state.identity.admin && (state.connectionApprovals?.length ?? 0) > 0;
 
   useLayoutEffect(() => animateWorkspacePanels(workspaceRef.current!), []);
 
@@ -53,6 +54,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
     if (!memberDrawerOpen && !sidebarOpen && !createRoomOpen && !roomManageOpen && !connectionApprovalOpen && !memberToManage && !memberProfile && !pendingAdminAction) return undefined;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      if (hasBlockingConnectionApproval) return;
       setMemberDrawerOpen(false);
       setSidebarOpen(false);
       setRoomManageOpen(false);
@@ -64,13 +66,19 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [memberDrawerOpen, sidebarOpen, createRoomOpen, roomManageOpen, connectionApprovalOpen, memberToManage, memberProfile, pendingAdminAction]);
+  }, [memberDrawerOpen, sidebarOpen, createRoomOpen, roomManageOpen, connectionApprovalOpen, memberToManage, memberProfile, pendingAdminAction, hasBlockingConnectionApproval]);
 
   useEffect(() => () => {
     pendingRoomUnsubscribeRef.current?.();
     pendingRoomActionUnsubscribeRef.current?.();
     pendingAdminActionUnsubscribeRef.current?.();
   }, []);
+
+  useEffect(() => {
+    if (state.identity.admin && (state.connectionApprovals?.length ?? 0) > 0) {
+      setConnectionApprovalOpen(true);
+    }
+  }, [state.connectionApprovals?.length, state.identity.admin]);
 
   const validRoomName = roomNamePattern.test(roomName.trim());
 
@@ -242,7 +250,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
           <button className={pendingAdminAction.action === 'kick' ? 'danger-button' : 'primary-button'} type="button" disabled={pendingAdminActionIdRef.current !== null} onClick={confirmAdminAction}>确认</button>
         </div>
       </ModalSurface>}
-      {connectionApprovalOpen && <ModalSurface title="连接审批" onClose={() => setConnectionApprovalOpen(false)}>
+      {connectionApprovalOpen && <ModalSurface title="连接审批" onClose={() => setConnectionApprovalOpen(false)} dismissible={!hasBlockingConnectionApproval}>
         {(state.connectionApprovals ?? []).length === 0 ? <p className="settings-note">没有待确认的成员连接。</p> : <div className="connection-approval-list">
           {(state.connectionApprovals ?? []).map((request) => <div className="connection-approval-item" key={request.id}>
             <strong>{request.displayName}#{request.userCode}</strong>

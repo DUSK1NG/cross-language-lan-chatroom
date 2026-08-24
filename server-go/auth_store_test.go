@@ -7,6 +7,7 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestAuthStore(t *testing.T) (*AuthStore, string) {
@@ -121,6 +122,43 @@ func TestHandleConnectionWaitsForRoomOwnerApproval(t *testing.T) {
 	}
 	_ = clientConn.Close()
 	waitForHandler(t, done, "approved connection")
+}
+
+func TestConnectionApprovalTimeoutReturnsReadableLoginError(t *testing.T) {
+	originalTimeout := connectionApprovalTimeout
+	connectionApprovalTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { connectionApprovalTimeout = originalTimeout })
+
+	store, _ := newTestAuthStore(t)
+	hub := NewHub()
+	admin := newTestClient(t, "Host", "HOST01")
+	admin.IsAdmin = true
+	hub.Clients[admin] = true
+	hub.ActiveCodes[admin.NormalizedCode] = admin
+	go hub.Run()
+
+	serverConn, clientConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		handleConnectionWithStore(serverConn, hub, store)
+		close(done)
+	}()
+
+	if err := sendMessage(clientConn, Message{Type: "login", Username: "Bob", UserCode: "BOB001"}); err != nil {
+		t.Fatal(err)
+	}
+	pending := receiveClientTestMessage(t, clientConn)
+	if pending.Type != "login_pending" || pending.MessageID == "" {
+		t.Fatalf("pending login response = %+v", pending)
+	}
+	_ = <-admin.Send
+
+	loginError := receiveClientTestMessage(t, clientConn)
+	if loginError.Type != "login_error" || loginError.Content != "The room owner did not approve the connection in time" {
+		t.Fatalf("timeout login response = %+v", loginError)
+	}
+	_ = clientConn.Close()
+	waitForHandler(t, done, "timed out connection")
 }
 
 func TestResolveConnectionIdentityDoesNotPersistBeforeApproval(t *testing.T) {

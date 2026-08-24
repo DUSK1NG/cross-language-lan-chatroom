@@ -1,6 +1,6 @@
 # LAN Chat 项目交接说明
 
-更新：2026-08-23。此文档供新的 Codex 对话接手项目；以仓库实际代码和 `git status` 为准。
+更新：2026-08-24。此文档供新的 Codex 对话接手项目；以仓库实际代码和 `git status` 为准。
 
 ## 当前状态
 
@@ -85,6 +85,8 @@ pnpm.cmd --dir .\frontend test -- --run
 ```
 
 如果系统 `go.exe` 与 `GOROOT` 版本不匹配，请优先使用仓库 `.tools\go1.25.5\go\bin\go.exe`，并把 `GOROOT` 指向对应的 `.tools\go1.25.5\go`。若 PowerShell 找不到 Node，将 `.tools\node-v24.19.0-win-x64` 临时加入 `PATH`。不要提交 `.tools/`、`out/`、`release/`、缓存、证书、数据库或日志。
+
+每次开始新功能阶段或制作发布包前，先执行 [发布基线与恢复验收清单](release-checklist.md)。它要求记录提交号和构建/ZIP/安装器哈希，并明确 GUI 当前没有通用断线自动恢复；CLI 的退避重连不能视为 GUI 已完成该能力。
 
 ## 后续协作约束
 

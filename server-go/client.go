@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const connectionApprovalTimeout = 60 * time.Second
+var connectionApprovalTimeout = 60 * time.Second
 
 func isLoopbackRemote(address net.Addr) bool {
 	if address == nil {
@@ -116,6 +116,11 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 					case hub.CancelConnectionApproval <- approvalID:
 					default:
 					}
+					// The approval wait uses a deadline so an abandoned connection cannot
+					// block forever. Clear it before sending the final decision: otherwise
+					// the timeout also expires the write side and the member sees a TLS
+					// record error instead of a readable login result.
+					_ = conn.SetDeadline(time.Time{})
 					if !approved {
 						_ = sendMessage(conn, Message{Type: "login_error", Content: reason})
 						return

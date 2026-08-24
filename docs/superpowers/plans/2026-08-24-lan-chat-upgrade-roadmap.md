@@ -52,6 +52,8 @@
 
 ## Phase 1: Automatic Reconnect and Session Recovery
 
+Before the reconnect work, make the two independent LAN admission checks explicit in the UI: the member verifies the host public certificate/fingerprint to prevent a spoofed host, while the host separately approves or rejects the member connection. Discovery wording must not present certificate verification as permission to join; after the member sends a request, show `等待房主批准` until the server returns a final decision.
+
 **Files:**
 
 - Modify: `client-cpp/gui/src/gui_connection_worker.hpp`, `client-cpp/gui/src/gui_connection_worker.cpp`, `client-cpp/gui/src/gui_chat_controller.hpp`, `client-cpp/gui/src/gui_chat_controller.cpp`, `client-cpp/gui/src/chat_bridge.cpp`, `frontend/src/bridge/types.ts`, `frontend/src/app/App.tsx`, `frontend/src/components/ChatHeader.tsx`.
