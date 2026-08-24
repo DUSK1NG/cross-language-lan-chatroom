@@ -8,6 +8,10 @@
 #include <QString>
 #include <QTimer>
 
+#include <memory>
+
+#include "lan_discovery_service.hpp"
+
 class QAbstractItemModel;
 class GuiChatController;
 class GraphicsInfo;
@@ -51,6 +55,7 @@ private:
     GuiChatController* controller_;
     PerformanceProfile* performanceProfile_ = nullptr;
     GraphicsInfo* graphicsInfo_ = nullptr;
+    std::unique_ptr<LanDiscoveryService> lanDiscovery_;
     QTimer stateTimer_;
     QString latestStateJson_;
     QJsonObject hostDefaults_;

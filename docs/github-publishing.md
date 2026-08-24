@@ -35,7 +35,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.
 
 使用 `scripts\package-unified-release.ps1` 生成。它包含已经部署的现代 GUI、Qt WebEngine、OpenSSL、MSVC 运行时和 `server-go\chat-server.exe`，不包含源码、Node.js、Go SDK、编译器、自动编译入口、初始证书、私钥或数据库。
 
-每台电脑都运行同一个 `lan-chat-gui.exe`：选择“创建本地聊天室”时，程序在该房主电脑自动生成 TLS 证书、私钥和数据库；选择“加入局域网聊天室”时，程序作为成员连接房主。房主只向成员分发公开的 `server-lan.crt`，绝不分发私钥。
+每台电脑都运行同一个 `LANChat.exe`：它在检测到本地服务端时，先在该房主电脑生成 TLS 证书、私钥和数据库，再启动现代 GUI；成员机则直接进入 GUI。房主只向成员分发公开的 `server-lan.crt`，绝不分发私钥。
 
 产物固定为 `release\LANChat-Windows-x64\` 与 `release\LANChat-Windows-x64.zip`。脚本会部署 Qt WebEngine、OpenSSL 与 MSVC 运行时，加入已构建的 Go Server，执行烟雾检查，并拒绝把证书、私钥、数据库、源码或构建工具打进包中。
 

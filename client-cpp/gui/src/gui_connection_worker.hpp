@@ -22,7 +22,8 @@ public slots:
                          int serverPort,
                          const QString& username,
                          const QString& userCode,
-                         const QString& caFile);
+                         const QString& caFile,
+                         const QString& tlsServerName = {});
     void connectToLocalHost(const QString& serverExe,
                             const QString& certFile,
                             const QString& keyFile,
@@ -69,6 +70,7 @@ private:
                                     const QString& username,
                                     const QString& userCode,
                                     const QString& caFile,
+                                    const QString& tlsServerName,
                                     int attempts);
     bool isLocalServerListening(int timeoutMs) const;
     void stopHostedServer();

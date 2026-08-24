@@ -46,7 +46,7 @@ function Test-InstallerDefinition([string]$Path) {
     foreach ($required in @(
         'PrivilegesRequired=lowest',
         'Uninstallable=yes',
-        'UninstallDisplayIcon={app}\lan-chat-gui.exe',
+        'UninstallDisplayIcon={app}\LANChat.exe',
         'Name: "{autoprograms}\LAN Chat"',
         'Name: "{autodesktop}\LAN Chat"',
         'Name: "desktopicon"',

@@ -135,17 +135,20 @@ bool ConnectionState::connect_and_login(
         return false;
     }
 
+    const std::string verifyHost = config_.tls_server_name.empty()
+        ? config_.server_ip
+        : config_.tls_server_name;
     candidate->ssl = SSL_new(candidate->ssl_context);
     if (candidate->ssl == nullptr ||
         SSL_set_fd(candidate->ssl, static_cast<int>(candidate->socket_handle)) != 1 ||
-        !set_verify_host(candidate->ssl, config_.server_ip)) {
+        !set_verify_host(candidate->ssl, verifyHost)) {
         last_error_ = openssl_error("TLS setup failed");
         close_current();
         return false;
     }
     IN_ADDR numeric_address{};
-    if (inet_pton(AF_INET, config_.server_ip.c_str(), &numeric_address) != 1) {
-        SSL_set_tlsext_host_name(candidate->ssl, config_.server_ip.c_str());
+    if (inet_pton(AF_INET, verifyHost.c_str(), &numeric_address) != 1) {
+        SSL_set_tlsext_host_name(candidate->ssl, verifyHost.c_str());
     }
     if (SSL_connect(candidate->ssl) != 1) {
         last_error_ = openssl_error("SSL_connect failed");

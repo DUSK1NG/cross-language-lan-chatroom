@@ -108,6 +108,131 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   const [username, setUsername] = useState(() => guest ? 'Bob' : (state.savedConnection.username || 'Alice'));
   const [userCode, setUserCode] = useState(() => guest ? 'B001' : (state.savedConnection.userCode || 'A001'));
   const [caFile, setCaFile] = useState(state.savedConnection.caFile);
+  const [selectedHostId, setSelectedHostId] = useState('');
+  const [manualEntry, setManualEntry] = useState(!guest);
+  const busy = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
+  const validPort = Number.isInteger(Number(serverPort)) && Number(serverPort) >= 1 && Number(serverPort) <= 65535;
+  const discovery = state.lanDiscovery ?? { scanning: false, hosts: [] };
+  const selectedHost = discovery.hosts.find((host) => host.id === selectedHostId);
+  const showManualFields = !guest || manualEntry || !selectedHost;
+
+  useEffect(() => {
+    if (guest) bridge.dispatch(createCommand('session.discoverLanHosts', {}));
+  }, [bridge, guest]);
+
+  useEffect(() => {
+    if (selectedHostId && !discovery.hosts.some((host) => host.id === selectedHostId)) {
+      setSelectedHostId('');
+    }
+  }, [discovery.hosts, selectedHostId]);
+
+  function connect() {
+    if (busy || !username.trim() || !userCode.trim()) return;
+    if (guest && selectedHost && !manualEntry) {
+      bridge.dispatch(createCommand('session.connectDiscoveredHost', {
+        hostId: selectedHost.id, username: username.trim(), userCode: userCode.trim()
+      }));
+      return;
+    }
+    if (!serverIp.trim() || !validPort) return;
+    bridge.dispatch(createCommand('session.connectRemote', {
+      serverIp: serverIp.trim(), serverPort: Number(serverPort), username: username.trim(),
+      userCode: userCode.trim(), caFile: caFile.trim()
+    }));
+  }
+
+  function selectHost(hostId: string) {
+    setSelectedHostId(hostId);
+    setManualEntry(false);
+  }
+
+  return (
+    <main className="app-shell connect-shell">
+      <section className="connect-panel">
+        <p className="eyebrow">SECURE CONNECTION</p>
+        <h1>{guest ? '加入局域网聊天室' : '连接远程服务器'}</h1>
+        <ConnectionStatus state={state} />
+        <p className="connection-help">
+          {guest ? '先从附近聊天室中选择房主；IPv4 变化后会自动重新发现。手动连接仍可作为备用方式。' : '填写已经启动 Go Server 的电脑 IPv4 和端口。'}
+        </p>
+        {guest && (
+          <section className="lan-discovery" aria-label="lan-host-discovery">
+            <div className="lan-discovery__header">
+              <div>
+                <strong>附近聊天室</strong>
+                <small>{discovery.scanning ? '正在搜索局域网聊天室…' : '自动发现同一局域网内的房主'}</small>
+              </div>
+              <button className="secondary-button" type="button" aria-label="refresh-lan-hosts"
+                onClick={() => bridge.dispatch(createCommand('session.discoverLanHosts', {}))} disabled={busy}>
+                刷新
+              </button>
+            </div>
+            {discovery.hosts.length === 0 ? (
+              <p className="lan-discovery__empty">{discovery.scanning ? '正在等待房主广播…' : '未找到聊天室。请确认房主已启动、两台电脑在同一局域网。'}</p>
+            ) : (
+              <div className="lan-discovery__list">
+                {discovery.hosts.map((host) => (
+                  <button className={`lan-host-card${selectedHostId === host.id && !manualEntry ? ' lan-host-card--selected' : ''}`}
+                    type="button" key={host.id} aria-label={`select-lan-host-${host.hostName}`}
+                    aria-pressed={selectedHostId === host.id && !manualEntry} onClick={() => selectHost(host.id)} disabled={busy}>
+                    <span><strong>{host.hostName}</strong><small>{host.serverIp}:{host.serverPort}</small></span>
+                    <span className="lan-host-card__trust">{host.known ? '已信任' : '首次确认'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedHost && !manualEntry && (
+              <p className="lan-discovery__notice">
+                点击“确认并加入”后，将保存并固定校验房主的公开证书。指纹：{selectedHost.fingerprintSha256.slice(0, 16)}…
+              </p>
+            )}
+          </section>
+        )}
+        {guest && selectedHost && !manualEntry && (
+          <button className="manual-entry-button" type="button" onClick={() => setManualEntry(true)} disabled={busy}>
+            改用手动连接
+          </button>
+        )}
+        <div className="form-grid">
+          {showManualFields && <>
+            <label htmlFor="server-ip">服务器 IP</label>
+            <input id="server-ip" value={serverIp} onChange={(event) => setServerIp(event.target.value)} />
+            <label htmlFor="server-port">端口</label>
+            <input id="server-port" inputMode="numeric" value={serverPort} onChange={(event) => setServerPort(event.target.value)} />
+          </>}
+          <label htmlFor="username">用户名</label>
+          <input id="username" value={username} onChange={(event) => setUsername(event.target.value)} />
+          <label htmlFor="user-code">用户代码</label>
+          <input id="user-code" value={userCode} onChange={(event) => setUserCode(event.target.value)} />
+          {showManualFields && <>
+            <label htmlFor="ca-file">CA 文件</label>
+            <input id="ca-file" value={caFile} onChange={(event) => setCaFile(event.target.value)} placeholder="server-lan.crt 的完整路径" />
+          </>}
+        </div>
+        <div className="form-actions">
+          <button className="secondary-button" type="button" onClick={onBack} disabled={busy}>返回</button>
+          <button className="primary-button" type="button" aria-label={guest && selectedHost && !manualEntry ? 'one-click-join' : 'connect-session'} onClick={connect}
+            disabled={busy || !username.trim() || !userCode.trim() || (showManualFields && (!serverIp.trim() || !validPort))}>
+            {busy ? '连接中…' : (guest && selectedHost && !manualEntry ? '确认并加入' : '连接')}
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function LegacyRemoteConnectionPage({ bridge, state, mode, onBack }: {
+  bridge: ChatBridgeClient;
+  state: BridgeState;
+  mode: ConnectionMode;
+  onBack: () => void;
+}) {
+  const guest = mode === 'guest';
+  const [serverIp, setServerIp] = useState(state.savedConnection.serverIp || '127.0.0.1');
+  const [serverPort, setServerPort] = useState(String(state.savedConnection.serverPort || 8888));
+  const [username, setUsername] = useState(() => guest ? 'Bob' : (state.savedConnection.username || 'Alice'));
+  const [userCode, setUserCode] = useState(() => guest ? 'B001' : (state.savedConnection.userCode || 'A001'));
+  const [caFile, setCaFile] = useState(state.savedConnection.caFile);
   const busy = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
   const validPort = Number.isInteger(Number(serverPort)) && Number(serverPort) >= 1 && Number(serverPort) <= 65535;
 

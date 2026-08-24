@@ -25,9 +25,11 @@ function Get-ExistingModernClient {
     }
 
     $gui = [string]$manifest.gui
+    $launcher = [string]$manifest.launcher
     $qtPrefix = [string]$manifest.qtPrefix
     $openSslRoot = [string]$manifest.openSslRoot
     if ([string]::IsNullOrWhiteSpace($gui) -or
+        [string]::IsNullOrWhiteSpace($launcher) -or
         [string]::IsNullOrWhiteSpace($qtPrefix) -or
         [string]::IsNullOrWhiteSpace($openSslRoot)) {
         return $null
@@ -37,6 +39,7 @@ function Get-ExistingModernClient {
     $openSslBin = Join-Path $openSslRoot 'bin'
     $required = @(
         $gui,
+        $launcher,
         (Join-Path $qtBin 'Qt6Core.dll'),
         (Join-Path $qtBin 'Qt6WebEngineCore.dll'),
         (Join-Path $qtBin 'Qt6WebEngineWidgets.dll')
@@ -51,7 +54,8 @@ function Get-ExistingModernClient {
 
     return [PSCustomObject]@{
         Gui = $gui
-        WorkingDirectory = Split-Path -Parent $gui
+        Launcher = $launcher
+        WorkingDirectory = Split-Path -Parent $launcher
         QtBin = $qtBin
         OpenSslBin = $openSslBin
     }
@@ -69,15 +73,21 @@ if (-not $Rebuild.IsPresent -and $null -ne $existingClient) {
     }
 
     $previousPath = $env:PATH
+    $previousOpenSslRuntimeDirectory = $env:LAN_CHAT_OPENSSL_RUNTIME_DIR
     try {
-        $env:PATH = "$($existingClient.QtBin);$($existingClient.OpenSslBin);$previousPath"
-        $process = Start-Process -FilePath $existingClient.Gui -WorkingDirectory $existingClient.WorkingDirectory -PassThru
+        # Qt WebEngine probes libraries when the process starts. Keep the
+        # vcpkg OpenSSL DLLs out of PATH and let the connection worker load
+        # them only when a secure connection is requested.
+        $env:PATH = "$($existingClient.QtBin);$previousPath"
+        $env:LAN_CHAT_OPENSSL_RUNTIME_DIR = $existingClient.OpenSslBin
+        $process = Start-Process -FilePath $existingClient.Launcher -WorkingDirectory $existingClient.WorkingDirectory -PassThru
         if ($Wait.IsPresent) {
             $process.WaitForExit()
             exit $process.ExitCode
         }
     } finally {
         $env:PATH = $previousPath
+        $env:LAN_CHAT_OPENSSL_RUNTIME_DIR = $previousOpenSslRuntimeDirectory
     }
     return
 }

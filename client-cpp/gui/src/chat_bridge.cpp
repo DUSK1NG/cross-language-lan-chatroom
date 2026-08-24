@@ -3,6 +3,7 @@
 #include "bridge_protocol.hpp"
 #include "graphics_info.hpp"
 #include "gui_chat_controller.hpp"
+#include "lan_discovery_service.hpp"
 #include "performance_profile.hpp"
 
 #include <QAbstractItemModel>
@@ -11,6 +12,7 @@
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QMetaObject>
+#include <memory>
 
 namespace {
 constexpr int kMaxSerializedRows = 500;
@@ -47,7 +49,7 @@ ChatBridge::ChatBridge(GuiChatController* controller, QObject* parent)
 ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* performanceProfile,
                        GraphicsInfo* graphicsInfo, QObject* parent)
     : QObject(parent), controller_(controller), performanceProfile_(performanceProfile),
-      graphicsInfo_(graphicsInfo) {
+      graphicsInfo_(graphicsInfo), lanDiscovery_(std::make_unique<LanDiscoveryService>()) {
     Q_ASSERT(controller_);
     stateTimer_.setSingleShot(true);
     stateTimer_.setInterval(kStatePublishIntervalMs);
@@ -69,6 +71,10 @@ ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* perfor
     });
     connect(controller_, &GuiChatController::activeRoomCanManageChanged, this, &ChatBridge::scheduleStateUpdate);
     connect(controller_, &GuiChatController::savedConnectionChanged, this, &ChatBridge::scheduleStateUpdate);
+    connect(lanDiscovery_.get(), &LanDiscoveryService::hostsChanged,
+            this, &ChatBridge::scheduleStateUpdate);
+    connect(lanDiscovery_.get(), &LanDiscoveryService::scanningChanged,
+            this, &ChatBridge::scheduleStateUpdate);
     if (performanceProfile_) {
         connect(performanceProfile_, &PerformanceProfile::modeChanged,
                 this, &ChatBridge::scheduleStateUpdate);
@@ -258,6 +264,8 @@ QJsonObject ChatBridge::buildState() {
                                          {"username", controller_->savedUsername()},
                                          {"userCode", controller_->savedUserCode()},
                                          {"caFile", controller_->savedCaFile()}}},
+        {"lanDiscovery", QJsonObject{{"scanning", lanDiscovery_->scanning()},
+                                      {"hosts", lanDiscovery_->hostsJson()}}},
         {"hostDefaults", hostDefaults_}
     };
 }
@@ -308,6 +316,42 @@ void ChatBridge::dispatch(const QString& commandJson) {
         controller_->connectToServer(payload.value("serverIp").toString(), payload.value("serverPort").toInt(),
                                      payload.value("username").toString(), payload.value("userCode").toString(),
                                      payload.value("caFile").toString());
+    } else if (type == QStringLiteral("session.discoverLanHosts")) {
+        QString discoveryError;
+        if (!lanDiscovery_->refresh(&discoveryError)) {
+            const QJsonObject error = bridge::makeError(QStringLiteral("discovery_unavailable"), discoveryError,
+                                                        true, QStringLiteral("bridge"), commandId);
+            emit commandResult(QString::fromUtf8(
+                QJsonDocument(bridge::makeCommandResult(commandId, false, error)).toJson(QJsonDocument::Compact)));
+            scheduleStateUpdate();
+            return;
+        }
+    } else if (type == QStringLiteral("session.connectDiscoveredHost")) {
+        LanDiscoveredHost host;
+        QString discoveryError;
+        if (!lanDiscovery_->connectData(payload.value("hostId").toString(), &host, &discoveryError)) {
+            const QJsonObject error = bridge::makeError(QStringLiteral("discovery_host_unavailable"), discoveryError,
+                                                        true, QStringLiteral("bridge"), commandId);
+            emit commandResult(QString::fromUtf8(
+                QJsonDocument(bridge::makeCommandResult(commandId, false, error)).toJson(QJsonDocument::Compact)));
+            scheduleStateUpdate();
+            return;
+        }
+        const QString certificatePath = lanDiscovery_->persistCertificate(host, &discoveryError);
+        if (certificatePath.isEmpty()) {
+            const QJsonObject error = bridge::makeError(QStringLiteral("discovery_certificate_failed"), discoveryError,
+                                                        false, QStringLiteral("bridge"), commandId);
+            emit commandResult(QString::fromUtf8(
+                QJsonDocument(bridge::makeCommandResult(commandId, false, error)).toJson(QJsonDocument::Compact)));
+            scheduleStateUpdate();
+            return;
+        }
+        // Discovery pins the exact self-signed certificate. Its stable DNS
+        // identity remains "localhost" while the transport IPv4 may change.
+        controller_->connectToServerWithTlsName(host.serverIp, host.serverPort,
+                                                payload.value("username").toString(),
+                                                payload.value("userCode").toString(),
+                                                certificatePath, QStringLiteral("localhost"));
     } else if (type == QStringLiteral("session.connectLocalHost")) {
         controller_->connectToLocalHost(payload.value("serverExe").toString(), payload.value("certFile").toString(),
                                         payload.value("keyFile").toString(), payload.value("dbFile").toString(),

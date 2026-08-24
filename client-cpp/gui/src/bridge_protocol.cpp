@@ -73,6 +73,12 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
     if (type == QStringLiteral("session.connectLocalHost")) {
         return hasRequiredStrings(payload, {"serverExe", "certFile", "keyFile", "dbFile", "username", "userCode"});
     }
+    if (type == QStringLiteral("session.discoverLanHosts")) {
+        return payload.isEmpty();
+    }
+    if (type == QStringLiteral("session.connectDiscoveredHost")) {
+        return hasRequiredStrings(payload, {"hostId", "username", "userCode"});
+    }
     if (type == QStringLiteral("session.disconnect") ||
         type == QStringLiteral("directory.refreshUsers") ||
         type == QStringLiteral("directory.refreshRooms")) {

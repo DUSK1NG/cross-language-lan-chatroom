@@ -58,9 +58,32 @@ describe('App', () => {
     expect(screen.getByDisplayValue('B001')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'connect-session' }));
 
-    expect(bridge.commands[0]).toMatchObject({
+    expect(bridge.commands.at(-1)).toMatchObject({
       type: 'session.connectRemote',
       payload: { serverIp: '127.0.0.1', serverPort: 8888, username: 'Bob', userCode: 'B001' }
+    });
+  });
+
+  it('joins a discovered LAN host without exposing an IP or certificate path', () => {
+    const bridge = createFakeBridge({
+      ...disconnectedState,
+      lanDiscovery: {
+        scanning: false,
+        hosts: [{
+          id: 'a'.repeat(64), hostName: 'Alice PC', serverIp: '192.168.8.23', serverPort: 8888,
+          fingerprintSha256: 'a'.repeat(64), known: false
+        }]
+      }
+    });
+    render(<App bridge={bridge} />);
+    fireEvent.click(screen.getByRole('button', { name: 'guest-mode' }));
+    fireEvent.click(screen.getByRole('button', { name: 'select-lan-host-Alice PC' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'one-click-join' }));
+
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'session.connectDiscoveredHost',
+      payload: { hostId: 'a'.repeat(64), username: 'Bob', userCode: 'B001' }
     });
   });
 

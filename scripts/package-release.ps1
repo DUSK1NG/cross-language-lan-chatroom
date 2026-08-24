@@ -51,10 +51,12 @@ function Get-OpenSslRootFromBuildCache([string]$CacheFile) {
 
 function Copy-OpenSslRuntime([string]$OpenSslRoot, [string]$Destination) {
     $binDirectory = Join-Path $OpenSslRoot 'bin'
+    $runtimeDirectory = Join-Path $Destination 'openssl'
+    New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
     foreach ($pattern in @('libssl-*.dll', 'libcrypto-*.dll')) {
         $runtime = Get-ChildItem -LiteralPath $binDirectory -Filter $pattern -File | Select-Object -First 1
         if ($null -eq $runtime) { throw "Missing OpenSSL runtime '$pattern' in $binDirectory" }
-        Copy-Item -LiteralPath $runtime.FullName -Destination (Join-Path $Destination $runtime.Name) -Force
+        Copy-Item -LiteralPath $runtime.FullName -Destination (Join-Path $runtimeDirectory $runtime.Name) -Force
     }
 }
 
@@ -94,6 +96,7 @@ function Test-MemberArchive([string]$Archive) {
     try {
         $entryNames = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
         foreach ($required in @(
+            'LANChat.exe',
             'lan-chat-gui.exe',
             'Qt6WebEngineCore.dll',
             'QtWebEngineProcess.exe',
@@ -126,8 +129,9 @@ if (-not $SkipBuild) {
 
 $cacheFile = Join-Path $BuildDirectory 'CMakeCache.txt'
 $guiSource = Join-Path $BuildDirectory 'lan-chat-gui.exe'
+$launcherSource = Join-Path $BuildDirectory 'lan-chat-launcher.exe'
 $memberGuide = Join-Path $Root 'docs\member-package.md'
-foreach ($requiredInput in @($cacheFile, $guiSource, $memberGuide)) {
+foreach ($requiredInput in @($cacheFile, $guiSource, $launcherSource, $memberGuide)) {
     if (-not (Test-Path -LiteralPath $requiredInput -PathType Leaf)) {
         throw "Missing member-package input: $requiredInput"
     }
@@ -151,9 +155,10 @@ if (Test-Path -LiteralPath $ArchivePath -PathType Leaf) {
 }
 New-Item -ItemType Directory -Force -Path $ReleaseDirectory | Out-Null
 
-Write-Step 'Copy modern GUI executable'
+Write-Step 'Copy modern GUI executable and runtime entry point'
 $guiTarget = Join-Path $ReleaseDirectory 'lan-chat-gui.exe'
 Copy-Item -LiteralPath $guiSource -Destination $guiTarget -Force
+Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $ReleaseDirectory 'LANChat.exe') -Force
 
 Write-Step 'Deploy Qt WebEngine and MSVC runtime'
 & $deployTool --release --compiler-runtime $guiTarget

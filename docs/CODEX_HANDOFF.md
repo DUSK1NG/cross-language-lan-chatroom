@@ -32,17 +32,18 @@ React UI
 - 中文现代聊天 UI、设置与管理员入口、连接状态、未读提示和性能采样（性能面板仅用于测试，不进发布包）。
 - 房主、局域网成员和远程服务器三种连接入口。
 - `-auto-cert`：房主首次创建本地聊天室时，服务端在本机生成完整 TLS 证书对和 SQLite 数据库；只有半个证书对时会报错，不会覆盖现有身份文件。
+- 局域网自动发现：本地房主每秒通过 UDP `38888` 公告公开证书、证书 SHA-256 指纹和 TCP 端口；成员从“附近聊天室”确认加入后仅在本机保存公开证书，使用 `localhost` TLS 身份校验，IPv4 变化可自动重新发现。手动 IPv4/证书入口保留为 UDP 被阻止时的回退。
 
 ## 当前 Windows 交付
 
 标准交付是 **一个统一运行包**：`LANChat-Windows-x64.zip`。
 
-- 所有电脑都解压后运行同一个 `lan-chat-gui.exe`。
+- 所有电脑都解压后运行同一个 `LANChat.exe`；它在存在本地服务端时先完成本机 TLS 身份初始化，再启动 `lan-chat-gui.exe`。
 - 选择“创建本地聊天室”时，包内 `server-go\chat-server.exe` 在该房主电脑生成 `server-go\certs\server-lan.crt`、`server-go\certs\server-lan.key` 和 `server-go\chat.db`。
 - 选择“加入局域网聊天室”时，同一 GUI 作为成员连接房主。
 - 统一包不含源码、Node、Go SDK、编译器、自动编译启动器、初始证书、私钥、数据库或聊天记录。
 - `LANChat-Source-Launcher-windows-x64.zip` 仅作为开发者可选源码启动工具，不是普通用户的房主包。
-- `server-lan.key`、`chat.db`、聊天记录、令牌永远不进入 GitHub 或 Release；成员只获取房主 IPv4、端口和公开 `server-lan.crt`。
+- `server-lan.key`、`chat.db`、聊天记录、令牌永远不进入 GitHub 或 Release；默认成员通过自动发现获得公开证书，只有手动回退时才获取房主 IPv4、端口和公开 `server-lan.crt`。
 
 生成统一包：
 
@@ -58,9 +59,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-re
 ```text
 frontend/src/app/App.tsx                    React 主界面和本地主机表单
 client-cpp/gui/src/chat_bridge.*            QWebChannel 命令/状态桥接
+client-cpp/gui/src/lan_discovery_service.*  UDP 房主发现与公开证书固定
 client-cpp/gui/src/gui_connection_worker.*  本地服务端进程与 TLS 连接
 client-cpp/gui/src/host_path_resolver.*     统一包/开发目录的服务端路径解析
 server-go/main.go                           Go Server 参数与 TLS 监听
+server-go/lan_discovery.go                  UDP 房间公告
 server-go/auto_cert.go                      首次 TLS 证书生成
 scripts/build-modern.ps1                    现代构建、CTest
 scripts/package-unified-release.ps1         单一房主/成员运行包

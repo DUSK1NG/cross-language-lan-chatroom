@@ -5,8 +5,9 @@
 ## 已完成的手动联调
 
 - 房主在本机创建局域网聊天室，Go TLS 服务端成功启动并自动连接。
-- 第二台 Windows PC 使用 `LANChat-Windows-x64.zip` 独立启动，填写房主真实局域网 IPv4、端口 `8888` 和 `server-lan.crt` 后成功加入。
+- 第二台 Windows PC 使用 `LANChat-Windows-x64.zip` 独立启动，在“附近聊天室”发现房主并确认加入，无需手动填写 IPv4 或复制证书。
 - 两台电脑之间的消息收发验证完成。
+- 将房主电脑切换网络或续租 DHCP 后，成员刷新列表仍能发现同一证书指纹的房间并重新连接。
 
 ## 每次发布前执行
 
@@ -27,4 +28,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.
 
 - 统一运行包：仅包含已部署的现代客户端、运行时和 `server-go\chat-server.exe`。它不含 Node.js、Go、编译器、源码、初始私钥、证书、数据库或自动编译入口。
 - GitHub 源码启动器包：仅作为开发者可选工具，包含源码与 `LANChat-Launcher.exe`；首次启动会明确询问后才安装构建依赖并自动编译。
-- 房主仅向成员传递 IPv4、端口和公开的 `server-lan.crt`。`server-lan.key`、`chat.db`、聊天记录和任何访问令牌均不得进入 GitHub 或任何发布包。
+- 自动发现只传递房主的公开证书及指纹；若自动发现不可用，房主才向成员传递 IPv4、端口和公开的 `server-lan.crt`。`server-lan.key`、`chat.db`、聊天记录和任何访问令牌均不得进入 GitHub 或任何发布包。

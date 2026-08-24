@@ -36,6 +36,7 @@ function Stop-SmokeRuntime([string]$Directory) {
 }
 
 foreach ($relativePath in @(
+    'LANChat.exe',
     'lan-chat-gui.exe',
     'Qt6Core.dll',
     'Qt6WebChannel.dll',
@@ -58,7 +59,12 @@ if ($AllowLocalHost.IsPresent) {
 }
 
 foreach ($pattern in @('libssl-*.dll', 'libcrypto-*.dll', 'msvcp140*.dll', 'vcruntime140*.dll')) {
-    if (@(Get-ChildItem -LiteralPath $PackageDirectory -Filter $pattern -File).Count -eq 0) {
+    $searchDirectory = if ($pattern -like 'libssl-*' -or $pattern -like 'libcrypto-*') {
+        Join-Path $PackageDirectory 'openssl'
+    } else {
+        $PackageDirectory
+    }
+    if (@(Get-ChildItem -LiteralPath $searchDirectory -Filter $pattern -File -ErrorAction SilentlyContinue).Count -eq 0) {
         throw "Runtime package is missing runtime matching: $pattern"
     }
 }
@@ -95,19 +101,22 @@ if ($forbiddenFiles.Count -gt 0) {
 if ($Smoke) {
     $smokeDirectory = Join-Path $env:TEMP ('LANChat-package-smoke-' + [Guid]::NewGuid().ToString('N'))
     $previousPath = $env:PATH
-    $process = $null
+    $launcherProcess = $null
     try {
         New-Item -ItemType Directory -Force -Path $smokeDirectory | Out-Null
         Copy-Item -Path (Join-Path $PackageDirectory '*') -Destination $smokeDirectory -Recurse -Force
+        $launcherExe = Join-Path $smokeDirectory 'LANChat.exe'
         $guiExe = Join-Path $smokeDirectory 'lan-chat-gui.exe'
         # Deliberately omit the developer Qt path: the packaged directory must
         # provide every application runtime dependency by itself.
         $env:PATH = "$smokeDirectory;$env:SystemRoot\System32;$env:SystemRoot"
-        $process = Start-Process -FilePath $guiExe -WorkingDirectory $smokeDirectory -WindowStyle Hidden -PassThru
+        $launcherProcess = Start-Process -FilePath $launcherExe -WorkingDirectory $smokeDirectory -WindowStyle Hidden -PassThru
         Start-Sleep -Milliseconds 3000
-        $process.Refresh()
-        if ($process.HasExited) {
-            throw "Runtime GUI exited during smoke test with code $($process.ExitCode)."
+        $guiProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.ExecutablePath -and $_.ExecutablePath.Equals($guiExe, [System.StringComparison]::OrdinalIgnoreCase)
+        } | Select-Object -First 1
+        if ($null -eq $guiProcess) {
+            throw 'Runtime entry point did not start the modern GUI during smoke test.'
         }
         if ($AllowLocalHost.IsPresent) {
             foreach ($relativePath in @(
@@ -122,10 +131,6 @@ if ($Smoke) {
         }
     } finally {
         $env:PATH = $previousPath
-        if ($null -ne $process -and -not $process.HasExited) {
-            Stop-Process -Id $process.Id -Force
-            Wait-Process -Id $process.Id -Timeout 3 -ErrorAction SilentlyContinue
-        }
         if (Test-Path -LiteralPath $smokeDirectory -PathType Container) {
             $resolvedSmokeDirectory = (Resolve-Path -LiteralPath $smokeDirectory).Path
             $tempRoot = (Resolve-Path -LiteralPath $env:TEMP).Path

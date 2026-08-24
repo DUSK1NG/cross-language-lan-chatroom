@@ -65,6 +65,9 @@ public:
     Q_INVOKABLE void connectToServer(const QString& serverIp, int serverPort,
                                      const QString& username, const QString& userCode,
                                      const QString& caFile = {});
+    void connectToServerWithTlsName(const QString& serverIp, int serverPort,
+                                    const QString& username, const QString& userCode,
+                                    const QString& caFile, const QString& tlsServerName);
     Q_INVOKABLE void connectToLocalHost(const QString& serverExe,
                                         const QString& certFile,
                                         const QString& keyFile,

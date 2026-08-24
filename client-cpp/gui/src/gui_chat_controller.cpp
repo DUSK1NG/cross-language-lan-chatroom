@@ -82,6 +82,12 @@ GuiChatController::~GuiChatController() {
 void GuiChatController::connectToServer(const QString& serverIp, int serverPort,
                                         const QString& username, const QString& userCode,
                                         const QString& caFile) {
+    connectToServerWithTlsName(serverIp, serverPort, username, userCode, caFile, {});
+}
+
+void GuiChatController::connectToServerWithTlsName(const QString& serverIp, int serverPort,
+                                                   const QString& username, const QString& userCode,
+                                                   const QString& caFile, const QString& tlsServerName) {
     saveConnectionPreferences(serverIp, serverPort, username, userCode, caFile);
     const bool identityChanged = localUserName_ != username || localUserCode_ != userCode;
     localUserName_ = username;
@@ -91,7 +97,7 @@ void GuiChatController::connectToServer(const QString& serverIp, int serverPort,
     QMetaObject::invokeMethod(worker_, "connectToServer", Qt::QueuedConnection,
                               Q_ARG(QString, serverIp), Q_ARG(int, serverPort),
                               Q_ARG(QString, username), Q_ARG(QString, userCode),
-                              Q_ARG(QString, caFile));
+                              Q_ARG(QString, caFile), Q_ARG(QString, tlsServerName));
 }
 
 void GuiChatController::connectToLocalHost(const QString& serverExe,

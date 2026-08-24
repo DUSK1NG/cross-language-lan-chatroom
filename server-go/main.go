@@ -14,6 +14,8 @@ func main() {
 	keyPath := flag.String("key", "", "path to the TLS private key PEM file")
 	autoCert := flag.Bool("auto-cert", false, "generate a local self-signed certificate when both TLS files are absent")
 	initializeLocalHostOnly := flag.Bool("initialize-local-host", false, "create the local TLS identity and chat database, then exit")
+	lanDiscovery := flag.Bool("lan-discovery", false, "broadcast this local host to LAN Chat clients on the local network")
+	discoveryName := flag.String("discovery-name", "", "display name announced to nearby LAN Chat clients")
 	dbPath := flag.String("db", "", "path to the SQLite account database")
 	adminCode := flag.String("admin-code", "", "user code granted administrator permissions")
 	flag.Parse()
@@ -42,6 +44,15 @@ func main() {
 	defer listener.Close()
 
 	log.Printf("listening on %s", listenAddress)
+	if *lanDiscovery {
+		stopDiscovery, discoveryErr := startLanDiscovery(*certPath, 8888, strings.TrimSpace(*discoveryName))
+		if discoveryErr != nil {
+			log.Printf("LAN discovery disabled: %v", discoveryErr)
+		} else {
+			defer stopDiscovery()
+			log.Printf("LAN discovery broadcasting on UDP %d", lanDiscoveryPort)
+		}
+	}
 	hub := NewHub()
 	hub.AdminCode = strings.ToLower(*adminCode)
 	go hub.Run()

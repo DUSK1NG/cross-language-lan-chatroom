@@ -53,6 +53,20 @@ export type HostDefaults = {
   unavailableReason?: string;
 };
 
+export type LanDiscoveredHost = {
+  id: string;
+  hostName: string;
+  serverIp: string;
+  serverPort: number;
+  fingerprintSha256: string;
+  known: boolean;
+};
+
+export type LanDiscoveryState = {
+  scanning: boolean;
+  hosts: LanDiscoveredHost[];
+};
+
 export type PerformanceState = {
   mode: 'Automatic' | 'High' | 'Balanced' | 'Power Saving';
   effectiveMode: string;
@@ -107,6 +121,7 @@ export type BridgeState = {
     userCode: string;
     caFile: string;
   };
+  lanDiscovery?: LanDiscoveryState;
   hostDefaults?: HostDefaults;
   performance?: PerformanceState;
   graphics?: GraphicsState;

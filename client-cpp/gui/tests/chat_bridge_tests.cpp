@@ -35,6 +35,7 @@ class ChatBridgeTests final : public QObject {
     Q_OBJECT
 
 private slots:
+    void controllerConstructs();
     void initialSnapshotHasSchemaAndDisconnectedState();
     void snapshotMarksMemberPackageHostAsUnavailable();
     void snapshotContainsPerformanceAndGraphicsInfo();
@@ -55,6 +56,11 @@ private slots:
     void recallRejectsAnUnrelatedMessageBeforeReportingSuccess();
     void recallReportsServerAcceptanceOrRejectionInsteadOfDispatchSuccess();
 };
+
+void ChatBridgeTests::controllerConstructs() {
+    GuiChatController controller;
+    QVERIFY(!controller.connected());
+}
 
 void ChatBridgeTests::initialSnapshotHasSchemaAndDisconnectedState() {
     GuiChatController controller;

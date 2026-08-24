@@ -21,7 +21,7 @@ DefaultDirName={localappdata}\Programs\LAN Chat
 DefaultGroupName=LAN Chat
 DisableProgramGroupPage=yes
 UninstallDisplayName=LAN Chat
-UninstallDisplayIcon={app}\lan-chat-gui.exe
+UninstallDisplayIcon={app}\LANChat.exe
 Uninstallable=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=LANChat-Setup-x64
@@ -44,12 +44,12 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\LAN Chat"; Filename: "{app}\lan-chat-gui.exe"; WorkingDir: "{app}"; Comment: "启动 LAN Chat"
+Name: "{autoprograms}\LAN Chat"; Filename: "{app}\LANChat.exe"; WorkingDir: "{app}"; Comment: "启动 LAN Chat"
 Name: "{autoprograms}\LAN Chat\卸载 LAN Chat"; Filename: "{uninstallexe}"; Comment: "卸载 LAN Chat"
-Name: "{autodesktop}\LAN Chat"; Filename: "{app}\lan-chat-gui.exe"; WorkingDir: "{app}"; Comment: "启动 LAN Chat"; Tasks: desktopicon
+Name: "{autodesktop}\LAN Chat"; Filename: "{app}\LANChat.exe"; WorkingDir: "{app}"; Comment: "启动 LAN Chat"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\lan-chat-gui.exe"; Description: "启动 LAN Chat"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\LANChat.exe"; Description: "启动 LAN Chat"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 ; The uninstaller removes files installed above and the Windows uninstall entry.
 ; It intentionally keeps host-created server-go\certs and server-go\chat.db so

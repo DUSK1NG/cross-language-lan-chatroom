@@ -1,6 +1,6 @@
 # Windows 安装器说明
 
-`LANChat-Setup-x64.exe` 是统一运行包的安装形式。它适用于房主和成员；两者安装后运行的是同一个 `lan-chat-gui.exe`。
+`LANChat-Setup-x64.exe` 是统一运行包的安装形式。它适用于房主和成员；两者安装后运行的是同一个 `LANChat.exe` 入口。
 
 ## 安装内容
 

@@ -48,6 +48,7 @@ exit 0
     New-Item -ItemType Directory -Force -Path $buildDirectory, (Join-Path $qtPrefix 'bin'), (Join-Path $openSslRoot 'bin') | Out-Null
     foreach ($path in @(
         (Join-Path $buildDirectory 'lan-chat-gui.exe'),
+        (Join-Path $buildDirectory 'lan-chat-launcher.exe'),
         (Join-Path $qtPrefix 'bin\Qt6Core.dll'),
         (Join-Path $qtPrefix 'bin\Qt6WebEngineCore.dll'),
         (Join-Path $qtPrefix 'bin\Qt6WebEngineWidgets.dll'),
@@ -59,6 +60,7 @@ exit 0
     [PSCustomObject]@{
         format = 1
         gui = Join-Path $buildDirectory 'lan-chat-gui.exe'
+        launcher = Join-Path $buildDirectory 'lan-chat-launcher.exe'
         qtPrefix = $qtPrefix
         openSslRoot = $openSslRoot
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $buildDirectory 'lan-chat-build.json') -Encoding UTF8

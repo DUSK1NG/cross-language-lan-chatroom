@@ -1,4 +1,5 @@
 #include "gui_connection_worker.hpp"
+#include "openssl_runtime.hpp"
 
 #include <utility>
 #include <QCoreApplication>
@@ -8,13 +9,13 @@
 #include <QTcpSocket>
 #include <QThread>
 #include <QVariantMap>
-
 namespace {
 constexpr int kLocalHostPort = 8888;
 constexpr int kLocalHostProbeTimeoutMs = 150;
 constexpr int kLocalHostStartupTimeoutMs = 4000;
 constexpr int kLocalHostRetryAttempts = 8;
 constexpr int kLocalHostRetryDelayMs = 150;
+
 }
 
 GuiConnectionWorker::GuiConnectionWorker(QObject* parent) : QObject(parent) {}
@@ -28,10 +29,11 @@ void GuiConnectionWorker::connectToServer(const QString& serverIp,
                                           int serverPort,
                                           const QString& username,
                                           const QString& userCode,
-                                          const QString& caFile) {
+                                          const QString& caFile,
+                                          const QString& tlsServerName) {
     stopReceiveLoop();
 
-    connectToServerWithRetries(serverIp, serverPort, username, userCode, caFile, 1);
+    connectToServerWithRetries(serverIp, serverPort, username, userCode, caFile, tlsServerName, 1);
 }
 
 bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
@@ -39,10 +41,16 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
                                                       const QString& username,
                                                       const QString& userCode,
                                                       const QString& caFile,
+                                                      const QString& tlsServerName,
                                                       const int attempts) {
     const int boundedAttempts = qMax(1, attempts);
     QString lastReason;
     connection::LoginResult loginResult = connection::LoginResult::kRetryableFailure;
+
+    if (!OpenSslRuntime::prepare(&lastReason)) {
+        emit connectionFailed(lastReason);
+        return false;
+    }
 
     for (int attempt = 0; attempt < boundedAttempts; ++attempt) {
         connection::Config config{
@@ -51,6 +59,7 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
             username.toStdString(),
             userCode.toStdString(),
             caFile.toStdString(),
+            tlsServerName.toStdString(),
         };
         connection_ = std::make_unique<connection::ConnectionState>(std::move(config));
 
@@ -104,7 +113,7 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
     const bool localIdentityReady = QFileInfo::exists(absoluteCertFile) && QFileInfo::exists(absoluteKeyFile);
     if (isLocalServerListening(kLocalHostProbeTimeoutMs) && localIdentityReady) {
         connectToServerWithRetries(QStringLiteral("127.0.0.1"), kLocalHostPort,
-                                   username, userCode, absoluteCertFile, 2);
+                                   username, userCode, absoluteCertFile, QString(), 2);
         return;
     }
     if (isLocalServerListening(kLocalHostProbeTimeoutMs)) {
@@ -118,7 +127,7 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
     hostProcess_->setProgram(absoluteServerExe);
     hostProcess_->setWorkingDirectory(QFileInfo(absoluteServerExe).absolutePath());
     hostProcess_->setArguments({"-cert", absoluteCertFile, "-key", absoluteKeyFile, "-auto-cert", "-db", absoluteDbFile,
-                                "-admin-code", userCode});
+                                "-admin-code", userCode, "-lan-discovery", "-discovery-name", username});
     hostProcess_->start();
     if (!hostProcess_->waitForStarted(3000)) {
         emit connectionFailed(QStringLiteral("无法启动本地 Go Server：") + hostProcess_->errorString());
@@ -162,7 +171,7 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
         return;
     }
     connectToServerWithRetries(QStringLiteral("127.0.0.1"), kLocalHostPort,
-                               username, userCode, absoluteCertFile, kLocalHostRetryAttempts);
+                               username, userCode, absoluteCertFile, QString(), kLocalHostRetryAttempts);
 }
 
 void GuiConnectionWorker::disconnectFromServer() {

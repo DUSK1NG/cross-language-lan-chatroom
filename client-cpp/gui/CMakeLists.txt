@@ -37,6 +37,10 @@ qt_add_executable(lan-chat-gui
     src/host_path_resolver.hpp
     src/local_host_bootstrap.cpp
     src/local_host_bootstrap.hpp
+    src/openssl_runtime.cpp
+    src/openssl_runtime.hpp
+    src/lan_discovery_service.cpp
+    src/lan_discovery_service.hpp
     src/performance_profile.cpp
     src/performance_profile.hpp
     src/gui_connection_worker.cpp
@@ -119,6 +123,22 @@ target_link_libraries(lan-chat-gui PRIVATE
 target_include_directories(lan-chat-gui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
+)
+
+qt_add_executable(lan-chat-launcher
+    src/launcher_main.cpp
+    src/host_path_resolver.cpp
+    src/host_path_resolver.hpp
+    src/local_host_bootstrap.cpp
+    src/local_host_bootstrap.hpp
+)
+
+target_link_libraries(lan-chat-launcher PRIVATE
+    Qt6::Core
+)
+
+target_include_directories(lan-chat-launcher PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 if(LAN_CHAT_ENABLE_PERF_OVERLAY)
@@ -218,10 +238,14 @@ qt_add_executable(chat-bridge-tests
     src/conversation_filter_model.hpp
     src/host_path_resolver.cpp
     src/host_path_resolver.hpp
+    src/openssl_runtime.cpp
+    src/openssl_runtime.hpp
     src/gui_chat_controller.cpp
     src/gui_chat_controller.hpp
     src/gui_connection_worker.cpp
     src/gui_connection_worker.hpp
+    src/lan_discovery_service.cpp
+    src/lan_discovery_service.hpp
     ../src/auth.cpp
     ../src/connection.cpp
     ../src/message.cpp
@@ -239,6 +263,18 @@ target_link_libraries(chat-bridge-tests PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
 )
+
+# Qt WebEngine also brings its own TLS stack. Loading the vcpkg OpenSSL DLLs
+# during process startup can select the wrong copy and crash before the UI is
+# drawn. Delay-load them instead; GuiConnectionWorker selects the dedicated
+# runtime directory immediately before the first TLS or discovery operation.
+if(MSVC)
+    target_link_libraries(lan-chat-gui PRIVATE delayimp)
+    target_link_options(lan-chat-gui PRIVATE
+        "/DELAYLOAD:libssl-3-x64.dll"
+        "/DELAYLOAD:libcrypto-3-x64.dll"
+    )
+endif()
 
 target_include_directories(chat-bridge-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -320,12 +356,35 @@ target_include_directories(local-host-bootstrap-tests PRIVATE
 
 add_test(NAME local-host-bootstrap-tests COMMAND local-host-bootstrap-tests)
 
+qt_add_executable(lan-discovery-service-tests
+    tests/lan_discovery_service_tests.cpp
+    src/openssl_runtime.cpp
+    src/openssl_runtime.hpp
+    src/lan_discovery_service.cpp
+    src/lan_discovery_service.hpp
+)
+
+target_link_libraries(lan-discovery-service-tests PRIVATE
+    Qt6::Core
+    Qt6::Network
+    Qt6::Test
+    OpenSSL::Crypto
+)
+
+target_include_directories(lan-discovery-service-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+add_test(NAME lan-discovery-service-tests COMMAND lan-discovery-service-tests)
+
 # CTest on Windows does not inherit the interactive PowerShell PATH used by
 # the direct test commands. Provide the Qt and build directories explicitly so
 # QtGui/QtQuick test processes can locate their runtime DLLs.
 get_filename_component(LAN_CHAT_QT_PREFIX "${Qt6Core_DIR}/../../.." ABSOLUTE)
 set(LAN_CHAT_QT_TEST_PATH "${LAN_CHAT_QT_PREFIX}/bin;${CMAKE_CURRENT_BINARY_DIR};$ENV{PATH}")
 string(REPLACE ";" "\\;" LAN_CHAT_QT_TEST_PATH_ESCAPED "${LAN_CHAT_QT_TEST_PATH}")
+get_filename_component(LAN_CHAT_OPENSSL_ROOT "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
+set(LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR "${LAN_CHAT_OPENSSL_ROOT}/bin")
 set_tests_properties(
     bridge-protocol-tests
     graphics-info-tests
@@ -336,7 +395,13 @@ set_tests_properties(
     performance-profile-tests
     host-path-resolver-tests
     local-host-bootstrap-tests
+    lan-discovery-service-tests
     PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED}"
+)
+set_tests_properties(
+    chat-bridge-tests
+    PROPERTIES ENVIRONMENT
+        "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED};LAN_CHAT_OPENSSL_RUNTIME_DIR=${LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR}"
 )
 
 if(LAN_CHAT_ENABLE_WEB_UI)

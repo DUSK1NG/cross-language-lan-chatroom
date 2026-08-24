@@ -267,7 +267,7 @@ Write-Step 'Build modern client'
 if ($Action -eq 'Test') {
     Invoke-VsCmake $vsDevCmd $cmake @('--build', $BuildDirectory, '--parallel', '4') $showIncludesPrefix
 } else {
-    Invoke-VsCmake $vsDevCmd $cmake @('--build', $BuildDirectory, '--target', 'lan-chat-gui', '--parallel', '4') $showIncludesPrefix
+    Invoke-VsCmake $vsDevCmd $cmake @('--build', $BuildDirectory, '--target', 'lan-chat-gui', 'lan-chat-launcher', '--parallel', '4') $showIncludesPrefix
 }
 
 if ($Action -eq 'Test') {
@@ -285,6 +285,7 @@ $manifest = [ordered]@{
     format = 1
     builtAt = (Get-Date).ToUniversalTime().ToString('o')
     gui = (Join-Path $BuildDirectory 'lan-chat-gui.exe')
+    launcher = (Join-Path $BuildDirectory 'lan-chat-launcher.exe')
     qtPrefix = $resolvedQtPrefix
     openSslRoot = $resolvedOpenSslRoot
 }
@@ -292,21 +293,26 @@ $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $BuildDirectory
 
 if ($Action -eq 'Launch') {
     $guiExe = Join-Path $BuildDirectory 'lan-chat-gui.exe'
-    if (-not (Test-Path -LiteralPath $guiExe -PathType Leaf)) { throw "Modern client was not generated: $guiExe" }
+    $launcherExe = Join-Path $BuildDirectory 'lan-chat-launcher.exe'
+    if (-not (Test-Path -LiteralPath $guiExe -PathType Leaf) -or -not (Test-Path -LiteralPath $launcherExe -PathType Leaf)) {
+        throw "Modern client launch files were not generated: $guiExe; $launcherExe"
+    }
     Write-Step 'Launch modern client'
     $runtimeDirectories = @(
-        (Join-Path $resolvedQtPrefix 'bin'),
-        (Join-Path $resolvedOpenSslRoot 'bin')
+        (Join-Path $resolvedQtPrefix 'bin')
     ) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
     $previousPath = $env:PATH
+    $previousOpenSslRuntimeDirectory = $env:LAN_CHAT_OPENSSL_RUNTIME_DIR
     try {
         $env:PATH = (($runtimeDirectories + $previousPath) -join ';')
-        $process = Start-Process -FilePath $guiExe -WorkingDirectory $BuildDirectory -PassThru
+        $env:LAN_CHAT_OPENSSL_RUNTIME_DIR = Join-Path $resolvedOpenSslRoot 'bin'
+        $process = Start-Process -FilePath $launcherExe -WorkingDirectory $BuildDirectory -PassThru
         if ($Wait) {
             $process.WaitForExit()
             exit $process.ExitCode
         }
     } finally {
         $env:PATH = $previousPath
+        $env:LAN_CHAT_OPENSSL_RUNTIME_DIR = $previousOpenSslRuntimeDirectory
     }
 }

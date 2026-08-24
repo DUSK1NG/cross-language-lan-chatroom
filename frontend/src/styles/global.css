@@ -53,6 +53,21 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .status-line { min-height: 22px; margin: 12px 0 0; }
 .status-line--error { color: #ff8dbd; }
 .connection-help { max-width: 1080px; margin-top: 12px; color: #9aa7c4; line-height: 1.6; }
+.lan-discovery { margin-top: 28px; padding: 16px; border: 1px solid rgba(55, 246, 208, .2); border-radius: 16px; background: rgba(7, 16, 35, .35); }
+.lan-discovery__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.lan-discovery__header > div { display: grid; gap: 3px; }
+.lan-discovery__header small, .lan-discovery__empty, .lan-discovery__notice { color: #9aa7c4; font-size: 12px; }
+.lan-discovery__empty, .lan-discovery__notice { margin: 14px 0 0; line-height: 1.5; }
+.lan-discovery__notice { color: #c5d0eb; }
+.lan-discovery__list { display: grid; gap: 8px; margin-top: 14px; }
+.lan-host-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 12px 14px; border: 1px solid rgba(164, 182, 255, .18); border-radius: 12px; color: #e8edff; background: rgba(17, 25, 50, .62); text-align: left; cursor: pointer; }
+.lan-host-card:hover, .lan-host-card--selected { border-color: rgba(55, 246, 208, .68); background: rgba(55, 246, 208, .1); }
+.lan-host-card:disabled { cursor: not-allowed; opacity: .55; }
+.lan-host-card > span:first-child { display: grid; gap: 3px; }
+.lan-host-card small { color: #9aa7c4; font-size: 12px; }
+.lan-host-card__trust { flex: 0 0 auto; color: #37f6d0; font-size: 12px; }
+.manual-entry-button { width: fit-content; margin-top: 14px; padding: 0; border: 0; color: #9aa7c4; background: transparent; cursor: pointer; font: inherit; font-size: 12px; }
+.manual-entry-button:hover { color: #37f6d0; }
 .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 42px; }
 .mode-card { display: grid; gap: 12px; min-height: 180px; padding: 24px; text-align: left; border: 1px solid rgba(164, 182, 255, .18); border-radius: 22px; background: rgba(28, 39, 76, .7); cursor: pointer; transition: transform 150ms ease, border-color 150ms ease, background 150ms ease; }
 .mode-card:hover:not(:disabled) { transform: translateY(-3px); border-color: #37f6d0; background: rgba(39, 54, 103, .9); }
