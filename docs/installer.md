@@ -31,7 +31,7 @@
 ```powershell
 cd C:\path\to\chat_X
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.1.1
 ```
 
 安装器使用 Inno Setup 6。若尚未安装，可先执行：

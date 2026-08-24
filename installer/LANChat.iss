@@ -9,7 +9,7 @@
   #define OutputDir "..\release"
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.1.0"
+  #define AppVersion "1.1.1"
 #endif
 
 [Setup]
@@ -21,7 +21,8 @@ DefaultDirName={localappdata}\Programs\LAN Chat
 DefaultGroupName=LAN Chat
 DisableProgramGroupPage=yes
 UninstallDisplayName=LAN Chat
-UninstallDisplayIcon={app}\LANChat.exe
+SetupIconFile={#SourceDir}\LANChat.ico
+UninstallDisplayIcon={app}\LANChat.ico
 Uninstallable=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=LANChat-Setup-x64
@@ -44,9 +45,9 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\LAN Chat"; Filename: "{app}\LANChat.exe"; WorkingDir: "{app}"; Comment: "启动 LAN Chat"
+Name: "{autoprograms}\LAN Chat"; Filename: "{app}\LANChat.exe"; WorkingDir: "{app}"; IconFilename: "{app}\LANChat.ico"; Comment: "启动 LAN Chat"
 Name: "{autoprograms}\LAN Chat\卸载 LAN Chat"; Filename: "{uninstallexe}"; Comment: "卸载 LAN Chat"
-Name: "{autodesktop}\LAN Chat"; Filename: "{app}\LANChat.exe"; WorkingDir: "{app}"; Comment: "启动 LAN Chat"; Tasks: desktopicon
+Name: "{autodesktop}\LAN Chat"; Filename: "{app}\LANChat.exe"; WorkingDir: "{app}"; IconFilename: "{app}\LANChat.ico"; Comment: "启动 LAN Chat"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\LANChat.exe"; Description: "启动 LAN Chat"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent

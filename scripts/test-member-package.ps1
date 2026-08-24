@@ -37,6 +37,7 @@ function Stop-SmokeRuntime([string]$Directory) {
 
 foreach ($relativePath in @(
     'LANChat.exe',
+    'LANChat.ico',
     'lan-chat-gui.exe',
     'Qt6Core.dll',
     'Qt6WebChannel.dll',

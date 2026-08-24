@@ -43,6 +43,7 @@ function Test-UnifiedArchive([string]$Archive) {
         $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
         foreach ($required in @(
             'LANChat.exe',
+            'LANChat.ico',
             'lan-chat-gui.exe',
             'Qt6WebEngineCore.dll',
             'QtWebEngineProcess.exe',

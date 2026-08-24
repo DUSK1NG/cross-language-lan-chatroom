@@ -131,7 +131,8 @@ $cacheFile = Join-Path $BuildDirectory 'CMakeCache.txt'
 $guiSource = Join-Path $BuildDirectory 'lan-chat-gui.exe'
 $launcherSource = Join-Path $BuildDirectory 'lan-chat-launcher.exe'
 $memberGuide = Join-Path $Root 'docs\member-package.md'
-foreach ($requiredInput in @($cacheFile, $guiSource, $launcherSource, $memberGuide)) {
+$iconSource = Join-Path $Root 'assets\LANChat.ico'
+foreach ($requiredInput in @($cacheFile, $guiSource, $launcherSource, $memberGuide, $iconSource)) {
     if (-not (Test-Path -LiteralPath $requiredInput -PathType Leaf)) {
         throw "Missing member-package input: $requiredInput"
     }
@@ -164,10 +165,11 @@ Write-Step 'Deploy Qt WebEngine and MSVC runtime'
 & $deployTool --release --compiler-runtime $guiTarget
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE." }
 
-Write-Step 'Copy OpenSSL, MSVC runtime, and member instructions'
+Write-Step 'Copy OpenSSL, MSVC runtime, member instructions, and shortcut icon'
 Copy-OpenSslRuntime $openSslRoot $ReleaseDirectory
 Copy-MsvcRuntime $ReleaseDirectory
 Copy-Item -LiteralPath $memberGuide -Destination (Join-Path $ReleaseDirectory 'README-member.md') -Force
+Copy-Item -LiteralPath $iconSource -Destination (Join-Path $ReleaseDirectory 'LANChat.ico') -Force
 
 $packageTest = Join-Path $PSScriptRoot 'test-member-package.ps1'
 $testArguments = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $packageTest,

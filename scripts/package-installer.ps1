@@ -4,7 +4,7 @@ param(
     [string]$OutputDirectory = '',
     [string]$InnoCompiler = '',
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
-    [string]$Version = '1.1.0',
+    [string]$Version = '1.1.1',
     [switch]$SmokeTest,
     [switch]$ValidateOnly
 )
@@ -46,9 +46,11 @@ function Test-InstallerDefinition([string]$Path) {
     foreach ($required in @(
         'PrivilegesRequired=lowest',
         'Uninstallable=yes',
-        'UninstallDisplayIcon={app}\LANChat.exe',
+        'SetupIconFile={#SourceDir}\LANChat.ico',
+        'UninstallDisplayIcon={app}\LANChat.ico',
         'Name: "{autoprograms}\LAN Chat"',
         'Name: "{autodesktop}\LAN Chat"',
+        'IconFilename: "{app}\LANChat.ico"',
         'Name: "desktopicon"',
         'Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs'
     )) {
