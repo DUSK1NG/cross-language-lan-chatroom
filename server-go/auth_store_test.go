@@ -213,6 +213,57 @@ func TestExistingMemberConnectionStillRequiresRoomOwnerApproval(t *testing.T) {
 	waitForHandler(t, done, "denied existing member connection")
 }
 
+func TestApprovedReconnectReplacesStaleActiveSession(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if _, err := store.EnsureIdentity("Bob", "BOB001"); err != nil {
+		t.Fatalf("seed existing member: %v", err)
+	}
+
+	hub := NewHub()
+	admin := newTestClient(t, "Host", "HOST01")
+	admin.IsAdmin = true
+	hub.Clients[admin] = true
+	hub.ActiveCodes[admin.NormalizedCode] = admin
+	stale := newTestClient(t, "Bob", "BOB001")
+	stale.AccountBacked = true
+	hub.Clients[stale] = true
+	hub.ActiveCodes[stale.NormalizedCode] = stale
+	go hub.Run()
+
+	serverConn, clientConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		handleConnectionWithStore(serverConn, hub, store)
+		close(done)
+	}()
+
+	if err := sendMessage(clientConn, Message{Type: "login", Username: "Bob", UserCode: "BOB001"}); err != nil {
+		t.Fatal(err)
+	}
+	pending := receiveClientTestMessage(t, clientConn)
+	if pending.Type != "login_pending" || pending.MessageID == "" {
+		t.Fatalf("reconnect pending login response = %+v", pending)
+	}
+	approval := <-admin.Send
+	if approval.Type != "connection_approval_request" || approval.MessageID != pending.MessageID {
+		t.Fatalf("reconnect approval notification = %+v", approval)
+	}
+
+	hub.AdminAction <- AdminActionRequest{Sender: admin, Action: "approve_connection", MessageID: pending.MessageID}
+	assertMessageReceived(t, admin.Send, Message{Type: "connection_approval_result", MessageID: pending.MessageID,
+		Username: "Bob", UserCode: "BOB001", Content: "approved"})
+	loginOK := receiveClientTestMessage(t, clientConn)
+	if loginOK.Type != "login_ok" || loginOK.Username != "Bob" || loginOK.UserCode != "BOB001" {
+		t.Fatalf("approved reconnect response = %+v", loginOK)
+	}
+	if active := hub.ActiveCodes[stale.NormalizedCode]; active == stale {
+		t.Fatal("stale session still owns the active user code")
+	}
+
+	_ = clientConn.Close()
+	waitForHandler(t, done, "approved reconnect")
+}
+
 func TestAuthStoreUsesConfiguredDatabasePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "configured.db")
 	t.Setenv(authDBPathEnv, path)

@@ -40,7 +40,7 @@ export function App({ bridge }: AppProps) {
     return <SettingsPage bridge={bridge} state={state} onBack={() => setPage('workspace')} />;
   }
 
-  if (page === 'workspace' && state.connection.phase === 'connected') {
+  if (page === 'workspace' && (state.connection.phase === 'connected' || state.connection.phase === 'reconnecting')) {
     return <WorkspacePage bridge={bridge} state={state} onSettings={() => setPage('settings')} />;
   }
 

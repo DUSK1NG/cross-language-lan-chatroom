@@ -348,9 +348,16 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 		h.RoomNames[defaultRoomName] = struct{}{}
 	}
 
-	if _, active := h.ActiveCodes[client.NormalizedCode]; active {
-		h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
-		return
+	if active, exists := h.ActiveCodes[client.NormalizedCode]; exists {
+		// Account-backed clients have already passed the room owner's approval
+		// for this connection. A network interruption can leave their prior TCP
+		// session alive until its read deadline expires; let the approved session
+		// take over instead of rejecting it as a duplicate user code.
+		if !client.AccountBacked {
+			h.respondRegister(request.Result, ErrUserCodeAlreadyUsed)
+			return
+		}
+		h.unregisterClient(active, true)
 	}
 	if !client.AccountBacked {
 		if _, used := h.UsedCodes[client.NormalizedCode]; used {

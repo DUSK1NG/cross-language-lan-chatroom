@@ -105,6 +105,7 @@ export type BridgeState = {
     phase: ConnectionPhase;
     statusText: string;
     retryable: boolean;
+    reconnectAttempt?: number;
     lastError?: BridgeError;
   };
   identity: {

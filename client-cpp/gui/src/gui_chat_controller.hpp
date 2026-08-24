@@ -22,6 +22,7 @@ class GuiChatController final : public QObject {
     Q_PROPERTY(QAbstractItemModel* filteredRoomModel READ filteredRoomModel CONSTANT)
     Q_PROPERTY(QAbstractItemModel* filteredDirectMessageModel READ filteredDirectMessageModel CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
+    Q_PROPERTY(bool reconnecting READ reconnecting NOTIFY reconnectingChanged)
     Q_PROPERTY(bool admin READ admin NOTIFY adminChanged)
     Q_PROPERTY(QString localUserName READ localUserName NOTIFY localIdentityChanged)
     Q_PROPERTY(QString localUserCode READ localUserCode NOTIFY localIdentityChanged)
@@ -46,6 +47,7 @@ public:
     QAbstractItemModel* filteredRoomModel() const { return roomFilterModel_; }
     QAbstractItemModel* filteredDirectMessageModel() const { return directMessageFilterModel_; }
     bool connected() const { return connected_; }
+    bool reconnecting() const { return reconnecting_; }
     bool admin() const { return admin_; }
     QString localUserName() const { return localUserName_; }
     QString localUserCode() const { return localUserCode_; }
@@ -95,6 +97,7 @@ public:
 
 signals:
     void connectedChanged();
+    void reconnectingChanged();
     void adminChanged();
     void localIdentityChanged();
     void onlineMemberCountChanged();
@@ -112,6 +115,9 @@ private slots:
     void handleConnected(bool isAdmin);
     void handleConnectionFailed(const QString& reason);
     void handleConnectionLost(const QString& reason);
+    void handleReconnectScheduled(int attempt, int delayMs);
+    void handleReconnectAttempt(int attempt);
+    void handleReconnectFailed(const QString& reason);
     void handleHistory(const QString& room, const QString& targetUserCode,
                        bool isPrivate, const QVariantList& messages, bool hasMore);
     void handleMessage(const QString& type, const QString& messageId, const QString& commandId,
@@ -150,6 +156,7 @@ private:
     QTimer refreshTimer_;
     GuiConnectionWorker* worker_ = nullptr;
     bool connected_ = false;
+    bool reconnecting_ = false;
     bool admin_ = false;
     QString localUserName_ = QStringLiteral("Alice");
     QString statusText_ = QStringLiteral("未连接");

@@ -56,6 +56,7 @@ private slots:
     void roomsResponseUsesBulkModelUpdates();
     void connectionApprovalStateIsExposedAndCleared();
     void successfulConnectionClearsPreviousError();
+    void reconnectingSnapshotPreservesTimelineAndReportsRecovery();
     void recallRejectsAnUnrelatedMessageBeforeReportingSuccess();
     void recallReportsServerAcceptanceOrRejectionInsteadOfDispatchSuccess();
 };
@@ -261,9 +262,10 @@ void ChatBridgeTests::workerDisconnectRunsOnWorkerThread() {
     QTRY_COMPARE_WITH_TIMEOUT(disconnectedSpy.count(), 1, 500);
     QCOMPARE(executingThread, &workerThread);
 
+    QVERIFY(QMetaObject::invokeMethod(worker, [worker]() { delete worker; }, Qt::BlockingQueuedConnection));
+    worker = nullptr;
     workerThread.quit();
     QVERIFY(workerThread.wait(1000));
-    delete worker;
 }
 
 void ChatBridgeTests::serverConnectionCompletesWithoutMessageLifetimeCorruption() {
@@ -453,6 +455,23 @@ void ChatBridgeTests::successfulConnectionClearsPreviousError() {
     const QJsonObject connection = QJsonDocument::fromJson(
         bridge.currentStateJson().toUtf8()).object().value("connection").toObject();
     QVERIFY(!connection.contains(QStringLiteral("lastError")));
+}
+
+void ChatBridgeTests::reconnectingSnapshotPreservesTimelineAndReportsRecovery() {
+    GuiChatController controller;
+    ChatBridge bridge(&controller);
+    controller.messageModel()->append({{"messageId", "draft-context"}, {"displayName", "Alice"},
+                                       {"userCode", "A001"}, {"content", "keep this timeline"},
+                                       {"selfMessage", true}, {"systemMessage", false}});
+    const int messageCount = controller.messageModel()->rowCount();
+
+    QVERIFY(QMetaObject::invokeMethod(&controller, "handleConnectionLost", Qt::DirectConnection,
+                                      Q_ARG(QString, QStringLiteral("temporary network loss"))));
+
+    QTRY_COMPARE(QJsonDocument::fromJson(bridge.currentStateJson().toUtf8())
+                     .object().value("connection").toObject().value("phase").toString(),
+                 QStringLiteral("reconnecting"));
+    QCOMPARE(controller.messageModel()->rowCount(), messageCount);
 }
 
 void ChatBridgeTests::recallRejectsAnUnrelatedMessageBeforeReportingSuccess() {

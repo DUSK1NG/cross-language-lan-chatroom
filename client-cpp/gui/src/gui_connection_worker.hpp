@@ -1,6 +1,7 @@
 #pragma once
 
 #include "connection.hpp"
+#include "reconnect_policy.hpp"
 
 #include <QObject>
 #include <QProcess>
@@ -31,6 +32,7 @@ public slots:
                             const QString& username,
                             const QString& userCode);
     void disconnectFromServer();
+    void scheduleReconnect();
     void sendChat(const QString& content);
     void sendChatToRoom(const QString& content, const QString& room);
     void sendPrivate(const QString& content, const QString& targetUserCode);
@@ -48,6 +50,9 @@ signals:
     void connected(bool isAdmin);
     void connectionFailed(const QString& reason);
     void connectionLost(const QString& reason);
+    void reconnectScheduled(int attempt, int delayMs);
+    void reconnectAttempt(int attempt);
+    void reconnectFailed(const QString& reason);
     void messageReceived(const QString& type,
                          const QString& messageId,
 						 const QString& commandId,
@@ -71,7 +76,9 @@ private:
                                     const QString& userCode,
                                     const QString& caFile,
                                     const QString& tlsServerName,
-                                    int attempts);
+                                    int attempts,
+                                    bool reportFailure = true);
+    void retrySavedConnection();
     bool isLocalServerListening(int timeoutMs) const;
     void stopHostedServer();
     void receiveLoop();
@@ -81,4 +88,17 @@ private:
     std::unique_ptr<QProcess> hostProcess_;
     std::thread receiveThread_;
     std::atomic<bool> running_{false};
+    struct SavedConnection {
+        QString serverIp;
+        int serverPort = 0;
+        QString username;
+        QString userCode;
+        QString caFile;
+        QString tlsServerName;
+        bool valid = false;
+    } savedConnection_;
+    ReconnectPolicy reconnectPolicy_;
+    bool reconnectTimerActive_ = false;
+    QString lastConnectionFailure_;
+    bool explicitDisconnect_ = false;
 };

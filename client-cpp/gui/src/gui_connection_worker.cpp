@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QTcpSocket>
 #include <QThread>
+#include <QTimer>
 #include <QVariantMap>
 namespace {
 constexpr int kLocalHostPort = 8888;
@@ -42,7 +43,10 @@ void GuiConnectionWorker::connectToServer(const QString& serverIp,
                                           const QString& caFile,
                                           const QString& tlsServerName) {
     stopReceiveLoop();
-
+    explicitDisconnect_ = false;
+    reconnectPolicy_.markConnected();
+    reconnectTimerActive_ = false;
+    savedConnection_ = {serverIp, serverPort, username, userCode, caFile, tlsServerName, true};
     connectToServerWithRetries(serverIp, serverPort, username, userCode, caFile, tlsServerName, 1);
 }
 
@@ -52,13 +56,15 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
                                                       const QString& userCode,
                                                       const QString& caFile,
                                                       const QString& tlsServerName,
-                                                      const int attempts) {
+                                                      const int attempts,
+                                                      const bool reportFailure) {
     const int boundedAttempts = qMax(1, attempts);
     QString lastReason;
     connection::LoginResult loginResult = connection::LoginResult::kRetryableFailure;
 
     if (!OpenSslRuntime::prepare(&lastReason)) {
-        emit connectionFailed(lastReason);
+        lastConnectionFailure_ = lastReason;
+        if (reportFailure) emit connectionFailed(lastReason);
         return false;
     }
 
@@ -82,17 +88,20 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
         }
 
         lastReason = QString::fromStdString(connection_->last_error());
+        lastConnectionFailure_ = lastReason;
         connection_.reset();
         if (loginResult == connection::LoginResult::kRejected) {
-            emit connectionFailed(userFacingLoginFailure(lastReason));
-            return true;
+            lastConnectionFailure_ = userFacingLoginFailure(lastReason);
+            if (reportFailure) emit connectionFailed(lastConnectionFailure_);
+            return false;
         }
         if (attempt + 1 < boundedAttempts) {
             QThread::msleep(kLocalHostRetryDelayMs);
         }
     }
 
-    emit connectionFailed(lastReason.isEmpty() ? QStringLiteral("Connection failed") : lastReason);
+    lastConnectionFailure_ = lastReason.isEmpty() ? QStringLiteral("Connection failed") : lastReason;
+    if (reportFailure) emit connectionFailed(lastConnectionFailure_);
     return false;
 }
 
@@ -114,6 +123,11 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
 
     stopReceiveLoop();
     connection_.reset();
+    explicitDisconnect_ = false;
+    reconnectPolicy_.markConnected();
+    reconnectTimerActive_ = false;
+    savedConnection_ = {QStringLiteral("127.0.0.1"), kLocalHostPort, username, userCode,
+                        absoluteCertFile, QString(), true};
 
     if (!QFileInfo::exists(absoluteServerExe)) {
         emit connectionFailed(QStringLiteral("本地 Go Server 文件不存在，请检查 Host 路径"));
@@ -185,10 +199,40 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
 }
 
 void GuiConnectionWorker::disconnectFromServer() {
+    explicitDisconnect_ = true;
+    reconnectPolicy_.cancel();
+    reconnectTimerActive_ = false;
     stopReceiveLoop();
     connection_.reset();
     stopHostedServer();
     emit disconnected();
+}
+
+void GuiConnectionWorker::scheduleReconnect() {
+    if (explicitDisconnect_ || !savedConnection_.valid || reconnectTimerActive_) return;
+    stopReceiveLoop();
+    connection_.reset();
+    const int delayMs = reconnectPolicy_.scheduleNextAttempt();
+    if (delayMs < 0) return;
+    emit reconnectScheduled(reconnectPolicy_.attemptCount(), delayMs);
+    reconnectTimerActive_ = true;
+    QTimer::singleShot(delayMs, this, [this]() {
+        reconnectTimerActive_ = false;
+        retrySavedConnection();
+    });
+}
+
+void GuiConnectionWorker::retrySavedConnection() {
+    if (explicitDisconnect_ || !savedConnection_.valid) return;
+    emit reconnectAttempt(reconnectPolicy_.attemptCount());
+    if (connectToServerWithRetries(savedConnection_.serverIp, savedConnection_.serverPort,
+                                   savedConnection_.username, savedConnection_.userCode,
+                                   savedConnection_.caFile, savedConnection_.tlsServerName, 1, false)) {
+        reconnectPolicy_.markConnected();
+        return;
+    }
+    emit reconnectFailed(lastConnectionFailure_);
+    scheduleReconnect();
 }
 
 bool GuiConnectionWorker::isLocalServerListening(const int timeoutMs) const {

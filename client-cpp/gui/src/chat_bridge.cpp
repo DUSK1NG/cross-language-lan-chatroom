@@ -61,6 +61,7 @@ ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* perfor
         }
         scheduleStateUpdate();
     });
+    connect(controller_, &GuiChatController::reconnectingChanged, this, &ChatBridge::scheduleStateUpdate);
     connect(controller_, &GuiChatController::adminChanged, this, &ChatBridge::scheduleStateUpdate);
     connect(controller_, &GuiChatController::localIdentityChanged, this, &ChatBridge::scheduleStateUpdate);
     connect(controller_, &GuiChatController::onlineMemberCountChanged, this, &ChatBridge::scheduleStateUpdate);
@@ -96,6 +97,11 @@ ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* perfor
         handleConnectionError(QStringLiteral("connection_failed"), reason, true);
     });
     connect(controller_, &GuiChatController::connectionLost, this, [this](const QString& reason) {
+        if (controller_->reconnecting()) {
+            lastError_ = {};
+            scheduleStateUpdate();
+            return;
+        }
         handleConnectionError(QStringLiteral("connection_lost"), reason, true);
     });
     connect(controller_, &GuiChatController::recallSucceeded, this, [this](const QString& commandId) {
@@ -200,6 +206,8 @@ QJsonObject ChatBridge::buildState() {
     QString phase = QStringLiteral("idle");
     if (controller_->connected()) {
         phase = QStringLiteral("connected");
+    } else if (controller_->reconnecting()) {
+        phase = QStringLiteral("reconnecting");
     } else if (!lastError_.isEmpty()) {
         phase = QStringLiteral("error");
     } else if (controller_->statusText() != QStringLiteral("未连接")) {

@@ -62,6 +62,9 @@ GuiChatController::GuiChatController(QObject* parent)
     connect(worker_, &GuiConnectionWorker::connected, this, &GuiChatController::handleConnected);
     connect(worker_, &GuiConnectionWorker::connectionFailed, this, &GuiChatController::handleConnectionFailed);
     connect(worker_, &GuiConnectionWorker::connectionLost, this, &GuiChatController::handleConnectionLost);
+    connect(worker_, &GuiConnectionWorker::reconnectScheduled, this, &GuiChatController::handleReconnectScheduled);
+    connect(worker_, &GuiConnectionWorker::reconnectAttempt, this, &GuiChatController::handleReconnectAttempt);
+    connect(worker_, &GuiConnectionWorker::reconnectFailed, this, &GuiChatController::handleReconnectFailed);
     connect(worker_, &GuiConnectionWorker::messageReceived, this, &GuiChatController::handleMessage);
     connect(worker_, &GuiConnectionWorker::historyReceived, this, &GuiChatController::handleHistory);
     workerThread_.start();
@@ -283,6 +286,10 @@ void GuiChatController::selectRoom(const QString& room) {
         }
         requestActiveHistory();
     }
+    if (reconnecting_) {
+        reconnecting_ = false;
+        emit reconnectingChanged();
+    }
 }
 
 void GuiChatController::selectDirectMessage(const QString& userCode) {
@@ -348,7 +355,12 @@ bool GuiChatController::recallMessage(const QString& messageId, const QString& c
 }
 
 void GuiChatController::handleConnected(bool isAdmin) {
-    resetSessionData();
+    const bool recovered = reconnecting_;
+    if (!recovered) resetSessionData();
+    if (reconnecting_) {
+        reconnecting_ = false;
+        emit reconnectingChanged();
+    }
     connected_ = true;
     if (admin_ != isAdmin) {
         admin_ = isAdmin;
@@ -356,7 +368,8 @@ void GuiChatController::handleConnected(bool isAdmin) {
     }
     emit connectedChanged();
     refreshTimer_.start();
-    setStatus(isAdmin ? QStringLiteral("已连接（管理员）") : QStringLiteral("已连接"));
+    setStatus(recovered ? QStringLiteral("已重新连接")
+                        : (isAdmin ? QStringLiteral("已连接（管理员）") : QStringLiteral("已连接")));
     requestRooms();
     requestUsers();
     requestActiveHistory();
@@ -395,14 +408,27 @@ void GuiChatController::handleConnectionFailed(const QString& reason) {
 void GuiChatController::handleConnectionLost(const QString& reason) {
     refreshTimer_.stop();
     connected_ = false;
-    if (admin_) {
-        admin_ = false;
-        emit adminChanged();
-    }
     emit connectedChanged();
-    setStatus(reason.isEmpty() ? QStringLiteral("连接已断开") : QStringLiteral("连接已断开：") + reason);
-    appendSystemMessage(statusText_);
+    if (!reconnecting_) {
+        reconnecting_ = true;
+        emit reconnectingChanged();
+    }
+    setStatus(reason.isEmpty() ? QStringLiteral("连接中断，正在重新连接") : QStringLiteral("连接中断，正在重新连接：") + reason);
+    QMetaObject::invokeMethod(worker_, "scheduleReconnect", Qt::QueuedConnection);
     emit connectionLost(reason);
+}
+
+void GuiChatController::handleReconnectScheduled(int attempt, int delayMs) {
+    Q_UNUSED(delayMs);
+    setStatus(QStringLiteral("正在重新连接（第 %1 次）").arg(attempt));
+}
+
+void GuiChatController::handleReconnectAttempt(int attempt) {
+    setStatus(QStringLiteral("正在重新连接（第 %1 次）").arg(attempt));
+}
+
+void GuiChatController::handleReconnectFailed(const QString& reason) {
+    setStatus(QStringLiteral("重新连接失败，等待下一次重试：") + reason);
 }
 
 void GuiChatController::handleHistory(const QString& room, const QString& targetUserCode,

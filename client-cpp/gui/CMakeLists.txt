@@ -45,6 +45,8 @@ qt_add_executable(lan-chat-gui
     src/performance_profile.hpp
     src/gui_connection_worker.cpp
     src/gui_connection_worker.hpp
+    src/reconnect_policy.cpp
+    src/reconnect_policy.hpp
     src/gui_chat_controller.cpp
     src/gui_chat_controller.hpp
     ../src/auth.cpp
@@ -244,6 +246,8 @@ qt_add_executable(chat-bridge-tests
     src/gui_chat_controller.hpp
     src/gui_connection_worker.cpp
     src/gui_connection_worker.hpp
+    src/reconnect_policy.cpp
+    src/reconnect_policy.hpp
     src/lan_discovery_service.cpp
     src/lan_discovery_service.hpp
     ../src/auth.cpp
@@ -283,6 +287,23 @@ target_include_directories(chat-bridge-tests PRIVATE
 )
 
 add_test(NAME chat-bridge-tests COMMAND chat-bridge-tests)
+
+qt_add_executable(reconnect-policy-tests
+    tests/reconnect_policy_tests.cpp
+    src/reconnect_policy.cpp
+    src/reconnect_policy.hpp
+)
+
+target_link_libraries(reconnect-policy-tests PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+target_include_directories(reconnect-policy-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+add_test(NAME reconnect-policy-tests COMMAND reconnect-policy-tests)
 
 qt_add_executable(performance-sampler-tests
     tests/performance_sampler_tests.cpp
@@ -391,6 +412,7 @@ set_tests_properties(
     chat-model-tests
     conversation-filter-tests
     chat-bridge-tests
+    reconnect-policy-tests
     performance-sampler-tests
     performance-profile-tests
     host-path-resolver-tests
