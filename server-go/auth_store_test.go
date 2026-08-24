@@ -6,9 +6,23 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+const testDeviceToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+func approveTestDevice(t *testing.T, store *AuthStore, username, userCode string) {
+	t.Helper()
+	authentication, err := store.AuthenticateDevice(username, userCode, testDeviceToken, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !authentication.Approved {
+		t.Fatalf("device authentication = %+v, want approved", authentication)
+	}
+}
 
 func newTestAuthStore(t *testing.T) (*AuthStore, string) {
 	t.Helper()
@@ -83,6 +97,7 @@ func TestAuthStorePersistsAcrossRestart(t *testing.T) {
 
 func TestHandleConnectionSupportsPasswordlessLogin(t *testing.T) {
 	store, _ := newTestAuthStore(t)
+	approveTestDevice(t, store, "Alice", "ALICE01")
 	hub := NewHub()
 	go hub.Run()
 	serverConn, clientConn := net.Pipe()
@@ -92,7 +107,7 @@ func TestHandleConnectionSupportsPasswordlessLogin(t *testing.T) {
 		close(done)
 	}()
 
-	if err := sendMessage(clientConn, Message{Type: "login", Username: "Alice", UserCode: "ALICE01"}); err != nil {
+	if err := sendMessage(clientConn, Message{Type: "login", Username: "Alice", UserCode: "ALICE01", DeviceToken: testDeviceToken}); err != nil {
 		t.Fatal(err)
 	}
 	loginOK := receiveClientTestMessage(t, clientConn)
@@ -112,6 +127,7 @@ func TestHandleConnectionAllowsAuthenticatedAccountToReconnect(t *testing.T) {
 	if _, err := store.EnsureIdentity("Alice", "ALICE01"); err != nil {
 		t.Fatal(err)
 	}
+	approveTestDevice(t, store, "Alice", "ALICE01")
 	hub := NewHub()
 	go hub.Run()
 
@@ -121,7 +137,7 @@ func TestHandleConnectionAllowsAuthenticatedAccountToReconnect(t *testing.T) {
 		handleConnectionWithStore(firstServer, hub, store)
 		close(firstDone)
 	}()
-	if err := sendMessage(firstClient, Message{Type: "login", Username: "Alice", UserCode: "ALICE01"}); err != nil {
+	if err := sendMessage(firstClient, Message{Type: "login", Username: "Alice", UserCode: "ALICE01", DeviceToken: testDeviceToken}); err != nil {
 		t.Fatal(err)
 	}
 	firstLogin := receiveClientTestMessage(t, firstClient)
@@ -137,7 +153,7 @@ func TestHandleConnectionAllowsAuthenticatedAccountToReconnect(t *testing.T) {
 		handleConnectionWithStore(secondServer, hub, store)
 		close(secondDone)
 	}()
-	if err := sendMessage(secondClient, Message{Type: "login", Username: "alice", UserCode: "alice01"}); err != nil {
+	if err := sendMessage(secondClient, Message{Type: "login", Username: "alice", UserCode: "alice01", DeviceToken: testDeviceToken}); err != nil {
 		t.Fatal(err)
 	}
 	secondLogin := receiveClientTestMessage(t, secondClient)
@@ -146,6 +162,37 @@ func TestHandleConnectionAllowsAuthenticatedAccountToReconnect(t *testing.T) {
 	}
 	_ = secondClient.Close()
 	waitForHandler(t, secondDone, "second authenticated connection")
+}
+
+func TestAuthStoreRequiresApprovalForNewRemoteDevice(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	remoteToken := strings.Repeat("B", 43)
+	pending, err := store.AuthenticateDevice("Bob", "BOB001", remoteToken, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.Approved || pending.Request.ID < 1 || pending.Request.Status != "pending" {
+		t.Fatalf("pending authentication = %+v", pending)
+	}
+	requests, err := store.PendingDeviceRequests()
+	if err != nil || len(requests) != 1 || requests[0].ID != pending.Request.ID {
+		t.Fatalf("pending requests = %+v, error = %v", requests, err)
+	}
+	if _, err := store.ResolveDeviceRequest(pending.Request.ID, true, "ADMIN01"); err != nil {
+		t.Fatal(err)
+	}
+	approved, err := store.AuthenticateDevice("Bob", "BOB001", remoteToken, false)
+	if err != nil || !approved.Approved || approved.Account.UserCode != "BOB001" {
+		t.Fatalf("approved authentication = %+v, error = %v", approved, err)
+	}
+}
+
+func TestDeviceTokenHashRejectsMalformedCredentials(t *testing.T) {
+	for _, token := range []string{"", strings.Repeat("A", 42), strings.Repeat("A", 44), strings.Repeat("!", 43)} {
+		if _, err := deviceTokenHash(token); err == nil {
+			t.Fatalf("deviceTokenHash(%q) unexpectedly succeeded", token)
+		}
+	}
 }
 
 func TestAuthStoreUsesConfiguredDatabasePath(t *testing.T) {

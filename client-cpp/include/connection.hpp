@@ -20,6 +20,7 @@ struct Config {
     std::string username;
     std::string user_code;
     std::string ca_file;
+    std::string device_token;
     // The TLS certificate identity to verify. Empty keeps the existing
     // behavior of verifying the numeric server address.
     std::string tls_server_name;

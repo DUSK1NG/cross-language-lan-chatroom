@@ -5,7 +5,21 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
+	"strings"
+	"time"
 )
+
+func isLoopbackRemote(address net.Addr) bool {
+	if address == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(address.String())
+	if err != nil {
+		return false
+	}
+	return net.ParseIP(host).IsLoopback()
+}
 
 func handleConnection(conn net.Conn, hub *Hub) {
 	handleConnectionWithStore(conn, hub, nil)
@@ -14,6 +28,7 @@ func handleConnection(conn net.Conn, hub *Hub) {
 func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 	remoteAddress := conn.RemoteAddr().String()
 	log.Printf("client connected: %s", remoteAddress)
+	setLoginDeadline(conn)
 
 	var client *Client
 	shouldUnregister := false
@@ -57,17 +72,26 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 				return
 			}
 			if store != nil {
-				account, err := store.EnsureIdentity(loginMessage.Username, loginMessage.UserCode)
+				bootstrapAdmin := hub != nil && hub.AdminCode != "" &&
+					strings.EqualFold(loginMessage.UserCode, hub.AdminCode) && isLoopbackRemote(conn.RemoteAddr())
+				authentication, err := store.AuthenticateDevice(loginMessage.Username, loginMessage.UserCode,
+					loginMessage.DeviceToken, bootstrapAdmin)
 				if err != nil {
-					content := "Account identity is already used"
-					if !errors.Is(err, ErrAccountAlreadyExists) {
-						content = "Account storage error"
-					}
-					_ = sendMessage(conn, Message{Type: "login_error", Content: content})
+					log.Printf("device authentication rejected for %s: %v", remoteAddress, err)
+					_ = sendMessage(conn, Message{Type: "login_error", Content: "Device authentication failed"})
 					return
 				}
-				normalizedCode, _ := normalizeUserCode(account.UserCode)
-				client = newClient(conn, account.Username, account.UserCode, normalizedCode)
+				if !authentication.Approved {
+					if hub != nil && authentication.Request.ID > 0 {
+						hub.DeviceApproval <- DeviceApprovalRequest{Request: authentication.Request}
+					}
+					_ = sendMessage(conn, Message{Type: "login_pending",
+						MessageID: strconv.FormatInt(authentication.Request.ID, 10),
+						Content:   "Waiting for the room owner to approve this device"})
+					return
+				}
+				normalizedCode, _ := normalizeUserCode(authentication.Account.UserCode)
+				client = newClient(conn, authentication.Account.Username, authentication.Account.UserCode, normalizedCode)
 				client.AccountBacked = true
 			} else {
 				normalizedCode, _ := normalizeUserCode(loginMessage.UserCode)
@@ -96,6 +120,7 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 		return
 	}
 	shouldUnregister = true
+	_ = conn.SetDeadline(time.Time{})
 
 	if err := sendMessage(conn, Message{
 		Type:     "login_ok",
@@ -131,12 +156,19 @@ func (c *Client) readPump(hub *Hub) {
 	}()
 
 	for {
+		setReadDeadline(c.Conn)
 		message, err := receiveMessage(c.Conn)
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				log.Printf("failed to receive message from %s: %v", c.Username, err)
 			}
 			return
+		}
+		if message.Type != "quit" && !c.allowInboundMessage(time.Now()) {
+			if !c.enqueue(hub, Message{Type: "error", Content: "Rate limit exceeded; please slow down"}) {
+				return
+			}
+			continue
 		}
 
 		switch message.Type {
@@ -265,6 +297,7 @@ func (c *Client) readPump(hub *Hub) {
 
 func (c *Client) writePump(hub *Hub) {
 	for message := range c.Send {
+		setWriteDeadline(c.Conn)
 		if err := sendMessage(c.Conn, message); err != nil {
 			log.Printf("failed to send message to %s: %v", c.Username, err)
 			if hub != nil {

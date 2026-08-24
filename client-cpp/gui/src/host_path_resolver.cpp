@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QStandardPaths>
 #include <QVector>
 
 namespace {
@@ -13,13 +14,46 @@ QString existingFile(const QString& path) {
     return {};
 }
 
-HostPathResolver::HostPaths pathsForRoot(const QString& root) {
+HostPathResolver::HostPaths legacyPathsForRoot(const QString& root) {
     const QDir directory(root);
     return {
         QDir::cleanPath(directory.filePath(QStringLiteral("server-go/chat-server.exe"))),
         QDir::cleanPath(directory.filePath(QStringLiteral("server-go/certs/server-lan.crt"))),
         QDir::cleanPath(directory.filePath(QStringLiteral("server-go/certs/server-lan.key"))),
         QDir::cleanPath(directory.filePath(QStringLiteral("server-go/chat.db")))
+    };
+}
+
+QString protectedHostDataRoot() {
+    // An isolated package smoke test can redirect only its child process to a
+    // temporary location. Regular users never need to set this variable.
+    const QString testDataRoot = qEnvironmentVariable("LAN_CHAT_TEST_HOST_DATA_ROOT").trimmed();
+    if (!testDataRoot.isEmpty()) {
+        return QDir::cleanPath(testDataRoot);
+    }
+
+    // The lightweight launcher and the GUI have different executable names,
+    // so AppLocalDataLocation would resolve to two different directories.
+    // Build the user-scoped path from GenericDataLocation explicitly instead.
+    const QString localData = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    return QDir::cleanPath(QDir(localData).filePath(QStringLiteral("DUSK1NG/LAN Chat/host")));
+}
+
+HostPathResolver::HostPaths pathsForRoot(const QString& root) {
+    const HostPathResolver::HostPaths legacy = legacyPathsForRoot(root);
+    // Keep an existing room identity in place for compatibility with earlier
+    // releases. New identities are deliberately kept under the current
+    // Windows user's AppLocalData directory instead of a shared install path.
+    if (QFileInfo::exists(legacy.certFile) || QFileInfo::exists(legacy.keyFile) || QFileInfo::exists(legacy.dbFile)) {
+        return legacy;
+    }
+
+    const QDir dataDirectory(protectedHostDataRoot());
+    return {
+        legacy.serverExe,
+        QDir::cleanPath(dataDirectory.filePath(QStringLiteral("certs/server-lan.crt"))),
+        QDir::cleanPath(dataDirectory.filePath(QStringLiteral("certs/server-lan.key"))),
+        QDir::cleanPath(dataDirectory.filePath(QStringLiteral("chat.db")))
     };
 }
 }

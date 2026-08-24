@@ -102,6 +102,10 @@ type AdminActionRequest struct {
 	CommandID  string
 }
 
+type DeviceApprovalRequest struct {
+	Request DeviceRequest
+}
+
 // MessageRecord is the minimum server-side state needed to authorize a recall.
 // It is accessed only by the Hub goroutine.
 type MessageRecord struct {
@@ -122,6 +126,7 @@ type Client struct {
 	Muted          bool
 	Room           string
 	Send           chan Message
+	inboundLimiter inboundRateLimiter
 
 	closeOnce            sync.Once
 	closeSendOnce        sync.Once
@@ -136,7 +141,12 @@ func newClient(conn net.Conn, username, userCode, normalizedCode string) *Client
 		NormalizedCode: normalizedCode,
 		Room:           defaultRoomName,
 		Send:           make(chan Message, clientSendBufferSize),
+		inboundLimiter: newInboundRateLimiter(time.Now()),
 	}
+}
+
+func (c *Client) allowInboundMessage(now time.Time) bool {
+	return c != nil && c.inboundLimiter.allow(now)
 }
 
 func (c *Client) closeConnection() {
@@ -178,6 +188,7 @@ type Hub struct {
 	HistoryJobs     chan historyJob
 	HistoryResults  chan historyResult
 	AdminAction     chan AdminActionRequest
+	DeviceApproval  chan DeviceApprovalRequest
 	ActiveCodes     map[string]*Client
 	UsedCodes       map[string]struct{}
 	Rooms           map[string]map[*Client]bool
@@ -207,6 +218,7 @@ func NewHub() *Hub {
 		HistoryJobs:    make(chan historyJob, 32),
 		HistoryResults: make(chan historyResult, 32),
 		AdminAction:    make(chan AdminActionRequest),
+		DeviceApproval: make(chan DeviceApprovalRequest),
 		ActiveCodes:    make(map[string]*Client),
 		UsedCodes:      make(map[string]struct{}),
 		Rooms:          make(map[string]map[*Client]bool),
@@ -275,6 +287,9 @@ func (h *Hub) Run() {
 
 		case request := <-h.AdminAction:
 			h.handleAdminAction(request)
+
+		case request := <-h.DeviceApproval:
+			h.handleDeviceApproval(request)
 		}
 	}
 }
@@ -321,6 +336,15 @@ func (h *Hub) handleRegisterRequest(request RegisterRequest) {
 	h.Clients[client] = true
 	h.addToRoom(client, client.Room)
 	h.broadcastSystemMessageToRoom(client.Room, presenceMessage(client, "joined the chat"))
+	if client.IsAdmin && h.OfflineStore != nil {
+		if pending, err := h.OfflineStore.PendingDeviceRequests(); err != nil {
+			log.Printf("failed to load pending device approvals: %v", err)
+		} else {
+			for _, deviceRequest := range pending {
+				h.deliverPendingDeviceRequest(client, deviceRequest)
+			}
+		}
+	}
 	log.Printf("client registered: %s", client.Username)
 	h.respondRegister(request.Result, nil)
 }
@@ -371,6 +395,31 @@ func (h *Hub) handleAdminAction(request AdminActionRequest) {
 		h.deliverError(sender, "Administrator permission required")
 		return
 	}
+	if request.Action == "approve_device" || request.Action == "deny_device" {
+		if h.OfflineStore == nil {
+			h.deliverError(sender, "Device approvals are unavailable", request.MessageID, request.CommandID)
+			return
+		}
+		requestID, err := strconv.ParseInt(request.MessageID, 10, 64)
+		if err != nil || requestID < 1 {
+			h.deliverError(sender, "Invalid device approval request", request.MessageID, request.CommandID)
+			return
+		}
+		resolved, err := h.OfflineStore.ResolveDeviceRequest(requestID, request.Action == "approve_device", sender.NormalizedCode)
+		if err != nil {
+			h.deliverError(sender, "Device request could not be resolved", request.MessageID, request.CommandID)
+			return
+		}
+		result := Message{Type: "device_approval_result", MessageID: request.MessageID,
+			Username: resolved.Username, UserCode: resolved.UserCode, Content: resolved.Status,
+			CommandID: request.CommandID}
+		for client := range h.Clients {
+			if client.IsAdmin {
+				h.deliver(client, result)
+			}
+		}
+		return
+	}
 	targetCode, err := normalizeUserCode(request.TargetCode)
 	if err != nil {
 		h.deliverError(sender, "Invalid target user code")
@@ -397,6 +446,23 @@ func (h *Hub) handleAdminAction(request AdminActionRequest) {
 	default:
 		h.deliverError(sender, "Unsupported administrator action")
 	}
+}
+
+func (h *Hub) handleDeviceApproval(event DeviceApprovalRequest) {
+	for client := range h.Clients {
+		if client.IsAdmin {
+			h.deliverPendingDeviceRequest(client, event.Request)
+		}
+	}
+}
+
+func (h *Hub) deliverPendingDeviceRequest(client *Client, request DeviceRequest) {
+	if client == nil || request.ID < 1 {
+		return
+	}
+	h.deliver(client, Message{Type: "device_approval_request", MessageID: strconv.FormatInt(request.ID, 10),
+		Username: request.Username, UserCode: request.UserCode,
+		Content: request.CreatedAt.UTC().Format(time.RFC3339Nano)})
 }
 
 func (h *Hub) unregisterClient(client *Client, broadcastLeave bool) {

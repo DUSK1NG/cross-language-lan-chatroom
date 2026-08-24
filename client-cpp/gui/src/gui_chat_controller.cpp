@@ -449,6 +449,44 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
         return;
     }
 
+    if (type == QStringLiteral("device_approval_request")) {
+        if (messageId.isEmpty() || username.isEmpty() || userCode.isEmpty()) {
+            return;
+        }
+        QVariantMap request{{"id", messageId}, {"displayName", username}, {"userCode", userCode},
+                            {"requestedAt", content}};
+        bool replaced = false;
+        for (QVariant& value : pendingDeviceApprovals_) {
+            if (value.toMap().value("id").toString() == messageId) {
+                value = request;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) {
+            pendingDeviceApprovals_.append(request);
+        }
+        emit pendingDeviceApprovalsChanged();
+        return;
+    }
+
+    if (type == QStringLiteral("device_approval_result")) {
+        bool removed = false;
+        for (int index = pendingDeviceApprovals_.size() - 1; index >= 0; --index) {
+            if (pendingDeviceApprovals_.at(index).toMap().value("id").toString() == messageId) {
+                pendingDeviceApprovals_.removeAt(index);
+                removed = true;
+            }
+        }
+        if (removed) {
+            emit pendingDeviceApprovalsChanged();
+        }
+        appendSystemMessage(content == QStringLiteral("approved")
+                                ? QStringLiteral("Device approved. The member can connect again.")
+                                : QStringLiteral("Device request denied."));
+        return;
+    }
+
     if (type == QStringLiteral("users_response")) {
         QHash<QString, int> unreadByUser;
         for (int row = 0; row < directMessageModel_->rowCount(); ++row) {

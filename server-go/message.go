@@ -51,8 +51,9 @@ type Message struct {
 	Messages        []Message    `json:"messages,omitempty"`
 	// Password is retained only so old database/test fixtures still compile;
 	// password authentication is removed and this field never crosses the wire.
-	Password string `json:"-"`
-	IsAdmin  bool   `json:"is_admin,omitempty"`
+	Password    string `json:"-"`
+	DeviceToken string `json:"device_token,omitempty"`
+	IsAdmin     bool   `json:"is_admin,omitempty"`
 }
 
 func validateUserCode(code string) error {
@@ -189,6 +190,12 @@ func validateMessage(message Message) error {
 		if message.Content == "recall" {
 			if message.MessageID == "" {
 				return fmt.Errorf("message id is required")
+			}
+			return nil
+		}
+		if message.Content == "approve_device" || message.Content == "deny_device" {
+			if message.MessageID == "" {
+				return fmt.Errorf("device request id is required")
 			}
 			return nil
 		}

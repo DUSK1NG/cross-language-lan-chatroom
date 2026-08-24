@@ -18,7 +18,11 @@ func main() {
 	discoveryName := flag.String("discovery-name", "", "display name announced to nearby LAN Chat clients")
 	dbPath := flag.String("db", "", "path to the SQLite account database")
 	adminCode := flag.String("admin-code", "", "user code granted administrator permissions")
+	maxClients := flag.Int("max-clients", defaultMaxConcurrentClients, "maximum concurrent client connections")
 	flag.Parse()
+	if *maxClients < 1 {
+		log.Fatal("max-clients must be at least 1")
+	}
 	if *initializeLocalHostOnly {
 		if err := initializeLocalHost(*certPath, *keyPath, *dbPath); err != nil {
 			log.Fatalf("local host initialization error: %v", err)
@@ -66,6 +70,7 @@ func main() {
 	if hub.AdminCode != "" {
 		log.Printf("administrator code configured: %s", hub.AdminCode)
 	}
+	connectionSlots := make(chan struct{}, *maxClients)
 
 	for {
 		conn, err := listener.Accept()
@@ -74,6 +79,15 @@ func main() {
 			continue
 		}
 
-		go handleConnectionWithStore(conn, hub, store)
+		select {
+		case connectionSlots <- struct{}{}:
+			go func() {
+				defer func() { <-connectionSlots }()
+				handleConnectionWithStore(conn, hub, store)
+			}()
+		default:
+			log.Printf("connection rejected: maximum of %d clients reached", *maxClients)
+			_ = conn.Close()
+		}
 	}
 }

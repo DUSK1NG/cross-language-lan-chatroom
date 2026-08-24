@@ -66,6 +66,10 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .lan-host-card > span:first-child { display: grid; gap: 3px; }
 .lan-host-card small { color: #9aa7c4; font-size: 12px; }
 .lan-host-card__trust { flex: 0 0 auto; color: #37f6d0; font-size: 12px; }
+.lan-discovery__notice { display: grid; gap: 8px; }
+.lan-discovery__notice p { margin: 0; }
+.lan-discovery__confirmation { display: flex; align-items: flex-start; gap: 8px; color: #d8e2ff; font-size: 13px; line-height: 1.45; cursor: pointer; }
+.lan-discovery__confirmation input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: #37f6d0; }
 .manual-entry-button { width: fit-content; margin-top: 14px; padding: 0; border: 0; color: #9aa7c4; background: transparent; cursor: pointer; font: inherit; font-size: 12px; }
 .manual-entry-button:hover { color: #37f6d0; }
 .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 42px; }
@@ -212,6 +216,10 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .admin-profile p { margin: 0; color: #8190b0; font-size: 13px; }
 .admin-member-input { width: 100%; margin-top: 16px; padding: 11px 12px; border: 1px solid rgba(164, 182, 255, .2); border-radius: 10px; color: #f5f7ff; background: #0b1228; outline: none; }
 .admin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.device-approval-list { display: grid; gap: 12px; margin-top: 16px; }
+.device-approval-item { padding: 13px; border: 1px solid rgba(164, 182, 255, .18); border-radius: 13px; background: rgba(8, 17, 41, .7); color: #d9e1f5; }
+.device-approval-item p { margin: 7px 0 0; color: #9daccd; font-size: 13px; line-height: 1.45; }
+.device-approval-item .admin-actions { margin-top: 12px; }
 .danger-button { min-height: 38px; padding: 0 14px; border: 0; border-radius: 11px; color: #fff1f6; background: #a53d63; font: inherit; font-weight: 700; cursor: pointer; }
 .danger-button:hover { background: #c04c78; }
 .danger-button:disabled, .admin-actions button:disabled { cursor: not-allowed; opacity: .5; }

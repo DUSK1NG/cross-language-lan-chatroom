@@ -44,6 +44,13 @@ export type MemberSummary = {
   admin: boolean;
 };
 
+export type DeviceApprovalRequest = {
+  id: string;
+  displayName: string;
+  userCode: string;
+  requestedAt: string;
+};
+
 export type HostDefaults = {
   serverExe: string;
   certFile: string;
@@ -114,6 +121,7 @@ export type BridgeState = {
   activeMessages: MessageItem[];
   members: MemberSummary[];
   permissions: { activeRoomCanManage: boolean };
+  deviceApprovals?: DeviceApprovalRequest[];
   savedConnection: {
     serverIp: string;
     serverPort: number;

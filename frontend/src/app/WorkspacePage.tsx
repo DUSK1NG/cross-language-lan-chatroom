@@ -24,6 +24,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
   const [memberDrawerOpen, setMemberDrawerOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [roomManageOpen, setRoomManageOpen] = useState(false);
+  const [deviceApprovalOpen, setDeviceApprovalOpen] = useState(false);
   const [memberToManage, setMemberToManage] = useState<MemberSummary | null>(null);
   const [memberProfile, setMemberProfile] = useState<MemberSummary | null>(null);
   const [pendingAdminAction, setPendingAdminAction] = useState<{ action: AdminAction; member: MemberSummary } | null>(null);
@@ -49,12 +50,13 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
   useLayoutEffect(() => animateWorkspacePanels(workspaceRef.current!), []);
 
   useEffect(() => {
-    if (!memberDrawerOpen && !sidebarOpen && !createRoomOpen && !roomManageOpen && !memberToManage && !memberProfile && !pendingAdminAction) return undefined;
+    if (!memberDrawerOpen && !sidebarOpen && !createRoomOpen && !roomManageOpen && !deviceApprovalOpen && !memberToManage && !memberProfile && !pendingAdminAction) return undefined;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setMemberDrawerOpen(false);
       setSidebarOpen(false);
       setRoomManageOpen(false);
+      setDeviceApprovalOpen(false);
       setMemberToManage(null);
       setMemberProfile(null);
       setPendingAdminAction(null);
@@ -62,7 +64,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [memberDrawerOpen, sidebarOpen, createRoomOpen, roomManageOpen, memberToManage, memberProfile, pendingAdminAction]);
+  }, [memberDrawerOpen, sidebarOpen, createRoomOpen, roomManageOpen, deviceApprovalOpen, memberToManage, memberProfile, pendingAdminAction]);
 
   useEffect(() => () => {
     pendingRoomUnsubscribeRef.current?.();
@@ -173,6 +175,12 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
     bridge.dispatch(command);
   }
 
+  function resolveDeviceApproval(id: string, userCode: string, approve: boolean) {
+    bridge.dispatch(createCommand('admin.action', {
+      action: approve ? 'approve_device' : 'deny_device', targetUserCode: userCode, messageId: id
+    }));
+  }
+
   const quoteMessage = useCallback((message: { displayName: string; content: string }) => {
     const [, ...replyLines] = message.content.split('\n');
     const reply = message.content.startsWith('> ') && replyLines.length > 0
@@ -187,7 +195,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
       <WorkspaceRail section={section} onSectionChange={setSection} onSettings={onSettings} onOpenSidebar={() => setSidebarOpen(true)} />
       <ConversationSidebar bridge={bridge} state={state} section={section} onCreateRoom={openCreateRoom} />
       <section className="chat-region" data-motion="workspace-panel">
-        <ChatHeader state={state} onMembers={() => setMemberDrawerOpen(true)} canManage={canManageRoom} onManageRoom={openRoomManage} />
+        <ChatHeader state={state} onMembers={() => setMemberDrawerOpen(true)} canManage={canManageRoom} onManageRoom={openRoomManage} onDeviceApprovals={() => setDeviceApprovalOpen(true)} />
         <MessageTimeline bridge={bridge} state={state} onQuote={quoteMessage} canRecall={(message) => state.identity.admin || message.userCode === state.identity.userCode} />
         <MessageComposer bridge={bridge} state={state} quote={quote} onClearQuote={() => setQuote(null)} draft={draft} onDraftChange={setDraft} onCommandResult={() => undefined} focusAtEndToken={focusComposerAtEndToken} />
       </section>
@@ -233,6 +241,18 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
           <button className="secondary-button" type="button" onClick={() => setPendingAdminAction(null)}>取消</button>
           <button className={pendingAdminAction.action === 'kick' ? 'danger-button' : 'primary-button'} type="button" disabled={pendingAdminActionIdRef.current !== null} onClick={confirmAdminAction}>确认</button>
         </div>
+      </ModalSurface>}
+      {deviceApprovalOpen && <ModalSurface title="设备审批" onClose={() => setDeviceApprovalOpen(false)}>
+        {(state.deviceApprovals ?? []).length === 0 ? <p className="settings-note">没有待审批的设备。</p> : <div className="device-approval-list">
+          {(state.deviceApprovals ?? []).map((request) => <div className="device-approval-item" key={request.id}>
+            <strong>{request.displayName}#{request.userCode}</strong>
+            <p>此设备请求加入聊天室。请先通过可信渠道核对成员身份。</p>
+            <div className="admin-actions">
+              <button className="secondary-button" type="button" onClick={() => resolveDeviceApproval(request.id, request.userCode, false)}>拒绝</button>
+              <button className="primary-button" type="button" onClick={() => resolveDeviceApproval(request.id, request.userCode, true)}>批准</button>
+            </div>
+          </div>)}
+        </div>}
       </ModalSurface>}
       {createRoomOpen && (
         <ModalSurface title="新建频道" onClose={closeCreateRoom}>

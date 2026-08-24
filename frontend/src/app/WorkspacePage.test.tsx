@@ -249,6 +249,26 @@ describe('WorkspacePage', () => {
     }));
   });
 
+  it('lets an administrator resolve a pending device approval', () => {
+    const state: BridgeState = {
+      ...workspaceState,
+      identity: { ...workspaceState.identity, admin: true },
+      deviceApprovals: [{ id: '42', displayName: 'Cara', userCode: 'C003', requestedAt: '2026-08-24T10:00:00Z' }]
+    };
+    const bridge = createFakeBridge(state);
+    render(<WorkspacePage bridge={bridge} state={state} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '设备审批' }));
+    const dialog = screen.getByRole('dialog', { name: '设备审批' });
+    expect(within(dialog).getByText('Cara#C003')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '批准' }));
+
+    expect(bridge.commands).toContainEqual(expect.objectContaining({
+      type: 'admin.action',
+      payload: { action: 'approve_device', targetUserCode: 'C003', messageId: '42' }
+    }));
+  });
+
   it('opens a member profile with online state and admin badge', () => {
     const bridge = createFakeBridge(workspaceState);
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);

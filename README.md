@@ -18,35 +18,14 @@
 
 核心链路：`React/TypeScript → QWebChannel → C++ 控制器 → TLS/TCP → Go Server → SQLite`
 
-## 选择适合你的包
+## 下载与安装
 
-| 场景 | 获取内容 | 启动方式 | 是否需要编译器 |
-| --- | --- | --- | --- |
-| 房主和局域网成员（推荐） | `LANChat-Setup-x64.exe` | 双击安装；创建桌面/开始菜单快捷方式 | 不需要；同一程序可创建本地聊天室或加入局域网聊天室 |
-| 房主和局域网成员（便携） | `LANChat-Windows-x64.zip` | 解压后双击 `LANChat.exe` | 不需要；同一程序可创建本地聊天室或加入局域网聊天室 |
-| 开发者（可选） | `LANChat-Source-Launcher-windows-x64.zip` | 双击 `LANChat-Launcher.exe` | 首次明确确认后自动准备工具链，后续增量构建 |
+| 适合谁 | 下载内容 | 如何启动 |
+| --- | --- | --- |
+| 房主和局域网成员（推荐） | `LANChat-Setup-x64.exe` | 双击安装。安装程序会创建桌面与开始菜单快捷方式。 |
+| 不希望安装的用户 | `LANChat-Windows-x64.zip` | 完整解压后双击 `LANChat.exe`；不要只复制其中一个 EXE。 |
 
-标准 Windows 统一运行包由维护者在 Windows 发布机构建：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1
-```
-
-GitHub 源码启动器仅供开发者使用，由维护者在 Windows 发布机构建：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-source-launcher.ps1
-```
-
-尚未生成发布资产时，可在克隆后的源码目录直接启动：
-
-```powershell
-cd C:\path\to\chat_X
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1
-```
-
-该入口会优先运行已验证的 `out\modern-msvc-x64\lan-chat-launcher.exe`；仅在本地没有可用构建时才构建 React 界面、Go 服务端和现代 Qt WebEngine 客户端。首次构建如需安装 Node.js、pnpm 等工具链，会先询问，不会静默提权。强制重建：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1 -Rebuild`。
+两个运行包都不需要编译器，也都可以创建本地聊天室或加入局域网聊天室。源码构建、发布脚本和自动准备工具链仅面向开发者，见文末“开发与验证”。
 
 ## 快速开始
 
@@ -61,7 +40,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1
 
 1. 安装 `LANChat-Setup-x64.exe`，或完整解压 `LANChat-Windows-x64.zip`；不要只复制单个 EXE。
 2. 启动 `LANChat.exe`，选择“加入局域网聊天室”。
-3. 在“附近聊天室”中选择房主，填写自己的用户名/用户代码并点击“确认并加入”。首次加入会保存并固定校验该房主的公开证书；之后房主 IPv4 变化时会自动重新发现。
+3. 在“附近聊天室”中选择房主，填写自己的用户名/用户代码、核对公开证书指纹并点击“确认并加入”。新设备会先进入待审批状态；房主在聊天界面右上角的“设备审批”中批准后，成员再次点击加入即可连接。后续使用同一 Windows 用户和同一设备时无需重复审批；房主 IPv4 变化时会自动重新发现。
 
 若列表为空（例如访客网络、隔离 VLAN 或 UDP 被阻止），可点“改用手动连接”，填写房主真实局域网 IPv4、端口 `8888` 和公开证书 `server-lan.crt`。另一台电脑不能填写 `127.0.0.1` 或 `0.0.0.0`。成员机可先检查端口可达性：
 
@@ -73,24 +52,35 @@ Test-NetConnection <房主IPv4> -Port 8888
 
 ## 已实现功能
 
-- TLS/TCP 安全连接，4-byte big-endian 长度帧与 UTF-8 JSON 协议
+- TLS/TCP 传输加密与证书校验，4-byte big-endian 长度帧与 UTF-8 JSON 协议
 - 大厅、公开/私有频道、频道邀请与成员管理
 - 一对一私信、离线私信、历史消息与消息撤回
-- 管理员禁言、踢出和频道权限
+- 管理员禁言、踢出、频道权限与新设备接入审批
 - 中文现代桌面 UI、表情、复制、引用、未读提示、连接状态与局域网自动发现
 
 当前明确不提供文件、图片、音频或视频上传；端到端加密和跨公网连接也不在本版本范围内。
 
-## 安全边界
+## 安全边界与使用前提
 
-`server-lan.key` 是房主的 TLS 私钥，只能保留在房主电脑：
+LAN Chat 适用于彼此信任的局域网，不应直接暴露为公网聊天服务：
 
-- 自动发现会传递房主的**公开**证书与指纹；首次加入前请核对房主名称和短指纹。手动连接时可以向成员共享：房主 IPv4、端口与 `server-lan.crt` 公共证书。
-- 绝不能向成员共享或提交到 GitHub：`server-lan.key`、`chat.db`、聊天记录、访问令牌和构建输出。
+- TLS 会加密传输并校验服务端证书，但本版本没有端到端加密。
+- 用户名和用户代码是显示/路由标识，不是密码。客户端会为每个“Windows 用户 + 房主证书”生成独立设备凭据，并用 Windows DPAPI 加密保存；服务端只保存其 SHA-256 摘要。除房主本机首次启动外，所有新设备都必须由在线管理员批准后才可连接。因此仍应只在可信网络使用，并在 Windows 防火墙中限制 TCP `8888`，不要做公网端口映射。
+- 自动发现只广播房主的**公开**证书与指纹，但 UDP 广播本身不具备身份认证。首次加入前，请通过电话、当面或其他可信渠道核对房主名称与短指纹；不一致时不要连接。手动连接时只共享房主 IPv4、端口和 `server-lan.crt` 公共证书。
+- `server-lan.key` 与 `chat.db` 分别包含房主私钥和本地聊天数据。请保存到仅房主账户可访问的本地目录，不要放在共享盘或同步盘，更不能提交到 GitHub、发送给成员或打包进发布资产。客户端设备凭据也只保留在当前 Windows 用户的 DPAPI 保护目录中，不会显示给网页界面或经网络发送明文。
 
-这不是“禁止上传 GitHub”。源码、构建脚本、测试和文档都可以公开；被限制的是可能让他人伪装成房主或泄露本地数据的敏感材料。
+源码、构建脚本、测试和文档可以公开；不能公开的是私钥、数据库、聊天记录和访问令牌等敏感材料。
 
 ## 开发与验证
+
+本节仅面向贡献者和从源码构建的开发者；普通用户请使用上方运行包。源码目录可通过以下命令启动，首次构建如需准备工具链会明确询问：
+
+```powershell
+cd C:\path\to\chat_X
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-gui.ps1
+```
+
+强制重建时追加 `-Rebuild`。发布维护者可使用 [发布清单](docs/github-publishing.md) 中的打包命令。
 
 统一现代构建与测试：
 

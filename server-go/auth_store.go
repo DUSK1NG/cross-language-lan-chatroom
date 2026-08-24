@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	_ "modernc.org/sqlite"
@@ -13,21 +16,35 @@ import (
 const (
 	authDBPathEnv                 = "CHAT_DB_PATH"
 	defaultAuthDBPath             = "chat.db"
-	minPasswordBytes              = 8
-	maxPasswordBytes              = 72
 	maxOfflineMessagesPerUser     = 100
 	maxHistoryPageSize            = 100
 	maxHistoryRowsPerConversation = 10000
 )
 
 var (
-	ErrAccountAlreadyExists = errors.New("account already exists")
+	ErrAccountAlreadyExists    = errors.New("account already exists")
+	ErrDeviceIdentityMismatch  = errors.New("device identity does not match the requested account")
+	ErrDeviceRequestNotPending = errors.New("device request is not pending")
 )
 
 type Account struct {
 	Username  string
 	UserCode  string
 	CreatedAt time.Time
+}
+
+type DeviceRequest struct {
+	ID        int64
+	Username  string
+	UserCode  string
+	Status    string
+	CreatedAt time.Time
+}
+
+type DeviceAuthentication struct {
+	Account  Account
+	Request  DeviceRequest
+	Approved bool
 }
 
 type AuthStore struct {
@@ -118,6 +135,20 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation
     ON chat_messages(kind, conversation_key, id);
+CREATE TABLE IF NOT EXISTS device_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL,
+    normalized_username TEXT NOT NULL,
+    user_code TEXT NOT NULL,
+    normalized_code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    approved_at TEXT,
+    approved_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_device_requests_pending
+    ON device_requests(status, normalized_code, id);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("initialize auth database: %w", err)
@@ -129,6 +160,209 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation
 		return fmt.Errorf("index offline message id: %w", err)
 	}
 	return nil
+}
+
+func deviceTokenHash(token string) (string, error) {
+	// 32 random bytes encoded as unpadded Base64URL always occupy 43 bytes.
+	// Reject any other length before decoding so malformed login frames cannot
+	// make the database-authentication path process oversized input.
+	if len(token) != 43 {
+		return "", errors.New("device token is invalid")
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(decoded) != 32 {
+		return "", errors.New("device token is invalid")
+	}
+	digest := sha256.Sum256(decoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func (s *AuthStore) findAccount(username, userCode string) (Account, bool, error) {
+	var account Account
+	var createdAt string
+	err := s.db.QueryRow(`SELECT username, user_code, created_at FROM accounts
+WHERE normalized_username = ? OR normalized_code = ?`,
+		normalizeUsername(username), strings.ToLower(userCode)).Scan(
+		&account.Username, &account.UserCode, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Account{}, false, nil
+	}
+	if err != nil {
+		return Account{}, false, fmt.Errorf("query account identity: %w", err)
+	}
+	account.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	return account, true, nil
+}
+
+func (s *AuthStore) pendingRequestForCode(normalizedCode string) (DeviceRequest, bool, error) {
+	var request DeviceRequest
+	var createdAt string
+	err := s.db.QueryRow(`SELECT id, username, user_code, status, created_at
+FROM device_requests WHERE normalized_code = ? AND status = 'pending' ORDER BY id LIMIT 1`, normalizedCode).
+		Scan(&request.ID, &request.Username, &request.UserCode, &request.Status, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeviceRequest{}, false, nil
+	}
+	if err != nil {
+		return DeviceRequest{}, false, fmt.Errorf("query pending device request: %w", err)
+	}
+	request.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	return request, true, nil
+}
+
+func (s *AuthStore) insertDeviceRequest(tokenHash, username, userCode, status string) (DeviceRequest, error) {
+	createdAt := time.Now().UTC()
+	result, err := s.db.Exec(`INSERT INTO device_requests
+(token_hash, username, normalized_username, user_code, normalized_code, status, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)`, tokenHash, username, normalizeUsername(username), userCode,
+		strings.ToLower(userCode), status, createdAt.Format(time.RFC3339Nano))
+	if err != nil {
+		return DeviceRequest{}, fmt.Errorf("store device request: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return DeviceRequest{}, fmt.Errorf("read device request id: %w", err)
+	}
+	return DeviceRequest{ID: id, Username: username, UserCode: userCode, Status: status, CreatedAt: createdAt}, nil
+}
+
+// AuthenticateDevice accepts only a token that was previously approved by a
+// room administrator. The first local administrator device is seeded through
+// the loopback-only bootstrap path; every other new device becomes pending.
+func (s *AuthStore) AuthenticateDevice(username, userCode, deviceToken string, localAdminBootstrap bool) (DeviceAuthentication, error) {
+	if s == nil || s.db == nil {
+		return DeviceAuthentication{}, errors.New("auth store is not initialized")
+	}
+	identity := Message{Type: "login", Username: username, UserCode: userCode}
+	if err := validateMessage(identity); err != nil {
+		return DeviceAuthentication{}, fmt.Errorf("invalid account identity: %w", err)
+	}
+	tokenHash, err := deviceTokenHash(deviceToken)
+	if err != nil {
+		return DeviceAuthentication{}, err
+	}
+
+	var request DeviceRequest
+	var normalizedUsername, normalizedCode, createdAt string
+	err = s.db.QueryRow(`SELECT id, username, user_code, status, created_at, normalized_username, normalized_code
+FROM device_requests WHERE token_hash = ?`, tokenHash).Scan(
+		&request.ID, &request.Username, &request.UserCode, &request.Status, &createdAt,
+		&normalizedUsername, &normalizedCode)
+	if err == nil {
+		request.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		if normalizedUsername != normalizeUsername(username) || normalizedCode != strings.ToLower(userCode) {
+			return DeviceAuthentication{}, ErrDeviceIdentityMismatch
+		}
+		if request.Status != "approved" {
+			return DeviceAuthentication{Request: request}, nil
+		}
+		account, found, accountErr := s.findAccount(username, userCode)
+		if accountErr != nil {
+			return DeviceAuthentication{}, accountErr
+		}
+		if !found || normalizeUsername(account.Username) != normalizeUsername(username) ||
+			strings.ToLower(account.UserCode) != strings.ToLower(userCode) {
+			return DeviceAuthentication{}, ErrDeviceIdentityMismatch
+		}
+		return DeviceAuthentication{Account: account, Request: request, Approved: true}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return DeviceAuthentication{}, fmt.Errorf("query device credential: %w", err)
+	}
+
+	account, accountExists, err := s.findAccount(username, userCode)
+	if err != nil {
+		return DeviceAuthentication{}, err
+	}
+	if accountExists && (normalizeUsername(account.Username) != normalizeUsername(username) ||
+		strings.ToLower(account.UserCode) != strings.ToLower(userCode)) {
+		return DeviceAuthentication{}, ErrAccountAlreadyExists
+	}
+	if localAdminBootstrap {
+		if !accountExists {
+			account, err = s.EnsureIdentity(username, userCode)
+			if err != nil {
+				return DeviceAuthentication{}, err
+			}
+		}
+		request, err = s.insertDeviceRequest(tokenHash, account.Username, account.UserCode, "approved")
+		if err != nil {
+			return DeviceAuthentication{}, err
+		}
+		return DeviceAuthentication{Account: account, Request: request, Approved: true}, nil
+	}
+
+	if pending, found, pendingErr := s.pendingRequestForCode(strings.ToLower(userCode)); pendingErr != nil {
+		return DeviceAuthentication{}, pendingErr
+	} else if found {
+		if normalizeUsername(pending.Username) != normalizeUsername(username) {
+			return DeviceAuthentication{}, ErrAccountAlreadyExists
+		}
+		return DeviceAuthentication{Request: pending}, nil
+	}
+	request, err = s.insertDeviceRequest(tokenHash, username, userCode, "pending")
+	if err != nil {
+		return DeviceAuthentication{}, err
+	}
+	return DeviceAuthentication{Request: request}, nil
+}
+
+func (s *AuthStore) PendingDeviceRequests() ([]DeviceRequest, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("auth store is not initialized")
+	}
+	rows, err := s.db.Query(`SELECT id, username, user_code, status, created_at
+FROM device_requests WHERE status = 'pending' ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query pending device requests: %w", err)
+	}
+	defer rows.Close()
+	requests := make([]DeviceRequest, 0)
+	for rows.Next() {
+		var request DeviceRequest
+		var createdAt string
+		if err := rows.Scan(&request.ID, &request.Username, &request.UserCode, &request.Status, &createdAt); err != nil {
+			return nil, err
+		}
+		request.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		requests = append(requests, request)
+	}
+	return requests, rows.Err()
+}
+
+func (s *AuthStore) ResolveDeviceRequest(requestID int64, approve bool, approvedBy string) (DeviceRequest, error) {
+	if s == nil || s.db == nil {
+		return DeviceRequest{}, errors.New("auth store is not initialized")
+	}
+	var request DeviceRequest
+	var createdAt string
+	err := s.db.QueryRow(`SELECT id, username, user_code, status, created_at
+FROM device_requests WHERE id = ?`, requestID).Scan(
+		&request.ID, &request.Username, &request.UserCode, &request.Status, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeviceRequest{}, ErrDeviceRequestNotPending
+	}
+	if err != nil {
+		return DeviceRequest{}, fmt.Errorf("load device request: %w", err)
+	}
+	request.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	if request.Status != "pending" {
+		return DeviceRequest{}, ErrDeviceRequestNotPending
+	}
+	if approve {
+		if _, err := s.EnsureIdentity(request.Username, request.UserCode); err != nil {
+			return DeviceRequest{}, err
+		}
+		request.Status = "approved"
+	} else {
+		request.Status = "denied"
+	}
+	_, err = s.db.Exec(`UPDATE device_requests SET status = ?, approved_at = ?, approved_by = ? WHERE id = ?`,
+		request.Status, time.Now().UTC().Format(time.RFC3339Nano), approvedBy, request.ID)
+	if err != nil {
+		return DeviceRequest{}, fmt.Errorf("resolve device request: %w", err)
+	}
+	return request, nil
 }
 
 func (s *AuthStore) HasUserCode(userCode string) (bool, error) {

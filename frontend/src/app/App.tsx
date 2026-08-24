@@ -110,6 +110,7 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   const [caFile, setCaFile] = useState(state.savedConnection.caFile);
   const [selectedHostId, setSelectedHostId] = useState('');
   const [manualEntry, setManualEntry] = useState(!guest);
+  const [fingerprintConfirmed, setFingerprintConfirmed] = useState(false);
   const busy = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
   const validPort = Number.isInteger(Number(serverPort)) && Number(serverPort) >= 1 && Number(serverPort) <= 65535;
   const discovery = state.lanDiscovery ?? { scanning: false, hosts: [] };
@@ -126,9 +127,14 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
     }
   }, [discovery.hosts, selectedHostId]);
 
+  useEffect(() => {
+    setFingerprintConfirmed(false);
+  }, [selectedHostId]);
+
   function connect() {
     if (busy || !username.trim() || !userCode.trim()) return;
     if (guest && selectedHost && !manualEntry) {
+      if (!selectedHost.known && !fingerprintConfirmed) return;
       bridge.dispatch(createCommand('session.connectDiscoveredHost', {
         hostId: selectedHost.id, username: username.trim(), userCode: userCode.trim()
       }));
@@ -182,9 +188,13 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
               </div>
             )}
             {selectedHost && !manualEntry && (
-              <p className="lan-discovery__notice">
-                点击“确认并加入”后，将保存并固定校验房主的公开证书。指纹：{selectedHost.fingerprintSha256.slice(0, 16)}…
-              </p>
+              <div className="lan-discovery__notice">
+                <p>点击“确认并加入”后，将保存并固定校验房主的公开证书。指纹：{selectedHost.fingerprintSha256.slice(0, 16)}…</p>
+                {!selectedHost.known && <label className="lan-discovery__confirmation">
+                  <input type="checkbox" checked={fingerprintConfirmed} onChange={(event) => setFingerprintConfirmed(event.target.checked)} disabled={busy} />
+                  我已通过可信渠道核对房主名称和上述指纹
+                </label>}
+              </div>
             )}
           </section>
         )}
@@ -212,7 +222,7 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
         <div className="form-actions">
           <button className="secondary-button" type="button" onClick={onBack} disabled={busy}>返回</button>
           <button className="primary-button" type="button" aria-label={guest && selectedHost && !manualEntry ? 'one-click-join' : 'connect-session'} onClick={connect}
-            disabled={busy || !username.trim() || !userCode.trim() || (showManualFields && (!serverIp.trim() || !validPort))}>
+            disabled={busy || !username.trim() || !userCode.trim() || (guest && selectedHost && !manualEntry && !selectedHost.known && !fingerprintConfirmed) || (showManualFields && (!serverIp.trim() || !validPort))}>
             {busy ? '连接中…' : (guest && selectedHost && !manualEntry ? '确认并加入' : '连接')}
           </button>
         </div>

@@ -127,6 +127,40 @@ func TestHubKickQueuesNotificationBeforeDisconnect(t *testing.T) {
 	}
 }
 
+func TestHubAdministratorCanResolvePendingDeviceApproval(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	hub := NewHub()
+	hub.OfflineStore = store
+	admin := newTestClient(t, "Alice", "A001")
+	admin.IsAdmin = true
+	hub.Clients[admin] = true
+
+	pending, err := store.AuthenticateDevice("Cara", "C003", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", false)
+	if err != nil || pending.Approved || pending.Request.ID < 1 {
+		t.Fatalf("pending device authentication = %+v, error = %v", pending, err)
+	}
+
+	hub.handleDeviceApproval(DeviceApprovalRequest{Request: pending.Request})
+	requestMessage := <-admin.Send
+	if requestMessage.Type != "device_approval_request" || requestMessage.MessageID != "1" ||
+		requestMessage.Username != "Cara" || requestMessage.UserCode != "C003" || requestMessage.Content == "" {
+		t.Fatalf("device approval notification = %+v", requestMessage)
+	}
+
+	hub.handleAdminAction(AdminActionRequest{
+		Sender: admin, Action: "approve_device", MessageID: "1", CommandID: "approve-cara",
+	})
+	assertMessageReceived(t, admin.Send, Message{
+		Type: "device_approval_result", MessageID: "1", Username: "Cara", UserCode: "C003",
+		Content: "approved", CommandID: "approve-cara",
+	})
+
+	approved, err := store.AuthenticateDevice("Cara", "C003", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", false)
+	if err != nil || !approved.Approved || approved.Account.UserCode != "C003" {
+		t.Fatalf("approved device authentication = %+v, error = %v", approved, err)
+	}
+}
+
 func TestHubRejectsRegistrationWithoutNormalizedCode(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()

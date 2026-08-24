@@ -1,4 +1,6 @@
-# 无服务器部署的局域网模式
+# 旧 CLI 的房主 / 访客诊断模式
+
+> 正式用户入口是 `LANChat.exe` 的现代图形界面；此文档只保留给维护者排查旧 CLI 协议。标准安装包和便携包不应按本文命令启动。旧 CLI 不支持密码登录，用户名和用户代码也不是安全凭据。
 
 本项目支持两种启动模式：
 
@@ -50,7 +52,7 @@
 以后部署到云服务器时，继续使用普通 server 模式：
 
 ```powershell
-.\chat-client.exe 203.0.113.10 8888 Alice ALICE001 --password password123 --ca-file .\certs\lan-ca.pem
+.\chat-client.exe 203.0.113.10 8888 Alice ALICE001 --ca-file .\certs\lan-ca.pem
 ```
 
 因此客户端有明确的模式开关：`--host` 使用本机临时聊天服务，普通参数连接远程服务端，`--guest` 加入其他用户创建的局域网聊天室。

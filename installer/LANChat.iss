@@ -52,7 +52,6 @@ Name: "{autodesktop}\LAN Chat"; Filename: "{app}\LANChat.exe"; WorkingDir: "{app
 Filename: "{app}\LANChat.exe"; Description: "启动 LAN Chat"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 ; The uninstaller removes files installed above and the Windows uninstall entry.
-; It intentionally keeps host-created server-go\certs and server-go\chat.db so
-; private keys and chat data are never silently deleted. Users may delete the
-; remaining server-go directory manually after uninstalling if they want to
-; permanently erase local host data.
+; Host-created TLS keys and chat data live under the current user's LocalAppData
+; directory and are intentionally outside the install tree. The uninstaller
+; therefore never silently deletes a host identity or chat history.

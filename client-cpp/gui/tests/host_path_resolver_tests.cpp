@@ -4,6 +4,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 class HostPathResolverTests final : public QObject {
@@ -17,6 +18,8 @@ private slots:
     void marksBundledServerAsAvailableBeforeFirstCertificate();
     void findsHostFilesFromDevelopmentBuildDirectory();
     void findsHostFilesFromUnifiedOutputDirectory();
+    void usesPerUserAppDataForNewHostIdentity();
+    void usesExplicitTestDataRootWhenProvided();
 };
 
 void HostPathResolverTests::prefersCertificateSiblingKey() {
@@ -121,6 +124,54 @@ void HostPathResolverTests::findsHostFilesFromUnifiedOutputDirectory() {
     QCOMPARE(paths.certFile, QFileInfo(cert).absoluteFilePath());
     QCOMPARE(paths.keyFile, QFileInfo(key).absoluteFilePath());
     QVERIFY(paths.available());
+}
+
+void HostPathResolverTests::usesPerUserAppDataForNewHostIdentity() {
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString server = QDir(temp.path()).filePath("server-go/chat-server.exe");
+    QVERIFY(QDir().mkpath(QFileInfo(server).absolutePath()));
+    QVERIFY(QFile(server).open(QIODevice::WriteOnly));
+
+    const HostPathResolver::HostPaths paths = HostPathResolver::resolveHostPaths(temp.path());
+    const QString localData = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    const QString expectedRoot = QDir::cleanPath(
+        QDir(localData).filePath(QStringLiteral("DUSK1NG/LAN Chat/host")));
+
+    QCOMPARE(paths.serverExe, QFileInfo(server).absoluteFilePath());
+    QVERIFY(QDir::cleanPath(paths.certFile).startsWith(expectedRoot + QLatin1Char('/')));
+    QVERIFY(QDir::cleanPath(paths.keyFile).startsWith(expectedRoot + QLatin1Char('/')));
+    QVERIFY(QDir::cleanPath(paths.dbFile).startsWith(expectedRoot + QLatin1Char('/')));
+    QVERIFY(!paths.certFile.startsWith(temp.path()));
+}
+
+void HostPathResolverTests::usesExplicitTestDataRootWhenProvided() {
+    QTemporaryDir packageRoot;
+    QTemporaryDir hostDataRoot;
+    QVERIFY(packageRoot.isValid());
+    QVERIFY(hostDataRoot.isValid());
+    const QString server = QDir(packageRoot.path()).filePath("server-go/chat-server.exe");
+    QVERIFY(QDir().mkpath(QFileInfo(server).absolutePath()));
+    QVERIFY(QFile(server).open(QIODevice::WriteOnly));
+
+    constexpr auto variableName = "LAN_CHAT_TEST_HOST_DATA_ROOT";
+    const bool hadPreviousValue = qEnvironmentVariableIsSet(variableName);
+    const QByteArray previousValue = qgetenv(variableName);
+    qputenv(variableName, hostDataRoot.path().toUtf8());
+
+    const HostPathResolver::HostPaths paths = HostPathResolver::resolveHostPaths(packageRoot.path());
+
+    if (hadPreviousValue) {
+        qputenv(variableName, previousValue);
+    } else {
+        qunsetenv(variableName);
+    }
+
+    const QString expectedRoot = QDir::cleanPath(hostDataRoot.path());
+    QCOMPARE(paths.serverExe, QFileInfo(server).absoluteFilePath());
+    QVERIFY(QDir::cleanPath(paths.certFile).startsWith(expectedRoot + QLatin1Char('/')));
+    QVERIFY(QDir::cleanPath(paths.keyFile).startsWith(expectedRoot + QLatin1Char('/')));
+    QVERIFY(QDir::cleanPath(paths.dbFile).startsWith(expectedRoot + QLatin1Char('/')));
 }
 
 QTEST_MAIN(HostPathResolverTests)

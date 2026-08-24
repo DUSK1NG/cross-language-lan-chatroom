@@ -101,6 +101,7 @@ if ($forbiddenFiles.Count -gt 0) {
 if ($Smoke) {
     $smokeDirectory = Join-Path $env:TEMP ('LANChat-package-smoke-' + [Guid]::NewGuid().ToString('N'))
     $previousPath = $env:PATH
+    $previousHostDataRoot = $env:LAN_CHAT_TEST_HOST_DATA_ROOT
     $launcherProcess = $null
     try {
         New-Item -ItemType Directory -Force -Path $smokeDirectory | Out-Null
@@ -110,6 +111,8 @@ if ($Smoke) {
         # Deliberately omit the developer Qt path: the packaged directory must
         # provide every application runtime dependency by itself.
         $env:PATH = "$smokeDirectory;$env:SystemRoot\System32;$env:SystemRoot"
+        $hostDataDirectory = Join-Path $smokeDirectory '__host-data'
+        $env:LAN_CHAT_TEST_HOST_DATA_ROOT = $hostDataDirectory
         $launcherProcess = Start-Process -FilePath $launcherExe -WorkingDirectory $smokeDirectory -WindowStyle Hidden -PassThru
         Start-Sleep -Milliseconds 3000
         $guiProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
@@ -120,17 +123,22 @@ if ($Smoke) {
         }
         if ($AllowLocalHost.IsPresent) {
             foreach ($relativePath in @(
-                'server-go\certs\server-lan.crt',
-                'server-go\certs\server-lan.key',
-                'server-go\chat.db'
+                'certs\server-lan.crt',
+                'certs\server-lan.key',
+                'chat.db'
             )) {
-                if (-not (Test-Path -LiteralPath (Join-Path $smokeDirectory $relativePath) -PathType Leaf)) {
+                if (-not (Test-Path -LiteralPath (Join-Path $hostDataDirectory $relativePath) -PathType Leaf)) {
                     throw "First-run local host initialization did not create: $relativePath"
                 }
             }
         }
     } finally {
         $env:PATH = $previousPath
+        if ($null -eq $previousHostDataRoot) {
+            Remove-Item Env:LAN_CHAT_TEST_HOST_DATA_ROOT -ErrorAction SilentlyContinue
+        } else {
+            $env:LAN_CHAT_TEST_HOST_DATA_ROOT = $previousHostDataRoot
+        }
         if (Test-Path -LiteralPath $smokeDirectory -PathType Container) {
             $resolvedSmokeDirectory = (Resolve-Path -LiteralPath $smokeDirectory).Path
             $tempRoot = (Resolve-Path -LiteralPath $env:TEMP).Path

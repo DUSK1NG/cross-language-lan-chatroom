@@ -1,4 +1,5 @@
 #include "gui_connection_worker.hpp"
+#include "device_identity.hpp"
 #include "openssl_runtime.hpp"
 
 #include <utility>
@@ -15,6 +16,16 @@ constexpr int kLocalHostProbeTimeoutMs = 150;
 constexpr int kLocalHostStartupTimeoutMs = 4000;
 constexpr int kLocalHostRetryAttempts = 8;
 constexpr int kLocalHostRetryDelayMs = 150;
+
+QString userFacingLoginFailure(const QString& reason) {
+    if (reason == QStringLiteral("Waiting for the room owner to approve this device")) {
+        return QStringLiteral("设备正在等待房主审批；房主批准后请再次点击加入。");
+    }
+    if (reason == QStringLiteral("Device authentication failed")) {
+        return QStringLiteral("设备身份验证失败，请联系房主确认或重新审批。");
+    }
+    return QStringLiteral("登录被拒绝：") + reason;
+}
 
 }
 
@@ -52,6 +63,12 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
         return false;
     }
 
+    QString deviceToken;
+    if (!DeviceIdentity::loadOrCreate(caFile, &deviceToken, &lastReason)) {
+        emit connectionFailed(QStringLiteral("Device identity unavailable: ") + lastReason);
+        return false;
+    }
+
     for (int attempt = 0; attempt < boundedAttempts; ++attempt) {
         connection::Config config{
             serverIp.toStdString(),
@@ -59,6 +76,7 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
             username.toStdString(),
             userCode.toStdString(),
             caFile.toStdString(),
+            deviceToken.toStdString(),
             tlsServerName.toStdString(),
         };
         connection_ = std::make_unique<connection::ConnectionState>(std::move(config));
@@ -74,7 +92,7 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
         lastReason = QString::fromStdString(connection_->last_error());
         connection_.reset();
         if (loginResult == connection::LoginResult::kRejected) {
-            emit connectionFailed(QStringLiteral("Login rejected: ") + lastReason);
+            emit connectionFailed(userFacingLoginFailure(lastReason));
             return true;
         }
         if (attempt + 1 < boundedAttempts) {
@@ -295,7 +313,8 @@ void GuiConnectionWorker::requestHistory(const QString& room, const QString& tar
 
 void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId, const QString& commandId) {
     if (!connection_ || !connection_->is_ready() || action.trimmed().isEmpty() ||
-        (action.trimmed() != QStringLiteral("recall") && targetUserCode.trimmed().isEmpty())) {
+        (action.trimmed() != QStringLiteral("recall") && action.trimmed() != QStringLiteral("approve_device") &&
+         action.trimmed() != QStringLiteral("deny_device") && targetUserCode.trimmed().isEmpty())) {
         return;
     }
     const message::Message message{

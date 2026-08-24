@@ -169,7 +169,9 @@ bool ConnectionState::connect_and_login(
         config_.ca_file};
 
     const message::Message login = auth::make_login_message(auth_options);
-    if (!message::send_message(candidate->ssl, login) ||
+    message::Message loginWithDevice = login;
+    loginWithDevice.device_token = config_.device_token;
+    if (!message::send_message(candidate->ssl, loginWithDevice) ||
         !message::receive_message(candidate->ssl, login_response)) {
         last_error_ = openssl_error("TLS login exchange failed");
         close_current();
@@ -177,6 +179,7 @@ bool ConnectionState::connect_and_login(
     }
     if (login_response.type != "login_ok") {
         result = LoginResult::kRejected;
+        last_error_ = login_response.content.empty() ? "Login rejected" : login_response.content;
         close_current();
         return false;
     }

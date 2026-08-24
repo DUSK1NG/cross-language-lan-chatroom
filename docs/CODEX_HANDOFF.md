@@ -39,7 +39,7 @@ React UI
 标准交付是 **一个统一运行包**：`LANChat-Windows-x64.zip`。
 
 - 所有电脑都解压后运行同一个 `LANChat.exe`；它在存在本地服务端时先完成本机 TLS 身份初始化，再启动 `lan-chat-gui.exe`。
-- 选择“创建本地聊天室”时，包内 `server-go\chat-server.exe` 在该房主电脑生成 `server-go\certs\server-lan.crt`、`server-go\certs\server-lan.key` 和 `server-go\chat.db`。
+- 选择“创建本地聊天室”时，包内 `server-go\chat-server.exe` 在当前 Windows 用户的 `%LocalAppData%\DUSK1NG\LAN Chat\host\` 生成 `certs\server-lan.crt`、`certs\server-lan.key` 和 `chat.db`；旧版安装目录内已有的身份文件继续兼容使用。
 - 选择“加入局域网聊天室”时，同一 GUI 作为成员连接房主。
 - 统一包不含源码、Node、Go SDK、编译器、自动编译启动器、初始证书、私钥、数据库或聊天记录。
 - `LANChat-Source-Launcher-windows-x64.zip` 仅作为开发者可选源码启动工具，不是普通用户的房主包。

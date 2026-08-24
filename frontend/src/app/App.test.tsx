@@ -78,6 +78,7 @@ describe('App', () => {
     render(<App bridge={bridge} />);
     fireEvent.click(screen.getByRole('button', { name: 'guest-mode' }));
     fireEvent.click(screen.getByRole('button', { name: 'select-lan-host-Alice PC' }));
+    fireEvent.click(screen.getByRole('checkbox'));
 
     fireEvent.click(screen.getByRole('button', { name: 'one-click-join' }));
 

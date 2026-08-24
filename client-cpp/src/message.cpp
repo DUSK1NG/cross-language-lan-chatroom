@@ -27,6 +27,7 @@ nlohmann::json serialize(const Message& message) {
     if (!message.target_user_code.empty()) object["target_user_code"] = message.target_user_code;
     if (!message.room.empty()) object["room"] = message.room;
     if (!message.content.empty()) object["content"] = message.content;
+    if (!message.device_token.empty()) object["device_token"] = message.device_token;
     if (!message.users.empty()) object["users"] = message.users;
     if (!message.rooms.empty()) object["rooms"] = message.rooms;
     if (!message.user_details.empty()) {
@@ -89,6 +90,7 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("target_user_code", parsed.target_user_code) ||
             !read_string("room", parsed.room) ||
             !read_string("content", parsed.content) ||
+            !read_string("device_token", parsed.device_token) ||
             !read_string("created_at", parsed.created_at) ||
             !read_string("before_message_id", parsed.before_message_id)) {
             set_error("JSON message contains a field with the wrong type");

@@ -58,6 +58,7 @@ public:
     QString savedUsername() const;
     QString savedUserCode() const;
     QString savedCaFile() const;
+    QVariantList pendingDeviceApprovals() const { return pendingDeviceApprovals_; }
     void setBundledCaFile(const QString& path);
     Q_INVOKABLE QString autoPrivateKeyPath(const QString& serverExe,
                                            const QString& certFile) const;
@@ -101,6 +102,7 @@ signals:
     void activeMessageModelChanged();
     void activeRoomCanManageChanged();
     void savedConnectionChanged();
+    void pendingDeviceApprovalsChanged();
     void connectionFailed(const QString& reason);
     void connectionLost(const QString& reason);
     void recallSucceeded(const QString& commandId);
@@ -142,6 +144,7 @@ private:
     QHash<QString, ChatListModel*> conversationModels_;
     QHash<QString, int> roomMemberCounts_;
     QString activeConversationKey_ = QStringLiteral("room:lobby");
+    QVariantList pendingDeviceApprovals_;
     bool activeRoomCanManage_ = false;
     QThread workerThread_;
     QTimer refreshTimer_;
