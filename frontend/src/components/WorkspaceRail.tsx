@@ -1,3 +1,5 @@
+import catBrandMark from '../assets/lan-chat-cat.png';
+
 export type WorkspaceSection = 'rooms' | 'direct';
 
 type WorkspaceRailProps = {
@@ -10,7 +12,7 @@ type WorkspaceRailProps = {
 export function WorkspaceRail({ section, onSectionChange, onSettings, onOpenSidebar }: WorkspaceRailProps) {
   return (
     <nav className="workspace-rail" data-testid="workspace-rail" data-motion="workspace-panel" aria-label="工作区导航">
-      <div className="brand-mark" aria-label="局域网聊天">LC</div>
+      <img className="brand-mark" src={catBrandMark} alt="LAN Chat 猫咪标识" />
       <div className="rail-actions">
         <button className={`rail-button ${section === 'rooms' ? 'rail-button--active' : ''}`} type="button" aria-label="群" title="群聊" onClick={() => onSectionChange('rooms')}>群</button>
         <button className={`rail-button ${section === 'direct' ? 'rail-button--active' : ''}`} type="button" aria-label="私" title="私信" onClick={() => onSectionChange('direct')}>私</button>
