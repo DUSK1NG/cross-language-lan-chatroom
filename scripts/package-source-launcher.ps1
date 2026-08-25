@@ -45,6 +45,7 @@ function Test-SourcePackageDirectory([string]$Directory) {
         'scripts\build-modern.ps1',
         'scripts\install-modern-toolchain.ps1',
         'scripts\package-source-launcher.ps1',
+        'docs\CODEX_HANDOFF.md',
         'tools\bootstrap\CMakeLists.txt',
         'tools\bootstrap\launcher.cpp'
     )) {
@@ -82,6 +83,7 @@ function Test-SourceArchive([string]$Archive) {
             'scripts/bootstrap-github.ps1',
             'scripts/build-modern.ps1',
             'scripts/package-source-launcher.ps1',
+            'docs/CODEX_HANDOFF.md',
             'tools/bootstrap/launcher.cpp'
         )) {
             if ($entryNames -notcontains $required) {
