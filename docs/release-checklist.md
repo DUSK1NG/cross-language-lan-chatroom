@@ -17,17 +17,17 @@ Get-FileHash .\release\LANChat-Setup-x64.exe -Algorithm SHA256
 - 先记录输出；未跟踪的个人素材、`tmp\`、构建缓存和发布产物都不得顺手加入提交。
 - 运行包内的 `lan-chat-gui.exe` 必须与 `out\modern-msvc-x64\lan-chat-gui.exe` 为同一次构建。若哈希不同，先重新打包，不能把运行现象归因于源码。
 
-### 本次 Phase 0 自动化基线（2026-08-24）
+### v1.2.0 发布基线（2026-08-25）
 
 | 项目 | 记录 |
 |---|---|
-| 验证前提交 | `9cb84e5` |
-| 构建 GUI SHA-256 | `7A12B0641FC19EB0801A8A0717FF646EB0BD3D5474A39FA0C6F92591700E9114` |
-| 包内 GUI SHA-256 | `7A12B0641FC19EB0801A8A0717FF646EB0BD3D5474A39FA0C6F92591700E9114` |
-| `LANChat-Windows-x64.zip` SHA-256 | `54CE72C4E176F35EAD7A5F8A6C496F6A1E59116230051DA8CEDED15E3B5CA47F` |
-| `LANChat-Setup-x64.exe` SHA-256 | `B2FF420541719B6C9DA0294B19DC811E630680396B6154E41E5F44F7778BFF46` |
-| 前端回归 | 11 个测试文件，69 项通过 |
-| 原生回归 | CTest 11/11 通过 |
+| 构建源码提交 | `554de72` |
+| 构建 GUI SHA-256 | `16B41100583F6ADFF8AC38677BC1DE0A4EDE1875CC3AF2340DD6A806B9DFECF4` |
+| 包内 GUI SHA-256 | `16B41100583F6ADFF8AC38677BC1DE0A4EDE1875CC3AF2340DD6A806B9DFECF4` |
+| `LANChat-Windows-x64.zip` SHA-256 | `ECEFA0D5DC8345150C2FFD53812248933E7EA5F57BBBFA062378FFBBC5E408EC` |
+| `LANChat-Setup-x64.exe` SHA-256 | `E1B9A13A04C105F894A0CD19D70325D88D6EF9A631F1B84B10895680F34E2C95` |
+| 前端回归 | 13 个测试文件，79 项通过 |
+| 原生回归 | CTest 15/15 通过；Go 测试通过 |
 | 包安全检查 | 禁止文件 0；必需入口齐全 |
 
 ## 1. 自动化回归
@@ -48,7 +48,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -
 
 # 统一 ZIP 与安装器烟雾测试
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1 -SkipBuild
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.1.3 -SmokeTest
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.2.0 -SmokeTest
 ```
 
 通过标准：前端测试和 CTest 全部通过；统一包、安装器烟雾检查通过；允许出现 `WrapVulkanHeaders` 缺失提示，但不得出现测试失败或运行时 DLL 缺失。
@@ -92,7 +92,7 @@ if ($forbidden) { $forbidden.FullName; throw '发布 ZIP 含不应交付的文�
 
 1. 使用 `LANChat-Setup-x64.exe` 在非开发目录安装，检查开始菜单和桌面快捷方式图标。
 2. 从快捷方式启动，完成一次本地主机和一次成员连接。
-3. 从“已安装的应用”卸载，确认程序目录和快捷方式被移除；用户的 `%LocalAppData%\DUSK1NG\LAN Chat\host\` 身份数据按卸载提示决定是否保留。
+3. 从“已安装的应用”卸载，确认快捷方式和卸载项被移除；用户的 `%LocalAppData%\DUSK1NG\LAN Chat\host\` 身份数据按卸载提示决定是否保留。当前已知 Windows“设置”卸载可能遗留少量安装目录文件，记录即可，不作为 v1.2.0 发布阻塞项。
 
 ## 5. 记录结果
 

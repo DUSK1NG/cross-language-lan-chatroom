@@ -48,6 +48,6 @@ Test-NetConnection <房主IPv4> -Port 8888
 
 ## 卸载与安全
 
-从 Windows“设置 → 应用”卸载 `LAN Chat`，或运行安装目录中的 `unins000.exe`。卸载不会删除房主数据；如需彻底清除身份和聊天记录，请在确认不再需要后手动删除 `%LocalAppData%\DUSK1NG\LAN Chat\host\`。
+从 Windows“设置 → 应用”卸载 `LAN Chat`，或运行安装目录中的 `unins000.exe`。卸载不会删除房主数据；如需彻底清除身份和聊天记录，请在确认不再需要后手动删除 `%LocalAppData%\DUSK1NG\LAN Chat\host\`。当前 Windows“设置”卸载流程仍可能保留安装目录中的少量文件，此问题已记录，后续版本处理。
 
 LAN Chat 适用于彼此信任的局域网。TLS 会加密并校验证书，但不是端到端加密，房主服务端可以读取并保存聊天内容。用户名与用户代码不是密码；每一次成员连接均须由房主确认，批准只对当前连接有效。`server-lan.key`、`chat.db` 和聊天记录不能发送给成员、放入同步盘或提交到 GitHub。
