@@ -43,6 +43,30 @@ bool set_verify_host(SSL* ssl_handle, const std::string& host) {
 
 }  // namespace
 
+bool resolve_ipv4_endpoint(const std::string& host, const int port, sockaddr_in* endpoint,
+                           std::string* error) {
+    if (endpoint == nullptr || host.empty() || port < 1 || port > 65535) {
+        if (error != nullptr) *error = "invalid server endpoint";
+        return false;
+    }
+
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    addrinfo* addresses = nullptr;
+    const int result = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &addresses);
+    if (result != 0 || addresses == nullptr) {
+        if (error != nullptr) *error = "could not resolve server host";
+        return false;
+    }
+
+    const auto* address = reinterpret_cast<const sockaddr_in*>(addresses->ai_addr);
+    *endpoint = *address;
+    freeaddrinfo(addresses);
+    return true;
+}
+
 struct ConnectionState::Session {
     SOCKET socket_handle = INVALID_SOCKET;
     SSL_CTX* ssl_context = nullptr;
@@ -85,12 +109,6 @@ bool ConnectionState::connect_and_login(
     result = LoginResult::kRetryableFailure;
 
     auto candidate = std::make_shared<Session>();
-    candidate->socket_handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (candidate->socket_handle == INVALID_SOCKET) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        last_error_ = "socket failed";
-        return false;
-    }
 
     {
         const std::lock_guard<std::mutex> lock(mutex_);
@@ -100,10 +118,18 @@ bool ConnectionState::connect_and_login(
     }
 
     sockaddr_in server_address{};
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(static_cast<u_short>(config_.server_port));
-    if (inet_pton(AF_INET, config_.server_ip.c_str(), &server_address.sin_addr) != 1) {
-        last_error_ = "invalid server IPv4 address";
+    std::string resolve_error;
+    if (!resolve_ipv4_endpoint(config_.server_ip, config_.server_port, &server_address, &resolve_error)) {
+        last_error_ = resolve_error;
+        close_current();
+        return false;
+    }
+    candidate->socket_handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (candidate->socket_handle == INVALID_SOCKET) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            last_error_ = "socket failed";
+        }
         close_current();
         return false;
     }

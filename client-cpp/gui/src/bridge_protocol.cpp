@@ -5,6 +5,8 @@
 #include <QJsonValue>
 #include <QSet>
 
+#include <cmath>
+
 namespace bridge {
 namespace {
 
@@ -26,6 +28,21 @@ bool booleanValue(const QJsonObject& object, const char* key) {
 bool integerValue(const QJsonObject& object, const char* key) {
     const QJsonValue value = object.value(QLatin1String(key));
     return value.isDouble() && value.toInt() >= 1 && value.toInt() <= 65535;
+}
+
+bool boundedFrameTimes(const QJsonObject& payload) {
+    const QJsonValue value = payload.value(QStringLiteral("frameTimesMs"));
+    if (!value.isArray()) return false;
+
+    const QJsonArray values = value.toArray();
+    if (values.isEmpty() || values.size() > 8) return false;
+    for (const QJsonValue& sample : values) {
+        const double frameMs = sample.toDouble(-1.0);
+        if (!sample.isDouble() || !std::isfinite(frameMs) || frameMs <= 0.0 || frameMs > 1000.0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool hasRequiredStrings(const QJsonObject& payload, std::initializer_list<const char*> keys) {
@@ -66,9 +83,12 @@ QJsonValue withoutSecrets(const QJsonValue& value) {
 bool validatePayload(const QString& type, const QJsonObject& payload) {
     if (type == QStringLiteral("session.connectRemote")) {
         const QJsonValue caFile = payload.value(QStringLiteral("caFile"));
+        const QJsonValue tlsServerName = payload.value(QStringLiteral("tlsServerName"));
         return hasRequiredStrings(payload, {"serverIp", "username", "userCode"}) &&
                integerValue(payload, "serverPort") &&
-               (caFile.isUndefined() || caFile.isString());
+               (caFile.isUndefined() || caFile.isString()) &&
+               (tlsServerName.isUndefined() ||
+                (tlsServerName.isString() && tlsServerName.toString() == QStringLiteral("localhost")));
     }
     if (type == QStringLiteral("session.connectLocalHost")) {
         return hasRequiredStrings(payload, {"serverExe", "certFile", "keyFile", "dbFile", "username", "userCode"});
@@ -89,6 +109,9 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
     }
     if (type == QStringLiteral("chat.sendPrivate")) {
         return hasRequiredStrings(payload, {"content", "targetUserCode"});
+    }
+    if (type == QStringLiteral("history.search")) {
+        return payload.value(QStringLiteral("query")).isString();
     }
     if (type == QStringLiteral("conversation.selectRoom")) {
         return hasRequiredStrings(payload, {"room"});
@@ -112,7 +135,7 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
         return payload.value(QStringLiteral("text")).isString();
     }
     if (type == QStringLiteral("message.removeLocal") ||
-        type == QStringLiteral("message.recall")) {
+        type == QStringLiteral("message.recall") || type == QStringLiteral("message.retry")) {
         return hasRequiredStrings(payload, {"messageId"});
     }
     if (type == QStringLiteral("settings.setPerformanceMode")) {
@@ -121,6 +144,12 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
                mode == QStringLiteral("High") ||
                mode == QStringLiteral("Balanced") ||
                mode == QStringLiteral("Power Saving");
+    }
+    if (type == QStringLiteral("settings.setConnectionLogging")) {
+        return booleanValue(payload, "enabled");
+    }
+    if (type == QStringLiteral("performance.reportFrameTimes")) {
+        return boundedFrameTimes(payload);
     }
     return false;
 }

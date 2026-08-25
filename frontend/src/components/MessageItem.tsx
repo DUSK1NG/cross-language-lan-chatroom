@@ -54,6 +54,7 @@ export const MessageItem = memo(function MessageItem({ message, bridge, onCopy, 
       <div className="message-cluster">
         {message.systemMessage ? <p className="message-system-text" data-testid={`message-content-${message.messageId}`}>{message.content}</p> : <>
           <div className="message-meta"><strong>{message.displayName}</strong><span>#{message.userCode}{showTime ? ` · ${message.time}` : ''}</span></div>
+          {message.selfMessage && message.deliveryState && <span className={`message-delivery message-delivery--${message.deliveryState}`}>{message.deliveryState === 'queued' ? '发送中' : message.deliveryState === 'sent' ? '已发送' : message.deliveryState === 'delivered' ? '已送达' : '发送失败'}</span>}
           <div className="message-bubble">
             {isQuotedMessage && <blockquote className="message-quote message-content--wrap" data-testid={`message-quote-${message.messageId}`}>{quotedText}</blockquote>}
             {(!isQuotedMessage || messageText) && <p className="message-content message-content--wrap" data-testid={`message-content-${message.messageId}`}>{messageText}</p>}
@@ -62,6 +63,7 @@ export const MessageItem = memo(function MessageItem({ message, bridge, onCopy, 
             <button type="button" onClick={() => (onCopy ?? (() => dispatch('message.copy', '已复制', { text: message.content })))(message)}>复制</button>
             <button type="button" onClick={() => (onQuote ?? (() => undefined))(message)}>引用</button>
             {message.selfMessage && <>
+              {message.deliveryState === 'failed' && <button type="button" onClick={() => dispatch('message.retry')}>重试</button>}
               <button type="button" disabled={pendingCommandIdRef.current !== null} onClick={() => (onLocalDelete ?? (() => dispatch('message.removeLocal', '已在本地删除')))(message)}>删除</button>
             </>}
             {canRecall && <>
@@ -92,5 +94,6 @@ function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemP
     && previousMessage.time === nextMessage.time
     && previousMessage.content === nextMessage.content
     && previousMessage.selfMessage === nextMessage.selfMessage
-    && previousMessage.systemMessage === nextMessage.systemMessage;
+    && previousMessage.systemMessage === nextMessage.systemMessage
+    && previousMessage.deliveryState === nextMessage.deliveryState;
 }

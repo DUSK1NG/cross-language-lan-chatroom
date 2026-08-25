@@ -59,6 +59,19 @@ describe('WorkspacePage', () => {
     expect(screen.getByTestId('message-content-m-2')).toHaveClass('message-content--wrap');
   });
 
+  it('searches and clears the active conversation history through the bridge', () => {
+    const bridge = createFakeBridge(workspaceState);
+    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索当前会话' }), { target: { value: 'hello' } });
+    fireEvent.click(screen.getByRole('button', { name: '清除消息搜索' }));
+
+    expect(bridge.commands.map(({ type, payload }) => ({ type, payload }))).toEqual([
+      { type: 'history.search', payload: { query: 'hello' } },
+      { type: 'history.search', payload: { query: '' } }
+    ]);
+  });
+
   it('isolates room and direct-message actions through typed bridge commands', () => {
     const bridge = createFakeBridge(workspaceState);
 

@@ -10,6 +10,7 @@ private slots:
     void invalidModeFallsBackToAutomatic();
     void automaticModeUsesGraphicsContext();
     void automaticModeRespondsToSlowFrames();
+    void automaticModeReducesMotionWhenP95Exceeds60FpsBudget();
     void frameObservationWindowStaysBounded();
     void automaticModeExposesObservedMetrics();
     void automaticModeConfirmsFrameCandidatesBeforeSwitching();
@@ -78,6 +79,20 @@ void PerformanceProfileTests::automaticModeRespondsToSlowFrames() {
     QCOMPARE(profile.effectiveMode(), QStringLiteral("Power Saving"));
 }
 
+void PerformanceProfileTests::automaticModeReducesMotionWhenP95Exceeds60FpsBudget() {
+    PerformanceProfile profile;
+    profile.setMode(QStringLiteral("Automatic"));
+    profile.updateGraphicsContext(true, false, 144.0);
+
+    for (int index = 0; index < 24; ++index) profile.observeFrameTime(17.0);
+    profile.observeFrameTime(17.0);
+    profile.observeFrameTime(17.0);
+
+    QCOMPARE(profile.effectiveMode(), QStringLiteral("Balanced"));
+    QCOMPARE(profile.automaticReason(), QStringLiteral("p95-over-16.7ms"));
+    QCOMPARE(profile.animationDurationScale(), 0.75);
+}
+
 void PerformanceProfileTests::frameObservationWindowStaysBounded() {
     PerformanceProfile profile;
     profile.setMode(QStringLiteral("Automatic"));
@@ -101,7 +116,7 @@ void PerformanceProfileTests::automaticModeExposesObservedMetrics() {
     QCOMPARE(profile.observedMaxFrameMs(), 32.0);
     QVERIFY(profile.observedFps() > 50.0);
     QVERIFY(profile.observedFps() < 60.0);
-    QCOMPARE(profile.automaticReason(), QStringLiteral("p95-over-24ms"));
+    QCOMPARE(profile.automaticReason(), QStringLiteral("p95-over-16.7ms"));
 }
 
 void PerformanceProfileTests::automaticModeConfirmsFrameCandidatesBeforeSwitching() {

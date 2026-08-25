@@ -81,6 +81,73 @@ func TestAuthStorePersistsAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestAuthStoreMigratesLegacyGlobalMessageIDConstraint(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-chat.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL,
+        conversation_key TEXT NOT NULL,
+        room TEXT,
+        sender_username TEXT NOT NULL,
+        sender_code TEXT NOT NULL,
+        target_code TEXT,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        recalled INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO chat_messages
+        (message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content, created_at, recalled)
+        VALUES ('legacy-message-id', 'room', 'lobby', 'lobby', 'Alice', 'a001', '', 'kept after migration', '2026-08-24T00:00:00Z', 0);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openAuthStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	inserted, err := store.SaveChatMessageIfNew(Message{Type: "chat", MessageID: "legacy-message-id",
+		Username: "Alice", UserCode: "A001", Room: "engineering", Content: "allowed in another conversation"})
+	if err != nil || !inserted {
+		t.Fatalf("save scoped replacement after legacy migration = inserted:%v err:%v", inserted, err)
+	}
+	history, err := store.LoadHistory(HistoryQuery{UserCode: "A001", Room: "lobby", Limit: 10})
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].Content != "kept after migration" {
+		t.Fatalf("legacy history after migration = %+v err:%v", history, err)
+	}
+}
+
+func TestAuthStoreSearchHistoryIsUnicodeAndConversationScoped(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	messages := []Message{
+		{Type: "chat", MessageID: "search-1", Username: "Alice", UserCode: "A001", Room: "lobby", Content: "你好，局域网聊天"},
+		{Type: "chat", MessageID: "search-2", Username: "Alice", UserCode: "A001", Room: "engineering", Content: "你好，工程频道"},
+		{Type: "chat", MessageID: "search-3", Username: "Bob", UserCode: "B001", Room: "lobby", Content: "你好，来自 Bob"},
+	}
+	for _, message := range messages {
+		if err := store.SaveChatMessage(message); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page, err := store.LoadHistory(HistoryQuery{UserCode: "A001", Room: "lobby", SearchQuery: "你好", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 2 || page.Messages[0].MessageID != "search-1" || page.Messages[1].MessageID != "search-3" {
+		t.Fatalf("scoped Unicode search = %+v", page)
+	}
+}
+
 func TestHandleConnectionWaitsForRoomOwnerApproval(t *testing.T) {
 	store, _ := newTestAuthStore(t)
 	hub := NewHub()

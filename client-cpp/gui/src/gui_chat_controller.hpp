@@ -55,6 +55,7 @@ public:
     QString statusText() const { return statusText_; }
     bool activeRoomCanManage() const { return activeRoomCanManage_; }
     QString activeConversationKey() const { return activeConversationKey_; }
+    int cachedConversationModelCount() const { return conversationModels_.size(); }
     QString savedServerIp() const;
     int savedServerPort() const;
     QString savedUsername() const;
@@ -84,6 +85,7 @@ public:
     Q_INVOKABLE void requestUsers();
     Q_INVOKABLE void requestRooms();
     Q_INVOKABLE void loadMoreHistory();
+    Q_INVOKABLE void searchActiveHistory(const QString& query);
     Q_INVOKABLE void setSidebarQuery(const QString& query);
     Q_INVOKABLE void createRoom(const QString& room, bool isPrivate);
     Q_INVOKABLE void sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode = {});
@@ -94,6 +96,7 @@ public:
     Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE void removeLocalMessage(const QString& messageId);
     Q_INVOKABLE bool recallMessage(const QString& messageId, const QString& commandId = {});
+    Q_INVOKABLE bool retryMessage(const QString& messageId);
 
 signals:
     void connectedChanged();
@@ -119,10 +122,11 @@ private slots:
     void handleReconnectAttempt(int attempt);
     void handleReconnectFailed(const QString& reason);
     void handleHistory(const QString& room, const QString& targetUserCode,
-                       bool isPrivate, const QVariantList& messages, bool hasMore);
+                       bool isPrivate, const QVariantList& messages, bool hasMore,
+                       const QString& searchQuery);
     void handleMessage(const QString& type, const QString& messageId, const QString& commandId,
                        const QString& username, const QString& userCode, const QString& content,
-                       const QString& room, const QString& targetUserCode,
+                       const QString& room, const QString& targetUserCode, const QString& deliveryState,
                        const QStringList& users, const QStringList& rooms,
                        const QVariantList& userDetails, const QVariantList& roomDetails,
                        bool isAdmin);
@@ -134,9 +138,10 @@ private:
     void incrementUnreadForConversation(const QString& key, const QString& username,
                                         const QString& userCode);
     ChatListModel* ensureConversationModel(const QString& key);
+    void trimConversationModelCache(const QString& protectedKey);
     void resetSessionData();
     bool canRecallMessage(const QString& messageId) const;
-    void requestActiveHistory(const QString& beforeMessageId = {});
+    void requestActiveHistory(const QString& beforeMessageId = {}, const QString& searchQuery = {});
     void saveConnectionPreferences(const QString& serverIp, int serverPort,
                                    const QString& username, const QString& userCode,
                                    const QString& caFile);
@@ -148,6 +153,8 @@ private:
     ConversationFilterModel* roomFilterModel_;
     ConversationFilterModel* directMessageFilterModel_;
     QHash<QString, ChatListModel*> conversationModels_;
+    QHash<QString, quint64> conversationModelAccessOrder_;
+    quint64 conversationModelAccessSequence_ = 0;
     QHash<QString, int> roomMemberCounts_;
     QString activeConversationKey_ = QStringLiteral("room:lobby");
     QVariantList pendingConnectionApprovals_;
@@ -167,4 +174,6 @@ private:
     int localMessageCounter_ = 0;
     bool historyHasMore_ = false;
     bool historyLoading_ = false;
+    QString historySearchQuery_;
+    bool replaceHistoryOnNextResponse_ = false;
 };

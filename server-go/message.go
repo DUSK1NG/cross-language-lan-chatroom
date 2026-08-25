@@ -43,8 +43,10 @@ type Message struct {
 	UserDetails     []OnlineUser `json:"user_details,omitempty"`
 	RoomDetails     []RoomInfo   `json:"room_details,omitempty"`
 	Content         string       `json:"content,omitempty"`
+	DeliveryState   string       `json:"delivery_state,omitempty"`
 	CreatedAt       string       `json:"created_at,omitempty"`
 	BeforeMessageID string       `json:"before_message_id,omitempty"`
+	SearchQuery     string       `json:"search_query,omitempty"`
 	Limit           int          `json:"limit,omitempty"`
 	HasMore         bool         `json:"has_more,omitempty"`
 	Recalled        bool         `json:"recalled,omitempty"`
@@ -153,6 +155,9 @@ func validateMessage(message Message) error {
 		}
 		if message.Limit < 0 || message.Limit > maxHistoryPageSize {
 			return fmt.Errorf("history page size must be between 0 and %d", maxHistoryPageSize)
+		}
+		if !utf8.ValidString(message.SearchQuery) || len([]byte(message.SearchQuery)) > maxMessageSize {
+			return fmt.Errorf("history search query must be valid UTF-8 and no longer than %d bytes", maxMessageSize)
 		}
 	case "history_response":
 		if message.Messages == nil {

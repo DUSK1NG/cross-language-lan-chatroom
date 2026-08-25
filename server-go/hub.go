@@ -22,6 +22,14 @@ var errRegisterRequestMissingIdentity = errors.New("register request requires us
 
 const defaultRoomName = "lobby"
 
+func isLegacyGeneratedMessageID(messageID string) bool {
+	if messageID == "" {
+		return false
+	}
+	_, err := strconv.ParseUint(messageID, 10, 64)
+	return err == nil
+}
+
 type RegisterRequest struct {
 	Client *Client
 	Result chan error
@@ -38,6 +46,7 @@ type PrivateMessageRequest struct {
 	Sender     *Client
 	TargetCode string
 	Content    string
+	MessageID  string
 }
 
 type RoomRequest struct {
@@ -51,6 +60,7 @@ type HistoryRequest struct {
 	TargetCode      string
 	Private         bool
 	BeforeMessageID string
+	SearchQuery     string
 	Limit           int
 }
 
@@ -63,6 +73,7 @@ type historyJob struct {
 	TargetCode      string
 	Private         bool
 	BeforeMessageID string
+	SearchQuery     string
 	Limit           int
 	Query           HistoryQuery
 }
@@ -573,14 +584,18 @@ func (h *Hub) unregisterClientAfterFlush(client *Client) {
 }
 
 func (h *Hub) broadcastMessage(message Message) {
+	clientSuppliedMessageID := message.MessageID != ""
+	deliveryTracking := clientSuppliedMessageID && !isLegacyGeneratedMessageID(message.MessageID)
 	if message.MessageID == "" && message.Type != "message_recalled" {
 		h.NextMessageID++
 		message.MessageID = strconv.FormatUint(h.NextMessageID, 10)
 	}
 	room := ""
+	var sender *Client
 	if message.UserCode != "" {
 		if normalized, err := normalizeUserCode(message.UserCode); err == nil {
-			if sender, ok := h.ActiveCodes[normalized]; ok {
+			if activeSender, ok := h.ActiveCodes[normalized]; ok {
+				sender = activeSender
 				room = sender.Room
 			}
 		}
@@ -590,19 +605,56 @@ func (h *Hub) broadcastMessage(message Message) {
 			persisted := message
 			persisted.Room = room
 			persisted.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			if err := h.OfflineStore.SaveChatMessage(persisted); err != nil {
+			persisted.DeliveryState = "sent"
+			inserted, err := h.OfflineStore.SaveChatMessageIfNew(persisted)
+			if err != nil {
 				if sender, ok := h.ActiveCodes[strings.ToLower(message.UserCode)]; ok {
 					h.deliverError(sender, "Failed to save message history")
 				}
 				return
 			}
+			if !inserted {
+				if sender != nil && deliveryTracking {
+					stored, err := h.OfflineStore.GetStoredMessageForMessage(persisted)
+					if err != nil {
+						h.deliverError(sender, "Failed to load delivery receipt")
+						return
+					}
+					h.deliver(sender, Message{Type: "delivery_receipt", MessageID: message.MessageID,
+						Content: stored.Message.DeliveryState, DeliveryState: stored.Message.DeliveryState})
+				}
+				return
+			}
+			message = persisted
 		}
 	}
 	if message.Type != "message_recalled" && message.MessageID != "" {
 		h.recordMessage(message, h.recipientCodes(h.roomClients(room)), "")
 	}
+	deliveredToPeer := false
+	wireMessage := message
+	if !deliveryTracking {
+		wireMessage.DeliveryState = ""
+		wireMessage.CreatedAt = ""
+	}
 	for client := range h.roomClients(room) {
-		h.deliver(client, message)
+		if h.deliver(client, wireMessage) && client != sender {
+			deliveredToPeer = true
+		}
+	}
+	if message.Type == "chat" && sender != nil && deliveryTracking {
+		state := "sent"
+		if deliveredToPeer {
+			state = "delivered"
+			if h.OfflineStore != nil {
+				if err := h.OfflineStore.UpdateChatMessageDeliveryStateForMessage(message, state); err != nil {
+					h.deliverError(sender, "Failed to update delivery state")
+					return
+				}
+			}
+		}
+		h.deliver(sender, Message{Type: "delivery_receipt", MessageID: message.MessageID,
+			Content: state, DeliveryState: state})
 	}
 }
 
@@ -909,6 +961,45 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 		h.deliverError(sender, "Invalid private chat content")
 		return
 	}
+	if targetCode == sender.NormalizedCode {
+		h.deliverError(sender, "Cannot send private message to yourself")
+		return
+	}
+
+	clientSuppliedMessageID := request.MessageID != ""
+	deliveryTracking := clientSuppliedMessageID && !isLegacyGeneratedMessageID(request.MessageID)
+	messageID := request.MessageID
+	if messageID == "" {
+		h.NextMessageID++
+		messageID = strconv.FormatUint(h.NextMessageID, 10)
+	}
+	message := Message{Type: "private_chat", MessageID: messageID, Username: sender.Username,
+		UserCode: sender.UserCode, TargetUserCode: request.TargetCode, Content: request.Content,
+		DeliveryState: "sent", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if h.OfflineStore != nil {
+		persisted := message
+		persisted.Private = true
+		inserted, err := h.OfflineStore.SaveChatMessageIfNew(persisted)
+		if err != nil {
+			h.deliverError(sender, "Failed to save message history")
+			return
+		}
+		if !inserted {
+			if !deliveryTracking {
+				return
+			}
+			stored, err := h.OfflineStore.GetStoredMessageForMessage(persisted)
+			if err != nil {
+				h.deliverError(sender, "Failed to load delivery receipt")
+				return
+			}
+			h.deliver(sender, Message{Type: "delivery_receipt", MessageID: message.MessageID,
+				Content: stored.Message.DeliveryState, DeliveryState: stored.Message.DeliveryState})
+			return
+		}
+		message.CreatedAt = persisted.CreatedAt
+		message.DeliveryState = persisted.DeliveryState
+	}
 
 	target, ok := h.ActiveCodes[targetCode]
 	if !ok {
@@ -921,54 +1012,50 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 			h.deliverError(sender, "Target user not found")
 			return
 		}
-		message := Message{Type: "private_chat", Username: sender.Username,
-			UserCode: sender.UserCode, TargetUserCode: request.TargetCode, Content: request.Content}
-		h.NextMessageID++
-		message.MessageID = strconv.FormatUint(h.NextMessageID, 10)
 		h.recordMessage(message, map[string]bool{sender.NormalizedCode: true, targetCode: true}, message.MessageID)
-		persisted := message
-		persisted.Private = true
-		persisted.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		if err := h.OfflineStore.SaveChatMessage(persisted); err != nil {
-			h.deliverError(sender, "Failed to save message history")
-			return
-		}
 		if err := h.OfflineStore.SaveOfflineMessage(targetCode, message); err != nil {
 			h.deliverError(sender, "Failed to save offline message")
 			return
 		}
-		h.deliver(sender, message)
+		wireMessage := message
+		if !deliveryTracking {
+			wireMessage.DeliveryState = ""
+			wireMessage.CreatedAt = ""
+		}
+		h.deliver(sender, wireMessage)
 		h.deliver(sender, Message{Type: "system", Content: "Private message saved for offline user"})
+		if deliveryTracking {
+			h.deliver(sender, Message{Type: "delivery_receipt", MessageID: message.MessageID,
+				Content: "sent", DeliveryState: "sent"})
+		}
 		return
 	}
-	if target == sender {
-		h.deliverError(sender, "Cannot send private message to yourself")
-		return
-	}
-
-	message := Message{
-		Type:           "private_chat",
-		Username:       sender.Username,
-		UserCode:       sender.UserCode,
-		TargetUserCode: target.UserCode,
-		Content:        request.Content,
-	}
-	h.NextMessageID++
-	message.MessageID = strconv.FormatUint(h.NextMessageID, 10)
+	message.TargetUserCode = target.UserCode
 	h.recordMessage(message, map[string]bool{sender.NormalizedCode: true, targetCode: true}, "")
-	if h.OfflineStore != nil {
-		persisted := message
-		persisted.Private = true
-		persisted.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		if err := h.OfflineStore.SaveChatMessage(persisted); err != nil {
-			h.deliverError(sender, "Failed to save message history")
-			return
+	wireMessage := message
+	if !deliveryTracking {
+		wireMessage.DeliveryState = ""
+		wireMessage.CreatedAt = ""
+	}
+	if !h.deliver(sender, wireMessage) {
+		return
+	}
+	state := "sent"
+	if h.deliver(target, wireMessage) {
+		state = "delivered"
+		if h.OfflineStore != nil {
+			storedMessage := message
+			storedMessage.Private = true
+			if err := h.OfflineStore.UpdateChatMessageDeliveryStateForMessage(storedMessage, state); err != nil {
+				h.deliverError(sender, "Failed to update delivery state")
+				return
+			}
 		}
 	}
-	if !h.deliver(sender, message) {
-		return
+	if deliveryTracking {
+		h.deliver(sender, Message{Type: "delivery_receipt", MessageID: message.MessageID,
+			Content: state, DeliveryState: state})
 	}
-	h.deliver(target, message)
 }
 
 func (h *Hub) handleHistoryRequest(request HistoryRequest) {
@@ -984,7 +1071,7 @@ func (h *Hub) handleHistoryRequest(request HistoryRequest) {
 		}
 		query := HistoryQuery{
 			UserCode: client.UserCode, PeerCode: peerCode, Private: true,
-			BeforeMessageID: request.BeforeMessageID, Limit: request.Limit,
+			BeforeMessageID: request.BeforeMessageID, SearchQuery: request.SearchQuery, Limit: request.Limit,
 		}
 		h.enqueueHistory(historyJob{
 			Store: h.OfflineStore, Client: client, TargetCode: peerCode, Private: true, Query: query,
@@ -1002,7 +1089,7 @@ func (h *Hub) handleHistoryRequest(request HistoryRequest) {
 	}
 	query := HistoryQuery{
 		UserCode: client.UserCode, Room: request.Room,
-		BeforeMessageID: request.BeforeMessageID, Limit: request.Limit,
+		BeforeMessageID: request.BeforeMessageID, SearchQuery: request.SearchQuery, Limit: request.Limit,
 	}
 	h.enqueueHistory(historyJob{
 		Store: h.OfflineStore, Client: client, Room: request.Room, Query: query,
@@ -1036,6 +1123,7 @@ func (h *Hub) handleHistoryResult(result historyResult) {
 		Messages:       result.Page.Messages,
 		HasMore:        result.Page.HasMore,
 		TargetUserCode: result.Job.TargetCode,
+		SearchQuery:    result.Job.Query.SearchQuery,
 	}
 	h.deliver(client, message)
 }

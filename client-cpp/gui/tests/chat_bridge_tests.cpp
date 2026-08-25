@@ -41,8 +41,11 @@ private slots:
     void snapshotMarksMemberPackageHostAsUnavailable();
     void snapshotContainsPerformanceAndGraphicsInfo();
     void performanceModeCommandUpdatesSnapshot();
+    void frameTelemetryUpdatesPerformanceProfileWithoutCommandResult();
     void snapshotContainsRoomAndMemberRoles();
     void dispatchSelectRoomCallsController();
+    void inactiveConversationModelsStayBounded();
+    void evictedConversationModelsReleaseBridgeSnapshots();
     void invalidJsonEmitsCommandResultWithoutCallingController();
     void passwordDoesNotAppearInSnapshotOrResult();
     void modelChangesAreCoalescedIntoOneStateChangedSignal();
@@ -134,6 +137,20 @@ void ChatBridgeTests::performanceModeCommandUpdatesSnapshot() {
                               QStringLiteral("Power Saving"), 500);
 }
 
+void ChatBridgeTests::frameTelemetryUpdatesPerformanceProfileWithoutCommandResult() {
+    GuiChatController controller;
+    PerformanceProfile performanceProfile;
+    ChatBridge bridge(&controller, &performanceProfile, nullptr);
+    QSignalSpy resultSpy(&bridge, &ChatBridge::commandResult);
+
+    bridge.dispatch(QStringLiteral(
+        R"({"id":"cmd-frame-times","type":"performance.reportFrameTimes","payload":{"frameTimesMs":[16.0,17.0,32.0]}})"));
+
+    QCOMPARE(performanceProfile.observedFrameCount(), 3);
+    QCOMPARE(performanceProfile.observedP95FrameMs(), 32.0);
+    QCOMPARE(resultSpy.count(), 0);
+}
+
 void ChatBridgeTests::snapshotContainsRoomAndMemberRoles() {
     GuiChatController controller;
     ChatBridge bridge(&controller);
@@ -165,6 +182,31 @@ void ChatBridgeTests::dispatchSelectRoomCallsController() {
 
     QVERIFY(activeModelSpy.count() > 0);
     QVERIFY(controller.activeMessageModel() != nullptr);
+}
+
+void ChatBridgeTests::inactiveConversationModelsStayBounded() {
+    GuiChatController controller;
+
+    for (int index = 0; index < 12; ++index) {
+        controller.selectRoom(QStringLiteral("room-%1").arg(index));
+    }
+
+    QCOMPARE(controller.activeConversationKey(), QStringLiteral("room:room-11"));
+    QVERIFY(controller.activeMessageModel() != nullptr);
+    QCOMPARE(controller.cachedConversationModelCount(), 8);
+}
+
+void ChatBridgeTests::evictedConversationModelsReleaseBridgeSnapshots() {
+    GuiChatController controller;
+    ChatBridge bridge(&controller);
+
+    for (int index = 0; index < 12; ++index) {
+        controller.selectRoom(QStringLiteral("archive-%1").arg(index));
+        QTest::qWait(110);
+    }
+
+    QCOMPARE(controller.cachedConversationModelCount(), 8);
+    QVERIFY(bridge.cachedSerializedModelCount() <= 11);
 }
 
 void ChatBridgeTests::invalidJsonEmitsCommandResultWithoutCallingController() {
@@ -372,7 +414,7 @@ void ChatBridgeTests::usersResponseUsesBulkModelUpdates() {
         Q_ARG(QString, QStringLiteral("users_response")),
         Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
         Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
-        Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()),
+        Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()),
         Q_ARG(QStringList, QStringList()), Q_ARG(QVariantList, users),
         Q_ARG(QVariantList, QVariantList()), Q_ARG(bool, false)));
 
@@ -395,7 +437,7 @@ void ChatBridgeTests::roomsResponseUsesBulkModelUpdates() {
         Q_ARG(QString, QStringLiteral("rooms_response")),
         Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
         Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
-        Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()),
+        Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()),
         Q_ARG(QStringList, QStringList()), Q_ARG(QVariantList, QVariantList()),
         Q_ARG(QVariantList, rooms), Q_ARG(bool, false)));
 
@@ -413,7 +455,7 @@ void ChatBridgeTests::connectionApprovalStateIsExposedAndCleared() {
         Q_ARG(QString, QStringLiteral("connection_approval_request")), Q_ARG(QString, QStringLiteral("42")),
         Q_ARG(QString, QString()), Q_ARG(QString, QStringLiteral("Cara")), Q_ARG(QString, QStringLiteral("C003")),
         Q_ARG(QString, QStringLiteral("2026-08-24T10:00:00Z")), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
-        Q_ARG(QStringList, QStringList()), Q_ARG(QStringList, QStringList()),
+        Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()), Q_ARG(QStringList, QStringList()),
         Q_ARG(QVariantList, QVariantList()), Q_ARG(QVariantList, QVariantList()), Q_ARG(bool, false)));
 
     QTRY_COMPARE(controller.pendingConnectionApprovals().size(), 1);
@@ -430,7 +472,7 @@ void ChatBridgeTests::connectionApprovalStateIsExposedAndCleared() {
         Q_ARG(QString, QStringLiteral("connection_approval_result")), Q_ARG(QString, QStringLiteral("42")),
         Q_ARG(QString, QString()), Q_ARG(QString, QStringLiteral("Cara")), Q_ARG(QString, QStringLiteral("C003")),
         Q_ARG(QString, QStringLiteral("approved")), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
-        Q_ARG(QStringList, QStringList()), Q_ARG(QStringList, QStringList()),
+        Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()), Q_ARG(QStringList, QStringList()),
         Q_ARG(QVariantList, QVariantList()), Q_ARG(QVariantList, QVariantList()), Q_ARG(bool, false)));
 
     QTRY_VERIFY(controller.pendingConnectionApprovals().isEmpty());
@@ -509,7 +551,7 @@ void ChatBridgeTests::recallReportsServerAcceptanceOrRejectionInsteadOfDispatchS
                                       Q_ARG(QString, QStringLiteral("recall-own")),
                                       Q_ARG(QString, QString()), Q_ARG(QString, QString()),
                                       Q_ARG(QString, QStringLiteral("Recall denied")), Q_ARG(QString, QString()),
-                                      Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()),
+                                      Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()),
                                       Q_ARG(QStringList, QStringList()), Q_ARG(QVariantList, QVariantList()),
                                       Q_ARG(QVariantList, QVariantList()), Q_ARG(bool, false)));
     QCOMPARE(resultSpy.count(), 1);
@@ -524,7 +566,7 @@ void ChatBridgeTests::recallReportsServerAcceptanceOrRejectionInsteadOfDispatchS
                                       Q_ARG(QString, QStringLiteral("message_recalled")), Q_ARG(QString, QStringLiteral("own-1")),
                                       Q_ARG(QString, QStringLiteral("recall-own-success")),
                                       Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
-                                      Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()),
+                                      Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QStringList, QStringList()),
                                       Q_ARG(QStringList, QStringList()), Q_ARG(QVariantList, QVariantList()),
                                       Q_ARG(QVariantList, QVariantList()), Q_ARG(bool, false)));
     QCOMPARE(resultSpy.count(), 2);

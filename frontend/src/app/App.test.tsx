@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createFakeBridge } from '../bridge/chatBridge';
 import type { BridgeState } from '../bridge/types';
@@ -62,6 +62,55 @@ describe('App', () => {
       type: 'session.connectRemote',
       payload: { serverIp: '127.0.0.1', serverPort: 8888, username: 'Bob', userCode: 'B001' }
     });
+  });
+
+  it('opens a TCP tunnel profile without exposing tunnel secrets', () => {
+    render(<App bridge={createFakeBridge(disconnectedState)} />);
+    fireEvent.click(screen.getByRole('button', { name: 'tunnel-mode' }));
+
+    expect(screen.getByRole('heading', { name: '通过 TCP 隧道加入' })).toBeInTheDocument();
+    expect(screen.getByLabelText('隧道地址')).toBeInTheDocument();
+    expect(screen.getByLabelText('端口')).toBeInTheDocument();
+    expect(screen.getByLabelText('CA 文件')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/令牌|Token|私钥/)).not.toBeInTheDocument();
+  });
+
+  it('uses localhost as the certificate identity for a TCP tunnel endpoint', () => {
+    const bridge = createFakeBridge(disconnectedState);
+    render(<App bridge={bridge} />);
+    fireEvent.click(screen.getByRole('button', { name: 'tunnel-mode' }));
+    fireEvent.change(screen.getByLabelText('隧道地址'), { target: { value: 'frp-bus.com' } });
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '50440' } });
+    fireEvent.click(screen.getByRole('button', { name: 'connect-session' }));
+
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'session.connectRemote',
+      payload: { serverIp: 'frp-bus.com', serverPort: 50440, tlsServerName: 'localhost' }
+    });
+  });
+
+  it('keeps automatically scanning for virtual-LAN hosts while the guest page is open', () => {
+    vi.useFakeTimers();
+    try {
+      const bridge = createFakeBridge(disconnectedState);
+      render(<App bridge={bridge} />);
+      fireEvent.click(screen.getByRole('button', { name: 'guest-mode' }));
+
+      expect(bridge.commands.filter((command) => command.type === 'session.discoverLanHosts')).toHaveLength(1);
+
+      act(() => { vi.advanceTimersByTime(3000); });
+
+      expect(bridge.commands.filter((command) => command.type === 'session.discoverLanHosts')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('identifies virtual-LAN discovery in the guest flow', () => {
+    render(<App bridge={createFakeBridge(disconnectedState)} />);
+    fireEvent.click(screen.getByRole('button', { name: 'guest-mode' }));
+
+    expect(screen.getByText('自动发现同一局域网或虚拟局域网内的房主')).toBeInTheDocument();
   });
 
   it('joins a discovered LAN host without exposing an IP or certificate path', () => {
@@ -209,6 +258,25 @@ describe('App', () => {
     expect(bridge.commands.at(-1)).toMatchObject({
       type: 'settings.setPerformanceMode',
       payload: { mode: 'Power Saving' }
+    });
+  });
+
+  it('keeps the settings content in its own scroll container and dispatches connection log changes', async () => {
+    const bridge = createFakeBridge({
+      ...disconnectedState,
+      connection: { phase: 'connected', statusText: '已连接', retryable: false },
+      navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } },
+      diagnostics: { enabled: false, directory: 'C:/Users/Alice/AppData/Local/LAN Chat/logs' }
+    } as BridgeState);
+    render(<App bridge={bridge} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+
+    expect(screen.getByTestId('settings-scroll-container')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '记录连接日志' }));
+    expect(bridge.commands.at(-1)).toMatchObject({
+      type: 'settings.setConnectionLogging',
+      payload: { enabled: true }
     });
   });
 });

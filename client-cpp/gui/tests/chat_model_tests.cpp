@@ -10,6 +10,7 @@ private slots:
     void appendRowsEmitsOneInsertRange();
     void replaceRowsEmitsOneReset();
     void updateRowsEmitsOneDataChangedRange();
+    void appendRowsMergesDuplicateMessageIdDeliveryState();
     void appendRowsKeepsNewestRowsAtTheModelLimit();
     void prependRowsInsertsOlderRowsBeforeCurrentRows();
     void largeMessageFixturesStayBoundedAtTheModelLimit();
@@ -50,6 +51,16 @@ void ChatModelTests::updateRowsEmitsOneDataChangedRange() {
     QCOMPARE(dataChangedSpy.count(), 1);
     QCOMPARE(model.valueAt(0, "count").toInt(), 1);
     QCOMPARE(model.valueAt(1, "count").toInt(), 2);
+}
+
+void ChatModelTests::appendRowsMergesDuplicateMessageIdDeliveryState() {
+    ChatListModel model({QStringLiteral("messageId"), QStringLiteral("content"), QStringLiteral("deliveryState")});
+    model.append({{"messageId", "client-message-1"}, {"content", "hello"}, {"deliveryState", "queued"}});
+
+    model.append({{"messageId", "client-message-1"}, {"content", "hello"}, {"deliveryState", "delivered"}});
+
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.valueAt(0, "deliveryState").toString(), QStringLiteral("delivered"));
 }
 
 void ChatModelTests::appendRowsKeepsNewestRowsAtTheModelLimit() {

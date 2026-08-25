@@ -72,7 +72,9 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .lan-discovery__confirmation input { width: 16px; height: 16px; margin: 1px 0 0; accent-color: #37f6d0; }
 .manual-entry-button { width: fit-content; margin-top: 14px; padding: 0; border: 0; color: #9aa7c4; background: transparent; cursor: pointer; font: inherit; font-size: 12px; }
 .manual-entry-button:hover { color: #37f6d0; }
-.mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 42px; }
+.mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-top: 42px; }
+.tunnel-guide { margin-top: 18px; padding: 14px 16px; border: 1px solid rgba(164, 182, 255, .18); border-radius: 14px; color: #d8e2ff; background: rgba(28, 39, 76, .42); }
+.tunnel-guide p { margin: 6px 0 0; color: #9aa7c4; font-size: 13px; line-height: 1.5; }
 .mode-card { display: grid; gap: 12px; min-height: 180px; padding: 24px; text-align: left; border: 1px solid rgba(164, 182, 255, .18); border-radius: 22px; background: rgba(28, 39, 76, .7); cursor: pointer; transition: transform 150ms ease, border-color 150ms ease, background 150ms ease; }
 .mode-card:hover:not(:disabled) { transform: translateY(-3px); border-color: #37f6d0; background: rgba(39, 54, 103, .9); }
 .mode-card:disabled { cursor: not-allowed; opacity: .52; }
@@ -107,8 +109,8 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .identity-card { margin-top: 60px; width: fit-content; padding: 14px 18px; border: 1px solid rgba(55, 246, 208, .24); border-radius: 16px; color: #d9e1f5; background: rgba(7, 11, 24, .52); }
 
 .workspace-shell { display: grid; justify-items: stretch; align-items: stretch; grid-template-columns: 76px minmax(220px, 280px) minmax(0, 1fr) 248px; grid-template-rows: minmax(0, 1fr); gap: 0; min-height: 100vh; padding: 0; background: linear-gradient(135deg, rgba(20, 30, 64, .9), rgba(7, 11, 24, .98)); }
-.settings-shell { display: grid; place-items: center; min-height: 100vh; padding: 32px; background: linear-gradient(135deg, rgba(20, 30, 64, .9), rgba(7, 11, 24, .98)); }
-.settings-panel { width: min(100%, 760px); padding: 34px; border: 1px solid rgba(164, 182, 255, .18); border-radius: 28px; background: rgba(17, 25, 50, .82); box-shadow: 0 30px 100px rgba(0, 0, 0, .28); }
+.settings-shell { display: block; height: 100%; min-height: 0; padding: 32px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; background: linear-gradient(135deg, rgba(20, 30, 64, .9), rgba(7, 11, 24, .98)); }
+.settings-panel { width: min(100%, 760px); margin: 0 auto; padding: 34px; border: 1px solid rgba(164, 182, 255, .18); border-radius: 28px; background: rgba(17, 25, 50, .82); box-shadow: 0 30px 100px rgba(0, 0, 0, .28); }
 .settings-header { display: flex; align-items: center; gap: 16px; padding-bottom: 26px; border-bottom: 1px solid rgba(164, 182, 255, .14); }
 .settings-header h1 { margin: 0; }
 .settings-back { width: 40px; padding: 0; font-size: 24px; }
@@ -152,6 +154,10 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .chat-region { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: rgba(7, 11, 24, .24); }
 .chat-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 28px 34px 22px; border-bottom: 1px solid rgba(164, 182, 255, .14); }
 .chat-header__actions { display: flex; align-items: center; gap: 10px; }
+.history-search { display: flex; align-items: center; gap: 6px; min-width: min(260px, 30vw); padding: 4px 7px 4px 10px; border: 1px solid rgba(164, 182, 255, .16); border-radius: 10px; background: rgba(7, 11, 24, .42); }
+.history-search input { min-width: 0; width: 100%; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-size: 12px; }
+.history-search button { border: 0; padding: 3px; color: #8190b0; background: transparent; cursor: pointer; font: inherit; font-size: 11px; }
+.history-search button:hover { color: #37f6d0; }
 .header-action-button { min-height: 34px; padding: 0 11px; font-size: 12px; }
 .chat-header h1 { font-size: clamp(28px, 3vw, 44px); }
 .header-status { display: flex; align-items: center; gap: 7px; margin: 10px 0 0; }
@@ -172,6 +178,8 @@ h1 { margin: 0; font-size: clamp(32px, 5vw, 58px); letter-spacing: -.04em; }
 .message--system .message-cluster { max-width: 100%; align-items: center; }
 .message-system-text { margin: 0; color: #8190b0; font-size: 12px; line-height: 1.5; text-align: center; }
 .message-meta { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; }
+.message-delivery { color: #a88251; font-size: 11px; }
+.message-delivery--failed { color: #b34f44; }
 .message-bubble { position: relative; padding: 13px 16px; border: 1px solid rgba(164, 182, 255, .14); border-radius: 18px 18px 18px 5px; color: #e8edff; background: rgba(22, 31, 63, .82); }
 .message--self .message-bubble { border-color: rgba(55, 246, 208, .22); border-radius: 18px 18px 5px 18px; background: rgba(32, 74, 80, .56); }
 .message-content { margin: 0; line-height: 1.6; }
@@ -351,6 +359,8 @@ select:focus-visible {
 .member-row { color: #392a18; }
 .form-grid input,
 .conversation-search,
+.history-search,
+.history-search input,
 .admin-member-input,
 .room-form__field input {
   border-color: rgba(108, 77, 31, .24);
@@ -362,6 +372,7 @@ select:focus-visible {
   border-color: #a56f20;
   box-shadow: 0 0 0 3px rgba(198, 151, 60, .18);
 }
+.history-search:focus-within { border-color: #a56f20; box-shadow: 0 0 0 3px rgba(198, 151, 60, .18); }
 .lan-discovery__confirmation { color: #5b4428; }
 .lan-discovery__confirmation input,
 .settings-toggle input,
@@ -433,6 +444,8 @@ select:focus-visible {
 }
 .message-composer textarea,
 :root[data-theme="light"] .message-composer textarea { color: #392a18; }
+.tunnel-guide { border-color: rgba(108, 77, 31, .18); color: #392a18; background: rgba(255, 250, 235, .78); }
+.tunnel-guide p { color: #856f4c; }
 
 /* Function controls are typography, not pills or bubbles. */
 .primary-button,

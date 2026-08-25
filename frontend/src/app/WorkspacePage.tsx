@@ -31,6 +31,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
   const [memberCode, setMemberCode] = useState('');
   const [section, setSection] = useState<WorkspaceSection>('rooms');
   const [draft, setDraft] = useState('');
+  const [historyQuery, setHistoryQuery] = useState('');
   const [quote, setQuote] = useState<QuoteDraft | null>(null);
   const [focusComposerAtEndToken, setFocusComposerAtEndToken] = useState(0);
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
@@ -198,12 +199,17 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
     setFocusComposerAtEndToken((token) => token + 1);
   }, []);
 
+  function updateHistoryQuery(query: string) {
+    setHistoryQuery(query);
+    bridge.dispatch(createCommand('history.search', { query }));
+  }
+
   return (
     <main ref={workspaceRef} className="app-shell workspace-shell">
       <WorkspaceRail section={section} onSectionChange={setSection} onSettings={onSettings} onOpenSidebar={() => setSidebarOpen(true)} />
       <ConversationSidebar bridge={bridge} state={state} section={section} onCreateRoom={openCreateRoom} />
       <section className="chat-region" data-motion="workspace-panel">
-        <ChatHeader state={state} onMembers={() => setMemberDrawerOpen(true)} canManage={canManageRoom} onManageRoom={openRoomManage} onConnectionApprovals={() => setConnectionApprovalOpen(true)} />
+        <ChatHeader state={state} onMembers={() => setMemberDrawerOpen(true)} canManage={canManageRoom} onManageRoom={openRoomManage} onConnectionApprovals={() => setConnectionApprovalOpen(true)} historyQuery={historyQuery} onHistoryQueryChange={updateHistoryQuery} />
         <MessageTimeline bridge={bridge} state={state} onQuote={quoteMessage} canRecall={(message) => state.identity.admin || message.userCode === state.identity.userCode} />
         <MessageComposer bridge={bridge} state={state} quote={quote} onClearQuote={() => setQuote(null)} draft={draft} onDraftChange={setDraft} onCommandResult={() => undefined} focusAtEndToken={focusComposerAtEndToken} />
       </section>

@@ -10,12 +10,13 @@ export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
   const endpoint = `${state.savedConnection.serverIp || '未设置'}:${state.savedConnection.serverPort || '—'}`;
   const performance = state.performance;
   const graphics = state.graphics;
+  const diagnostics = state.diagnostics ?? { enabled: false, directory: '' };
   const performanceMode = performance?.mode ?? 'Automatic';
   const modeLabels: Record<string, string> = {
     Automatic: '自动', High: '高性能', Balanced: '均衡', 'Power Saving': '省电'
   };
   return (
-    <main className="app-shell settings-shell">
+    <main className="app-shell settings-shell" data-testid="settings-scroll-container">
       <section className="settings-panel" aria-label="设置">
         <header className="settings-header">
           <button className="secondary-button settings-back" type="button" aria-label="返回聊天" onClick={onBack}>‹</button>
@@ -33,6 +34,20 @@ export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
           <div className="settings-row"><span>服务器地址</span><span className="settings-value">{endpoint}</span></div>
           <div className="settings-row"><span>连接状态</span><span className="settings-value">{state.connection.statusText}</span></div>
           <p className="settings-note">连接配置由启动页面管理。</p>
+        </section>
+        <section className="settings-group">
+          <h2>连接日志</h2>
+          <label className="settings-row settings-toggle">
+            <span>记录连接日志</span>
+            <input
+              type="checkbox"
+              aria-label="记录连接日志"
+              checked={diagnostics.enabled}
+              onChange={(event) => bridge.dispatch(createCommand('settings.setConnectionLogging', { enabled: event.target.checked }))}
+            />
+          </label>
+          <p className="settings-note">仅记录时间、服务器端点、重连次数和 TLS/审批结果；不记录消息内容、证书或私钥。</p>
+          {diagnostics.enabled && <div className="settings-row"><span>日志目录</span><span className="settings-value">{diagnostics.directory}</span></div>}
         </section>
         <section className="settings-group">
           <h2>性能 / 图形信息</h2>

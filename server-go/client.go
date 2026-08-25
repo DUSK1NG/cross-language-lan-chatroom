@@ -264,6 +264,7 @@ func (c *Client) readPump(hub *Hub) {
 				Sender:     c,
 				TargetCode: targetCode,
 				Content:    message.Content,
+				MessageID:  message.MessageID,
 			}
 
 		case "users_request":
@@ -311,7 +312,7 @@ func (c *Client) readPump(hub *Hub) {
 			}
 			hub.History <- HistoryRequest{Client: c, Room: message.Room,
 				TargetCode: message.TargetUserCode, Private: message.Private,
-				BeforeMessageID: message.BeforeMessageID, Limit: message.Limit}
+				BeforeMessageID: message.BeforeMessageID, SearchQuery: message.SearchQuery, Limit: message.Limit}
 
 		case "admin_action":
 			if err := validateMessage(message); err != nil {

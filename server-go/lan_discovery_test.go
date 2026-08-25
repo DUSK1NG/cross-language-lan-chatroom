@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net"
 	"testing"
 )
 
@@ -34,5 +35,34 @@ func TestBuildLanDiscoveryAnnouncementRejectsInvalidInput(t *testing.T) {
 	}
 	if _, err := buildLanDiscoveryAnnouncement([]byte("certificate"), "Host", 0); err == nil {
 		t.Fatal("invalid port was accepted")
+	}
+}
+
+func TestBroadcastAddressForIPv4KeepsVirtualLanAndRejectsUnsafeAddresses(t *testing.T) {
+	tests := []struct {
+		name string
+		ip   string
+		mask string
+		want string
+		ok   bool
+	}{
+		{name: "radmin virtual lan", ip: "26.12.34.56", mask: "255.0.0.0", want: "26.255.255.255", ok: true},
+		{name: "private lan", ip: "192.168.10.8", mask: "255.255.255.0", want: "192.168.10.255", ok: true},
+		{name: "loopback", ip: "127.0.0.1", mask: "255.0.0.0", ok: false},
+		{name: "link local", ip: "169.254.1.2", mask: "255.255.0.0", ok: false},
+		{name: "unspecified", ip: "0.0.0.0", mask: "0.0.0.0", ok: false},
+		{name: "host route", ip: "26.12.34.56", mask: "255.255.255.255", ok: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			broadcast, ok := broadcastAddressForIPv4(net.ParseIP(test.ip), net.IPMask(net.ParseIP(test.mask).To4()))
+			if ok != test.ok {
+				t.Fatalf("ok = %v, want %v", ok, test.ok)
+			}
+			if ok && broadcast.String() != test.want {
+				t.Fatalf("broadcast = %s, want %s", broadcast, test.want)
+			}
+		})
 	}
 }

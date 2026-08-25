@@ -51,6 +51,30 @@ void ChatListModel::appendRows(const QList<QVariantMap>& rows) {
     if (rows.isEmpty()) return;
 
     QList<QVariantMap> incoming = rows;
+    if (roleForName("messageId") != Qt::DisplayRole) {
+        QList<QVariantMap> uniqueIncoming;
+        QHash<QString, int> incomingRowsByMessageId;
+        for (const QVariantMap& row : std::as_const(incoming)) {
+            const QString messageId = row.value("messageId").toString();
+            if (messageId.isEmpty()) {
+                uniqueIncoming.append(row);
+                continue;
+            }
+            const int existingRow = findRow("messageId", messageId);
+            if (existingRow >= 0) {
+                updateRow(existingRow, row);
+                continue;
+            }
+            if (incomingRowsByMessageId.contains(messageId)) {
+                uniqueIncoming[incomingRowsByMessageId.value(messageId)].insert(row);
+                continue;
+            }
+            incomingRowsByMessageId.insert(messageId, uniqueIncoming.size());
+            uniqueIncoming.append(row);
+        }
+        incoming = std::move(uniqueIncoming);
+        if (incoming.isEmpty()) return;
+    }
     if (incoming.size() > kMaxRowsPerModel) {
         incoming = incoming.mid(incoming.size() - kMaxRowsPerModel);
     }

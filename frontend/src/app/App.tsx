@@ -7,13 +7,16 @@ import { WorkspacePage } from './WorkspacePage';
 import { SettingsPage } from './SettingsPage';
 import { useAppSettings } from '../state/appSettings';
 import { inferPrivateKeyPath } from './hostPaths';
+import { useFrameTelemetry } from '../performance/useFrameTelemetry';
 import '../styles/global.css';
 
 type AppProps = { bridge: ChatBridgeClient };
-type ConnectionMode = 'remote' | 'guest';
+type ConnectionMode = 'remote' | 'guest' | 'tunnel';
+const discoveryRefreshIntervalMs = 3000;
 
 export function App({ bridge }: AppProps) {
   const state = useBridgeState(bridge);
+  useFrameTelemetry(bridge);
   const [page, setPage] = useState(state.navigation.page);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('remote');
   const settings = useAppSettings();
@@ -48,6 +51,7 @@ export function App({ bridge }: AppProps) {
     <ModeSelectionPage
       onRemote={() => { setConnectionMode('remote'); setPage('connect'); }}
       onGuest={() => { setConnectionMode('guest'); setPage('connect'); }}
+      onTunnel={() => { setConnectionMode('tunnel'); setPage('connect'); }}
       onLocalHost={() => setPage('host')}
       hostAvailable={hostAvailable}
       hostUnavailableReason={hostUnavailableReason}
@@ -55,9 +59,10 @@ export function App({ bridge }: AppProps) {
   );
 }
 
-function ModeSelectionPage({ onRemote, onGuest, onLocalHost, hostAvailable, hostUnavailableReason }: {
+function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvailable, hostUnavailableReason }: {
   onRemote: () => void;
   onGuest: () => void;
+  onTunnel: () => void;
   onLocalHost: () => void;
   hostAvailable: boolean;
   hostUnavailableReason: string;
@@ -84,6 +89,11 @@ function ModeSelectionPage({ onRemote, onGuest, onLocalHost, hostAvailable, host
             <strong>加入局域网聊天室</strong>
             <span>作为 Guest 连接另一台电脑上的 Host</span>
           </button>
+          <button className="mode-card" type="button" aria-label="tunnel-mode" onClick={onTunnel}>
+            <span className="mode-icon" aria-hidden="true">⇄</span>
+            <strong>通过 TCP 隧道加入</strong>
+            <span>使用外部隧道提供的地址、端口和公开证书</span>
+          </button>
         </div>
       </section>
     </main>
@@ -103,10 +113,11 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   onBack: () => void;
 }) {
   const guest = mode === 'guest';
+  const tunnel = mode === 'tunnel';
   const [serverIp, setServerIp] = useState(state.savedConnection.serverIp || '127.0.0.1');
   const [serverPort, setServerPort] = useState(String(state.savedConnection.serverPort || 8888));
-  const [username, setUsername] = useState(() => guest ? 'Bob' : (state.savedConnection.username || 'Alice'));
-  const [userCode, setUserCode] = useState(() => guest ? 'B001' : (state.savedConnection.userCode || 'A001'));
+  const [username, setUsername] = useState(() => guest || tunnel ? 'Bob' : (state.savedConnection.username || 'Alice'));
+  const [userCode, setUserCode] = useState(() => guest || tunnel ? 'B001' : (state.savedConnection.userCode || 'A001'));
   const [caFile, setCaFile] = useState(state.savedConnection.caFile);
   const [selectedHostId, setSelectedHostId] = useState('');
   const [manualEntry, setManualEntry] = useState(!guest);
@@ -118,7 +129,11 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   const showManualFields = !guest || manualEntry || !selectedHost;
 
   useEffect(() => {
-    if (guest) bridge.dispatch(createCommand('session.discoverLanHosts', {}));
+    if (!guest) return;
+    const discover = () => bridge.dispatch(createCommand('session.discoverLanHosts', {}));
+    discover();
+    const interval = window.setInterval(discover, discoveryRefreshIntervalMs);
+    return () => window.clearInterval(interval);
   }, [bridge, guest]);
 
   useEffect(() => {
@@ -143,7 +158,8 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
     if (!serverIp.trim() || !validPort) return;
     bridge.dispatch(createCommand('session.connectRemote', {
       serverIp: serverIp.trim(), serverPort: Number(serverPort), username: username.trim(),
-      userCode: userCode.trim(), caFile: caFile.trim()
+      userCode: userCode.trim(), caFile: caFile.trim(),
+      ...(tunnel ? { tlsServerName: 'localhost' } : {})
     }));
   }
 
@@ -156,17 +172,21 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
     <main className="app-shell connect-shell">
       <section className="connect-panel">
         <p className="eyebrow">SECURE CONNECTION</p>
-        <h1>{guest ? '加入局域网聊天室' : '连接远程服务器'}</h1>
+        <h1>{tunnel ? '通过 TCP 隧道加入' : (guest ? '加入局域网聊天室' : '连接远程服务器')}</h1>
         <ConnectionStatus state={state} />
         <p className="connection-help">
-          {guest ? '先从附近聊天室中选择房主；IPv4 变化后会自动重新发现。手动连接仍可作为备用方式。' : '填写已经启动 Go Server 的电脑 IPv4 和端口。'}
+          {tunnel ? '填写外部隧道提供的主机和端口，并使用房主的公开证书。隧道令牌和私钥只保留在外部隧道工具中。' : (guest ? '自动发现局域网或同一虚拟局域网内的房主；IPv4 变化后会持续重新发现。手动连接仍可作为备用方式。' : '填写已经启动 Go Server 的电脑 IPv4 和端口。')}
         </p>
+        {tunnel && <section className="tunnel-guide" aria-label="tunnel-connection-guide">
+          <strong>安全边界</strong>
+          <p>LAN Chat 只建立 TLS 聊天连接，不启动或配置隧道，也不会读取隧道令牌、私钥或配置文件。</p>
+        </section>}
         {guest && (
           <section className="lan-discovery" aria-label="lan-host-discovery">
             <div className="lan-discovery__header">
               <div>
                 <strong>附近聊天室</strong>
-                <small>{discovery.scanning ? '正在搜索局域网聊天室…' : '自动发现同一局域网内的房主'}</small>
+                <small>{discovery.scanning ? '正在搜索局域网和虚拟局域网聊天室…' : '自动发现同一局域网或虚拟局域网内的房主'}</small>
               </div>
               <button className="secondary-button" type="button" aria-label="refresh-lan-hosts"
                 onClick={() => bridge.dispatch(createCommand('session.discoverLanHosts', {}))} disabled={busy}>
@@ -174,7 +194,7 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
               </button>
             </div>
             {discovery.hosts.length === 0 ? (
-              <p className="lan-discovery__empty">{discovery.scanning ? '正在等待房主广播…' : '未找到聊天室。请确认房主已启动、两台电脑在同一局域网。'}</p>
+              <p className="lan-discovery__empty">{discovery.scanning ? '正在等待房主广播…' : '未找到聊天室。请确认房主已启动，并且双方位于同一局域网或同一虚拟局域网。'}</p>
             ) : (
               <div className="lan-discovery__list">
                 {discovery.hosts.map((host) => (
@@ -205,7 +225,7 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
         )}
         <div className="form-grid">
           {showManualFields && <>
-            <label htmlFor="server-ip">服务器 IP</label>
+            <label htmlFor="server-ip">{tunnel ? '隧道地址' : '服务器 IP'}</label>
             <input id="server-ip" value={serverIp} onChange={(event) => setServerIp(event.target.value)} />
             <label htmlFor="server-port">端口</label>
             <input id="server-port" inputMode="numeric" value={serverPort} onChange={(event) => setServerPort(event.target.value)} />

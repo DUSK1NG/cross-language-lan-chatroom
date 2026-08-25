@@ -8,8 +8,12 @@ class BridgeProtocolTests final : public QObject {
 
 private slots:
     void acceptsRoomMessageCommand();
+    void acceptsHistorySearchCommand();
     void acceptsPerformanceModeCommand();
+    void acceptsConnectionLogPreferenceCommand();
+    void acceptsBoundedFrameTelemetryCommand();
     void acceptsRemoteConnectionWithoutCaFile();
+    void rejectsTunnelTlsIdentityOtherThanLocalhost();
     void rejectsMissingIdAndPayload();
     void rejectsWrongPayloadType();
     void rejectsEmptyRequiredPayloadValue();
@@ -29,11 +33,47 @@ void BridgeProtocolTests::acceptsRoomMessageCommand() {
     QVERIFY(error.isEmpty());
 }
 
+void BridgeProtocolTests::acceptsHistorySearchCommand() {
+    const QJsonObject command{
+        {"id", "cmd-history-search"},
+        {"type", "history.search"},
+        {"payload", QJsonObject{{"query", "你好"}}}
+    };
+
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
 void BridgeProtocolTests::acceptsPerformanceModeCommand() {
     const QJsonObject command{
         {"id", "cmd-performance"},
         {"type", "settings.setPerformanceMode"},
         {"payload", QJsonObject{{"mode", "Power Saving"}}}
+    };
+
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::acceptsConnectionLogPreferenceCommand() {
+    const QJsonObject command{
+        {"id", "cmd-connection-log"},
+        {"type", "settings.setConnectionLogging"},
+        {"payload", QJsonObject{{"enabled", true}}}
+    };
+
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::acceptsBoundedFrameTelemetryCommand() {
+    const QJsonObject command{
+        {"id", "cmd-frame-times"},
+        {"type", "performance.reportFrameTimes"},
+        {"payload", QJsonObject{{"frameTimesMs", QJsonArray{16.0, 17.0, 33.0}}}}
     };
 
     QString error;
@@ -55,6 +95,23 @@ void BridgeProtocolTests::acceptsRemoteConnectionWithoutCaFile() {
     QString error;
     QVERIFY(bridge::validateCommand(command, &error));
     QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::rejectsTunnelTlsIdentityOtherThanLocalhost() {
+    const QJsonObject command{
+        {"id", "cmd-tunnel"},
+        {"type", "session.connectRemote"},
+        {"payload", QJsonObject{{"serverIp", "frp-bus.com"},
+                                 {"serverPort", 50440},
+                                 {"username", "Bob"},
+                                 {"userCode", "B001"},
+                                 {"caFile", "server-lan.crt"},
+                                 {"tlsServerName", "frp-bus.com"}}}
+    };
+
+    QString error;
+    QVERIFY(!bridge::validateCommand(command, &error));
+    QCOMPARE(error, QStringLiteral("invalid_command"));
 }
 
 void BridgeProtocolTests::rejectsMissingIdAndPayload() {

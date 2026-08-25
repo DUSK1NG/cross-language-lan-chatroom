@@ -35,6 +35,7 @@ export type MessageItem = {
   content: string;
   selfMessage: boolean;
   systemMessage: boolean;
+  deliveryState?: 'queued' | 'sent' | 'delivered' | 'failed';
 };
 
 export type MemberSummary = {
@@ -99,6 +100,11 @@ export type GraphicsState = {
   resolution: string;
 };
 
+export type DiagnosticsState = {
+  enabled: boolean;
+  directory: string;
+};
+
 export type BridgeState = {
   schemaVersion: 1;
   connection: {
@@ -134,6 +140,7 @@ export type BridgeState = {
   hostDefaults?: HostDefaults;
   performance?: PerformanceState;
   graphics?: GraphicsState;
+  diagnostics?: DiagnosticsState;
 };
 
 export type BridgeCommand = {

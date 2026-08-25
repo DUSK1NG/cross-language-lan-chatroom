@@ -17,8 +17,10 @@ nlohmann::json serialize(const Message& message) {
     nlohmann::json object = nlohmann::json{{"type", message.type}};
     if (!message.message_id.empty()) object["message_id"] = message.message_id;
     if (!message.command_id.empty()) object["command_id"] = message.command_id;
+    if (!message.delivery_state.empty()) object["delivery_state"] = message.delivery_state;
     if (!message.created_at.empty()) object["created_at"] = message.created_at;
     if (!message.before_message_id.empty()) object["before_message_id"] = message.before_message_id;
+    if (!message.search_query.empty()) object["search_query"] = message.search_query;
     if (message.limit > 0) object["limit"] = message.limit;
     if (message.has_more) object["has_more"] = true;
     if (message.recalled) object["recalled"] = true;
@@ -85,12 +87,14 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
         if (!read_string("username", parsed.username) ||
             !read_string("message_id", parsed.message_id) ||
             !read_string("command_id", parsed.command_id) ||
+            !read_string("delivery_state", parsed.delivery_state) ||
             !read_string("user_code", parsed.user_code) ||
             !read_string("target_user_code", parsed.target_user_code) ||
             !read_string("room", parsed.room) ||
             !read_string("content", parsed.content) ||
             !read_string("created_at", parsed.created_at) ||
-            !read_string("before_message_id", parsed.before_message_id)) {
+            !read_string("before_message_id", parsed.before_message_id) ||
+            !read_string("search_query", parsed.search_query)) {
             set_error("JSON message contains a field with the wrong type");
             return false;
         }
@@ -214,6 +218,7 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
                 };
                 if (!read_nested_string("type", nested.type) ||
                     !read_nested_string("message_id", nested.message_id) ||
+                    !read_nested_string("delivery_state", nested.delivery_state) ||
                     !read_nested_string("username", nested.username) ||
                     !read_nested_string("user_code", nested.user_code) ||
                     !read_nested_string("target_user_code", nested.target_user_code) ||

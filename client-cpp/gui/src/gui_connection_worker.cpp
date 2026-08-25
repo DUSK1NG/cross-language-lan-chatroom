@@ -1,4 +1,5 @@
 #include "gui_connection_worker.hpp"
+#include "network_diagnostics.hpp"
 #include "openssl_runtime.hpp"
 
 #include <utility>
@@ -47,6 +48,8 @@ void GuiConnectionWorker::connectToServer(const QString& serverIp,
     reconnectPolicy_.markConnected();
     reconnectTimerActive_ = false;
     savedConnection_ = {serverIp, serverPort, username, userCode, caFile, tlsServerName, true};
+    NetworkDiagnostics::writeConnectionEvent(QStringLiteral("connect_requested"), serverIp, serverPort,
+                                              0, tlsServerName.isEmpty() ? QString() : QStringLiteral("tls_name=") + tlsServerName);
     connectToServerWithRetries(serverIp, serverPort, username, userCode, caFile, tlsServerName, 1);
 }
 
@@ -69,6 +72,7 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
     }
 
     for (int attempt = 0; attempt < boundedAttempts; ++attempt) {
+        NetworkDiagnostics::writeConnectionEvent(QStringLiteral("connect_attempt"), serverIp, serverPort, attempt + 1);
         connection::Config config{
             serverIp.toStdString(),
             serverPort,
@@ -81,6 +85,7 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
 
         message::Message loginResponse;
         if (connection_->connect_and_login(loginResponse, loginResult)) {
+            NetworkDiagnostics::writeConnectionEvent(QStringLiteral("login_ok"), serverIp, serverPort, attempt + 1);
             running_.store(true);
             receiveThread_ = std::thread(&GuiConnectionWorker::receiveLoop, this);
             emit connected(loginResponse.is_admin);
@@ -88,6 +93,8 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
         }
 
         lastReason = QString::fromStdString(connection_->last_error());
+        NetworkDiagnostics::writeConnectionEvent(QStringLiteral("connect_failed"), serverIp, serverPort,
+                                                  attempt + 1, lastReason);
         lastConnectionFailure_ = lastReason;
         connection_.reset();
         if (loginResult == connection::LoginResult::kRejected) {
@@ -148,6 +155,13 @@ void GuiConnectionWorker::connectToLocalHost(const QString& serverExe,
     stopHostedServer();
     hostProcess_ = std::make_unique<QProcess>();
     hostProcess_->setProcessChannelMode(QProcess::SeparateChannels);
+    if (NetworkDiagnostics::enabled()) {
+        const QString hostLogPath = NetworkDiagnostics::hostServerLogFilePath();
+        hostProcess_->setStandardOutputFile(hostLogPath, QIODevice::Append);
+        hostProcess_->setStandardErrorFile(hostLogPath, QIODevice::Append);
+        NetworkDiagnostics::writeConnectionEvent(QStringLiteral("host_process_start"), QStringLiteral("127.0.0.1"),
+                                                  kLocalHostPort);
+    }
     hostProcess_->setProgram(absoluteServerExe);
     hostProcess_->setWorkingDirectory(QFileInfo(absoluteServerExe).absolutePath());
     hostProcess_->setArguments({"-cert", absoluteCertFile, "-key", absoluteKeyFile, "-auto-cert", "-db", absoluteDbFile,
@@ -214,6 +228,9 @@ void GuiConnectionWorker::scheduleReconnect() {
     connection_.reset();
     const int delayMs = reconnectPolicy_.scheduleNextAttempt();
     if (delayMs < 0) return;
+    NetworkDiagnostics::writeConnectionEvent(QStringLiteral("reconnect_scheduled"), savedConnection_.serverIp,
+                                              savedConnection_.serverPort, reconnectPolicy_.attemptCount(),
+                                              QStringLiteral("delay_ms=") + QString::number(delayMs));
     emit reconnectScheduled(reconnectPolicy_.attemptCount(), delayMs);
     reconnectTimerActive_ = true;
     QTimer::singleShot(delayMs, this, [this]() {
@@ -224,6 +241,8 @@ void GuiConnectionWorker::scheduleReconnect() {
 
 void GuiConnectionWorker::retrySavedConnection() {
     if (explicitDisconnect_ || !savedConnection_.valid) return;
+    NetworkDiagnostics::writeConnectionEvent(QStringLiteral("reconnect_attempt"), savedConnection_.serverIp,
+                                              savedConnection_.serverPort, reconnectPolicy_.attemptCount());
     emit reconnectAttempt(reconnectPolicy_.attemptCount());
     if (connectToServerWithRetries(savedConnection_.serverIp, savedConnection_.serverPort,
                                    savedConnection_.username, savedConnection_.userCode,
@@ -245,6 +264,8 @@ bool GuiConnectionWorker::isLocalServerListening(const int timeoutMs) const {
 
 void GuiConnectionWorker::stopHostedServer() {
     if (!hostProcess_) return;
+    NetworkDiagnostics::writeConnectionEvent(QStringLiteral("host_process_stop"), QStringLiteral("127.0.0.1"),
+                                              kLocalHostPort);
     if (hostProcess_->state() != QProcess::NotRunning) {
         hostProcess_->terminate();
         if (!hostProcess_->waitForFinished(1500)) {
@@ -255,29 +276,35 @@ void GuiConnectionWorker::stopHostedServer() {
     hostProcess_.reset();
 }
 
-void GuiConnectionWorker::sendChat(const QString& content) {
-    sendChatToRoom(content, QStringLiteral("lobby"));
+void GuiConnectionWorker::sendChat(const QString& content, const QString& messageId) {
+    sendChatToRoom(content, QStringLiteral("lobby"), messageId);
 }
 
-void GuiConnectionWorker::sendChatToRoom(const QString& content, const QString& room) {
+void GuiConnectionWorker::sendChatToRoom(const QString& content, const QString& room, const QString& messageId) {
     if (!connection_ || !connection_->is_ready() || content.trimmed().isEmpty()) {
+        if (!messageId.isEmpty()) emit messageDeliveryFailed(messageId);
         return;
     }
-    const message::Message message{
+    message::Message message{
         "chat", "", "", content.trimmed().toStdString(), {}, "", room.toStdString(), {}, ""};
+    message.message_id = messageId.toStdString();
     if (!connection_->send(message)) {
+        if (!messageId.isEmpty()) emit messageDeliveryFailed(messageId);
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
 }
 
-void GuiConnectionWorker::sendPrivate(const QString& content, const QString& targetUserCode) {
+void GuiConnectionWorker::sendPrivate(const QString& content, const QString& targetUserCode, const QString& messageId) {
     if (!connection_ || !connection_->is_ready() || content.trimmed().isEmpty() || targetUserCode.isEmpty()) {
+        if (!messageId.isEmpty()) emit messageDeliveryFailed(messageId);
         return;
     }
-    const message::Message message{
+    message::Message message{
         "private_chat", "", "", content.trimmed().toStdString(), {},
         targetUserCode.toStdString(), "", {}, ""};
+    message.message_id = messageId.toStdString();
     if (!connection_->send(message)) {
+        if (!messageId.isEmpty()) emit messageDeliveryFailed(messageId);
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
 }
@@ -335,12 +362,14 @@ void GuiConnectionWorker::requestRooms() {
 }
 
 void GuiConnectionWorker::requestHistory(const QString& room, const QString& targetUserCode,
-                                         bool isPrivate, const QString& beforeMessageId, int limit) {
+                                         bool isPrivate, const QString& beforeMessageId, int limit,
+                                         const QString& searchQuery) {
     if (!connection_ || !connection_->is_ready()) return;
     message::Message message{"history_request", "", "", "", {},
                              targetUserCode.trimmed().toStdString(), room.trimmed().toStdString(), {}, ""};
     message.is_private = isPrivate;
     message.before_message_id = beforeMessageId.trimmed().toStdString();
+    message.search_query = searchQuery.trimmed().toStdString();
     message.limit = qBound(1, limit, 100);
     if (!connection_->send(message)) {
         emit connectionLost(QString::fromStdString(connection_->last_error()));
@@ -366,7 +395,11 @@ void GuiConnectionWorker::receiveLoop() {
         message::Message incoming;
         if (!connection_->receive(incoming)) {
             if (running_.exchange(false)) {
-                emit connectionLost(QString::fromStdString(connection_->last_error()));
+                const QString reason = QString::fromStdString(connection_->last_error());
+                NetworkDiagnostics::writeConnectionEvent(QStringLiteral("connection_lost"),
+                                                          savedConnection_.serverIp, savedConnection_.serverPort,
+                                                          reconnectPolicy_.attemptCount(), reason);
+                emit connectionLost(reason);
             }
             return;
         }
@@ -407,12 +440,14 @@ void GuiConnectionWorker::receiveLoop() {
                 detail.insert("userCode", QString::fromStdString(historyMessage.user_code));
                 detail.insert("content", QString::fromStdString(historyMessage.content));
                 detail.insert("createdAt", QString::fromStdString(historyMessage.created_at));
+                detail.insert("deliveryState", QString::fromStdString(historyMessage.delivery_state));
                 detail.insert("recalled", historyMessage.recalled);
                 historyMessages.append(detail);
             }
             emit historyReceived(QString::fromStdString(incoming.room),
                                  QString::fromStdString(incoming.target_user_code),
-                                 incoming.is_private, historyMessages, incoming.has_more);
+                                 incoming.is_private, historyMessages, incoming.has_more,
+                                 QString::fromStdString(incoming.search_query));
             continue;
         }
 
@@ -424,6 +459,7 @@ void GuiConnectionWorker::receiveLoop() {
                              QString::fromStdString(incoming.content),
                              QString::fromStdString(incoming.room),
                              QString::fromStdString(incoming.target_user_code),
+                             QString::fromStdString(incoming.delivery_state),
                              users,
                              rooms,
                              userDetails,

@@ -55,6 +55,24 @@ func buildLanDiscoveryAnnouncement(certificatePEM []byte, hostName string, port 
 	}, nil
 }
 
+// broadcastAddressForIPv4 returns the directed broadcast address for a usable
+// IPv4 interface. Virtual-LAN addresses (such as Radmin's 26.0.0.0/8) are
+// intentionally treated the same as private LAN addresses. Loopback,
+// link-local, unspecified, and host-route interfaces cannot discover peers.
+func broadcastAddressForIPv4(ip net.IP, mask net.IPMask) (net.IP, bool) {
+	ipv4 := ip.To4()
+	ones, bits := mask.Size()
+	if ipv4 == nil || bits != net.IPv4len*8 || ones < 0 || ones >= net.IPv4len*8 ||
+		ipv4.IsLoopback() || ipv4.IsLinkLocalUnicast() || ipv4.IsUnspecified() {
+		return nil, false
+	}
+	broadcast := make(net.IP, net.IPv4len)
+	for index := range broadcast {
+		broadcast[index] = ipv4[index] | ^mask[index]
+	}
+	return broadcast, !broadcast.IsUnspecified()
+}
+
 func localBroadcastAddresses() []net.IP {
 	addresses := []net.IP{net.IPv4bcast}
 	seen := map[string]bool{net.IPv4bcast.String(): true}
@@ -75,12 +93,8 @@ func localBroadcastAddresses() []net.IP {
 			if !ok || ipNet.IP.To4() == nil || len(ipNet.Mask) != net.IPv4len {
 				continue
 			}
-			ip := ipNet.IP.To4()
-			broadcast := make(net.IP, net.IPv4len)
-			for index := range broadcast {
-				broadcast[index] = ip[index] | ^ipNet.Mask[index]
-			}
-			if broadcast.IsUnspecified() || seen[broadcast.String()] {
+			broadcast, ok := broadcastAddressForIPv4(ipNet.IP, ipNet.Mask)
+			if !ok || seen[broadcast.String()] {
 				continue
 			}
 			seen[broadcast.String()] = true

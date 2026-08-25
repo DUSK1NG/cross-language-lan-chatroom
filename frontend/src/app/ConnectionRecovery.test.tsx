@@ -25,7 +25,7 @@ describe('connection recovery', () => {
     const bridge = createFakeBridge(connectedWorkspace);
     render(<App bridge={bridge} />);
 
-    const composer = screen.getByRole('textbox');
+    const composer = screen.getByRole('textbox', { name: '消息输入框' });
     fireEvent.change(composer, { target: { value: 'draft that must survive' } });
 
     bridge.publish({
@@ -34,12 +34,12 @@ describe('connection recovery', () => {
     });
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '# lobby' })).toBeInTheDocument());
-    expect(screen.getByRole('textbox')).toHaveValue('draft that must survive');
+    expect(screen.getByRole('textbox', { name: '消息输入框' })).toHaveValue('draft that must survive');
     expect(screen.getByText('正在重新连接（第 1 次）')).toBeInTheDocument();
 
     bridge.publish(connectedWorkspace);
 
     await waitFor(() => expect(screen.getByText('已连接')).toBeInTheDocument());
-    expect(screen.getByRole('textbox')).toHaveValue('draft that must survive');
+    expect(screen.getByRole('textbox', { name: '消息输入框' })).toHaveValue('draft that must survive');
   });
 });

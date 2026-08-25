@@ -60,8 +60,10 @@ struct Message {
     std::string password;
     std::string message_id;
     std::string command_id;
+    std::string delivery_state;
     std::string created_at;
     std::string before_message_id;
+    std::string search_query;
     int limit = 0;
     bool has_more = false;
     bool recalled = false;

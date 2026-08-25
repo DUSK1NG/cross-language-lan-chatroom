@@ -36,6 +36,7 @@ type HistoryQuery struct {
 	PeerCode        string
 	Private         bool
 	BeforeMessageID string
+	SearchQuery     string
 	Limit           int
 }
 
@@ -101,7 +102,7 @@ CREATE INDEX IF NOT EXISTS idx_offline_messages_target
     ON offline_messages(target_code, id);
 CREATE TABLE IF NOT EXISTS chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    message_id TEXT NOT NULL UNIQUE,
+    message_id TEXT NOT NULL,
     kind TEXT NOT NULL,
     conversation_key TEXT NOT NULL,
     room TEXT,
@@ -109,11 +110,15 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     sender_code TEXT NOT NULL,
     target_code TEXT,
     content TEXT NOT NULL,
+    delivery_state TEXT NOT NULL DEFAULT 'sent',
     created_at TEXT NOT NULL,
-    recalled INTEGER NOT NULL DEFAULT 0
+    recalled INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(sender_code, conversation_key, message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation
     ON chat_messages(kind, conversation_key, id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_search_scope
+    ON chat_messages(kind, conversation_key, content, id);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("initialize auth database: %w", err)
@@ -121,8 +126,70 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation
 	if _, err := s.db.Exec(`ALTER TABLE offline_messages ADD COLUMN message_id TEXT`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
 		return fmt.Errorf("migrate offline message id: %w", err)
 	}
+	if _, err := s.db.Exec(`ALTER TABLE chat_messages ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'sent'`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return fmt.Errorf("migrate chat message delivery state: %w", err)
+	}
+	if err := s.migrateChatMessageIdentitySchema(); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_offline_messages_message_id ON offline_messages(message_id)`); err != nil {
 		return fmt.Errorf("index offline message id: %w", err)
+	}
+	return nil
+}
+
+func (s *AuthStore) migrateChatMessageIdentitySchema() error {
+	var schema sql.NullString
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chat_messages'`).Scan(&schema); err != nil {
+		return fmt.Errorf("read chat message schema: %w", err)
+	}
+	if !strings.Contains(strings.ToLower(schema.String), "message_id text not null unique") {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin chat message identity migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`ALTER TABLE chat_messages RENAME TO chat_messages_legacy`); err != nil {
+		return fmt.Errorf("rename legacy chat messages: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE TABLE chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        conversation_key TEXT NOT NULL,
+        room TEXT,
+        sender_username TEXT NOT NULL,
+        sender_code TEXT NOT NULL,
+        target_code TEXT,
+        content TEXT NOT NULL,
+        delivery_state TEXT NOT NULL DEFAULT 'sent',
+        created_at TEXT NOT NULL,
+        recalled INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(sender_code, conversation_key, message_id)
+    )`); err != nil {
+		return fmt.Errorf("create migrated chat messages: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO chat_messages
+        (id, message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content, delivery_state, created_at, recalled)
+        SELECT id, message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content,
+            COALESCE(delivery_state, 'sent'), created_at, recalled
+        FROM chat_messages_legacy`); err != nil {
+		return fmt.Errorf("copy legacy chat messages: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE chat_messages_legacy`); err != nil {
+		return fmt.Errorf("drop legacy chat messages: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX idx_chat_messages_conversation ON chat_messages(kind, conversation_key, id)`); err != nil {
+		return fmt.Errorf("index migrated chat messages: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX idx_chat_messages_search_scope ON chat_messages(kind, conversation_key, content, id)`); err != nil {
+		return fmt.Errorf("index migrated chat search: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit chat message identity migration: %w", err)
 	}
 	return nil
 }
@@ -204,54 +271,112 @@ func (s *AuthStore) SaveOfflineMessage(targetCode string, message Message) error
 }
 
 func (s *AuthStore) SaveChatMessage(message Message) error {
+	_, err := s.SaveChatMessageIfNew(message)
+	return err
+}
+
+// SaveChatMessageIfNew persists one message and reports whether this call
+// created the record. The Hub uses the result to avoid re-broadcasting a
+// client retry that carries the same message ID.
+func (s *AuthStore) SaveChatMessageIfNew(message Message) (bool, error) {
 	if s == nil || s.db == nil {
-		return errors.New("auth store is not initialized")
+		return false, errors.New("auth store is not initialized")
 	}
 	if message.MessageID == "" {
-		return errors.New("chat message id is required")
+		return false, errors.New("chat message id is required")
 	}
 	if message.Type != "chat" && message.Type != "private_chat" {
-		return fmt.Errorf("unsupported history message type: %s", message.Type)
+		return false, fmt.Errorf("unsupported history message type: %s", message.Type)
 	}
 	if err := validateTextContent("chat message", message.Content); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := normalizeUserCode(message.UserCode); err != nil {
-		return err
+		return false, err
 	}
-	kind := "room"
-	conversationKey := message.Room
-	targetCode := ""
-	if message.Type == "private_chat" {
-		kind = "private"
-		normalizedSender, _ := normalizeUserCode(message.UserCode)
-		normalizedTarget, err := normalizeUserCode(message.TargetUserCode)
-		if err != nil {
-			return err
-		}
-		targetCode = normalizedTarget
-		conversationKey = privateConversationKey(normalizedSender, normalizedTarget)
-	} else if err := validateRoomName(message.Room); err != nil {
-		return err
+	kind, conversationKey, senderCode, targetCode, err := chatMessageIdentity(message)
+	if err != nil {
+		return false, err
 	}
 	createdAt := message.CreatedAt
 	if createdAt == "" {
 		createdAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO chat_messages
-        (message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content, created_at, recalled)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, message.MessageID, kind, conversationKey, message.Room,
-		message.Username, strings.ToLower(message.UserCode), targetCode, message.Content, createdAt)
+	deliveryState := message.DeliveryState
+	if deliveryState == "" {
+		deliveryState = "sent"
+	}
+	result, err := s.db.Exec(`INSERT OR IGNORE INTO chat_messages
+		(message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content, delivery_state, created_at, recalled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, message.MessageID, kind, conversationKey, message.Room,
+		message.Username, senderCode, targetCode, message.Content, deliveryState, createdAt)
 	if err != nil {
-		return fmt.Errorf("save chat message: %w", err)
+		return false, fmt.Errorf("save chat message: %w", err)
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("check saved chat message: %w", err)
+	}
+	if inserted == 0 {
+		return false, nil
 	}
 	if _, err := s.db.Exec(`DELETE FROM chat_messages
         WHERE kind = ? AND conversation_key = ? AND id NOT IN
         (SELECT id FROM chat_messages WHERE kind = ? AND conversation_key = ? ORDER BY id DESC LIMIT ?)`,
 		kind, conversationKey, kind, conversationKey, maxHistoryRowsPerConversation); err != nil {
-		return fmt.Errorf("prune chat history: %w", err)
+		return false, fmt.Errorf("prune chat history: %w", err)
 	}
-	return nil
+	return true, nil
+}
+
+func chatMessageIdentity(message Message) (kind, conversationKey, senderCode, targetCode string, err error) {
+	senderCode, err = normalizeUserCode(message.UserCode)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	kind = "room"
+	conversationKey = message.Room
+	if message.Type == "private_chat" {
+		kind = "private"
+		targetCode, err = normalizeUserCode(message.TargetUserCode)
+		if err != nil {
+			return "", "", "", "", err
+		}
+		conversationKey = privateConversationKey(senderCode, targetCode)
+		return kind, conversationKey, senderCode, targetCode, nil
+	}
+	if err := validateRoomName(message.Room); err != nil {
+		return "", "", "", "", err
+	}
+	return kind, conversationKey, senderCode, "", nil
+}
+
+func (s *AuthStore) UpdateChatMessageDeliveryState(messageID, deliveryState string) error {
+	if s == nil || s.db == nil {
+		return errors.New("auth store is not initialized")
+	}
+	if messageID == "" || (deliveryState != "sent" && deliveryState != "delivered") {
+		return errors.New("invalid chat delivery state")
+	}
+	_, err := s.db.Exec(`UPDATE chat_messages SET delivery_state = ? WHERE message_id = ?`, deliveryState, messageID)
+	return err
+}
+
+func (s *AuthStore) UpdateChatMessageDeliveryStateForMessage(message Message, deliveryState string) error {
+	if s == nil || s.db == nil {
+		return errors.New("auth store is not initialized")
+	}
+	if message.MessageID == "" || (deliveryState != "sent" && deliveryState != "delivered") {
+		return errors.New("invalid chat delivery state")
+	}
+	kind, conversationKey, senderCode, _, err := chatMessageIdentity(message)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`UPDATE chat_messages SET delivery_state = ?
+        WHERE message_id = ? AND kind = ? AND conversation_key = ? AND sender_code = ?`,
+		deliveryState, message.MessageID, kind, conversationKey, senderCode)
+	return err
 }
 
 func privateConversationKey(first, second string) string {
@@ -276,6 +401,10 @@ func (s *AuthStore) LoadHistory(query HistoryQuery) (HistoryPage, error) {
 	if limit > maxHistoryPageSize {
 		limit = maxHistoryPageSize
 	}
+	searchQuery := strings.TrimSpace(query.SearchQuery)
+	if len([]byte(searchQuery)) > maxMessageSize {
+		return HistoryPage{}, fmt.Errorf("history search query is too long")
+	}
 	kind := "room"
 	conversationKey := query.Room
 	if query.Private {
@@ -291,17 +420,25 @@ func (s *AuthStore) LoadHistory(query HistoryQuery) (HistoryPage, error) {
 
 	beforeID := int64(^uint64(0) >> 1)
 	if query.BeforeMessageID != "" {
-		if err := s.db.QueryRow(`SELECT id FROM chat_messages WHERE message_id = ?`, query.BeforeMessageID).Scan(&beforeID); err != nil {
+		if err := s.db.QueryRow(`SELECT id FROM chat_messages WHERE message_id = ? AND kind = ? AND conversation_key = ?`,
+			query.BeforeMessageID, kind, conversationKey).Scan(&beforeID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return HistoryPage{Messages: []Message{}}, nil
 			}
 			return HistoryPage{}, err
 		}
 	}
-	rows, err := s.db.Query(`SELECT message_id, room, sender_username, sender_code, target_code,
-        content, created_at, recalled FROM chat_messages
-        WHERE kind = ? AND conversation_key = ? AND id < ? ORDER BY id DESC LIMIT ?`,
-		kind, conversationKey, beforeID, limit+1)
+	statement := `SELECT message_id, room, sender_username, sender_code, target_code,
+        content, delivery_state, created_at, recalled FROM chat_messages
+        WHERE kind = ? AND conversation_key = ? AND id < ?`
+	arguments := []any{kind, conversationKey, beforeID}
+	if searchQuery != "" {
+		statement += ` AND instr(content, ?) > 0`
+		arguments = append(arguments, searchQuery)
+	}
+	statement += ` ORDER BY id DESC LIMIT ?`
+	arguments = append(arguments, limit+1)
+	rows, err := s.db.Query(statement, arguments...)
 	if err != nil {
 		return HistoryPage{}, fmt.Errorf("load chat history: %w", err)
 	}
@@ -311,7 +448,7 @@ func (s *AuthStore) LoadHistory(query HistoryQuery) (HistoryPage, error) {
 		var message Message
 		var recalled int
 		if err := rows.Scan(&message.MessageID, &message.Room, &message.Username, &message.UserCode,
-			&message.TargetUserCode, &message.Content, &message.CreatedAt, &recalled); err != nil {
+			&message.TargetUserCode, &message.Content, &message.DeliveryState, &message.CreatedAt, &recalled); err != nil {
 			return HistoryPage{}, err
 		}
 		message.Type = "chat"
@@ -342,17 +479,35 @@ func (s *AuthStore) GetStoredMessage(messageID string) (StoredMessage, error) {
 	if s == nil || s.db == nil {
 		return StoredMessage{}, errors.New("auth store is not initialized")
 	}
-	var stored StoredMessage
-	var recalled int
-	err := s.db.QueryRow(`SELECT kind, conversation_key, room, sender_username, sender_code,
-        target_code, content, created_at, recalled FROM chat_messages WHERE message_id = ?`, messageID).Scan(
-		&stored.Kind, &stored.ConversationKey, &stored.Message.Room, &stored.Message.Username,
-		&stored.Message.UserCode, &stored.TargetCode, &stored.Message.Content,
-		&stored.Message.CreatedAt, &recalled)
+	return s.getStoredMessage(`WHERE message_id = ? ORDER BY id DESC`, messageID)
+}
+
+func (s *AuthStore) GetStoredMessageForMessage(message Message) (StoredMessage, error) {
+	if s == nil || s.db == nil {
+		return StoredMessage{}, errors.New("auth store is not initialized")
+	}
+	if message.MessageID == "" {
+		return StoredMessage{}, errors.New("chat message id is required")
+	}
+	kind, conversationKey, senderCode, _, err := chatMessageIdentity(message)
 	if err != nil {
 		return StoredMessage{}, err
 	}
-	stored.Message.MessageID = messageID
+	return s.getStoredMessage(`WHERE message_id = ? AND kind = ? AND conversation_key = ? AND sender_code = ?`,
+		message.MessageID, kind, conversationKey, senderCode)
+}
+
+func (s *AuthStore) getStoredMessage(where string, args ...any) (StoredMessage, error) {
+	var stored StoredMessage
+	var recalled int
+	query := `SELECT message_id, kind, conversation_key, room, sender_username, sender_code,
+		target_code, content, delivery_state, created_at, recalled FROM chat_messages ` + where
+	err := s.db.QueryRow(query, args...).Scan(&stored.Message.MessageID, &stored.Kind, &stored.ConversationKey,
+		&stored.Message.Room, &stored.Message.Username, &stored.Message.UserCode, &stored.TargetCode,
+		&stored.Message.Content, &stored.Message.DeliveryState, &stored.Message.CreatedAt, &recalled)
+	if err != nil {
+		return StoredMessage{}, err
+	}
 	stored.Message.Type = "chat"
 	if stored.Kind == "private" {
 		stored.Message.Type = "private_chat"

@@ -61,6 +61,25 @@ describe('MessageTimeline motion budget', () => {
     expect(animateMessage).toHaveBeenCalledTimes(1);
   });
 
+  it('pages older history without rendering the entire timeline at once', () => {
+    const state = {
+      ...baseState,
+      activeMessages: Array.from({ length: 600 }, (_, index) => message(`history-${index}`))
+    };
+
+    render(<MessageTimeline bridge={createFakeBridge(state)} state={state} />);
+    const timeline = screen.getByTestId('message-timeline');
+    setScrollableGeometry(timeline, 0);
+
+    expect(screen.getByTestId('message-history-599')).toBeInTheDocument();
+    expect(screen.queryByTestId('message-history-499')).toBeNull();
+
+    fireEvent.scroll(timeline);
+
+    expect(screen.getByTestId('message-history-499')).toBeInTheDocument();
+    expect(screen.queryByTestId('message-history-599')).toBeNull();
+  });
+
   it('keeps a reader in history and reports how many received messages arrived', () => {
     const firstState = { ...baseState, activeMessages: [receivedMessage('history-1')] };
     const { rerender } = render(<MessageTimeline bridge={createFakeBridge(firstState)} state={firstState} />);

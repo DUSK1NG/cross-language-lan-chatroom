@@ -9,7 +9,7 @@
 namespace {
 constexpr int kFrameWindowSize = 24;
 constexpr int kAutomaticModeConfirmations = 3;
-constexpr double kBalancedFrameThresholdMs = 24.0;
+constexpr double kBalancedFrameThresholdMs = 16.7;
 constexpr double kPowerSavingFrameThresholdMs = 40.0;
 
 double p95(const QVector<double>& samples) {
@@ -145,7 +145,7 @@ QString PerformanceProfile::automaticReasonForContext() const {
     if (refreshRate_ <= 60.0) return QStringLiteral("refresh-rate-limit");
     if (frameTimesMs_.size() < kFrameWindowSize) return QStringLiteral("waiting-for-samples");
     if (observedP95FrameMs_ >= kPowerSavingFrameThresholdMs) return QStringLiteral("p95-over-40ms");
-    if (observedP95FrameMs_ >= kBalancedFrameThresholdMs) return QStringLiteral("p95-over-24ms");
+    if (observedP95FrameMs_ >= kBalancedFrameThresholdMs) return QStringLiteral("p95-over-16.7ms");
     return QStringLiteral("stable");
 }
 

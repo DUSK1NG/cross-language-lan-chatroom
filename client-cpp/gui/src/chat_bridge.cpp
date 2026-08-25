@@ -4,6 +4,7 @@
 #include "graphics_info.hpp"
 #include "gui_chat_controller.hpp"
 #include "lan_discovery_service.hpp"
+#include "network_diagnostics.hpp"
 #include "performance_profile.hpp"
 
 #include <QAbstractItemModel>
@@ -139,6 +140,11 @@ void ChatBridge::connectModel(QAbstractItemModel* model, bool scheduleUpdate) {
     connect(model, &QAbstractItemModel::rowsInserted, this, markDirty);
     connect(model, &QAbstractItemModel::rowsRemoved, this, markDirty);
     connect(model, &QAbstractItemModel::modelReset, this, markDirty);
+    connect(model, &QObject::destroyed, this, [this, model]() {
+        serializedModels_.remove(model);
+        dirtyModels_.remove(model);
+        connectedModels_.remove(model);
+    });
     markModelDirty(model, scheduleUpdate);
 }
 
@@ -267,6 +273,8 @@ QJsonObject ChatBridge::buildState() {
         {"members", snapshotFor(controller_->memberModel())},
         {"permissions", QJsonObject{{"activeRoomCanManage", controller_->activeRoomCanManage()}}},
         {"connectionApprovals", QJsonArray::fromVariantList(controller_->pendingConnectionApprovals())},
+        {"diagnostics", QJsonObject{{"enabled", NetworkDiagnostics::enabled()},
+                                     {"directory", NetworkDiagnostics::logDirectoryPath()}}},
         {"performance", performance},
         {"graphics", graphics},
         {"savedConnection", QJsonObject{{"serverIp", controller_->savedServerIp()},
@@ -323,9 +331,17 @@ void ChatBridge::dispatch(const QString& commandJson) {
     const QJsonObject payload = command.value(QStringLiteral("payload")).toObject();
     bool awaitRecallResult = false;
     if (type == QStringLiteral("session.connectRemote")) {
-        controller_->connectToServer(payload.value("serverIp").toString(), payload.value("serverPort").toInt(),
-                                     payload.value("username").toString(), payload.value("userCode").toString(),
-                                     payload.value("caFile").toString());
+        const QString tlsServerName = payload.value("tlsServerName").toString();
+        if (tlsServerName == QStringLiteral("localhost")) {
+            controller_->connectToServerWithTlsName(
+                payload.value("serverIp").toString(), payload.value("serverPort").toInt(),
+                payload.value("username").toString(), payload.value("userCode").toString(),
+                payload.value("caFile").toString(), tlsServerName);
+        } else {
+            controller_->connectToServer(payload.value("serverIp").toString(), payload.value("serverPort").toInt(),
+                                         payload.value("username").toString(), payload.value("userCode").toString(),
+                                         payload.value("caFile").toString());
+        }
     } else if (type == QStringLiteral("session.discoverLanHosts")) {
         QString discoveryError;
         if (!lanDiscovery_->refresh(&discoveryError)) {
@@ -372,6 +388,8 @@ void ChatBridge::dispatch(const QString& commandJson) {
         controller_->sendRoomMessage(payload.value("content").toString(), payload.value("room").toString());
     } else if (type == QStringLiteral("chat.sendPrivate")) {
         controller_->sendPrivateMessage(payload.value("content").toString(), payload.value("targetUserCode").toString());
+    } else if (type == QStringLiteral("history.search")) {
+        controller_->searchActiveHistory(payload.value("query").toString());
     } else if (type == QStringLiteral("conversation.selectRoom")) {
         controller_->selectRoom(payload.value("room").toString());
     } else if (type == QStringLiteral("conversation.selectDirect")) {
@@ -394,6 +412,8 @@ void ChatBridge::dispatch(const QString& commandJson) {
         controller_->copyText(payload.value("text").toString());
     } else if (type == QStringLiteral("message.removeLocal")) {
         controller_->removeLocalMessage(payload.value("messageId").toString());
+    } else if (type == QStringLiteral("message.retry")) {
+        controller_->retryMessage(payload.value("messageId").toString());
     } else if (type == QStringLiteral("message.recall")) {
         const QString messageId = payload.value("messageId").toString();
         pendingRecallCommandIds_.insert(commandId, commandId);
@@ -417,6 +437,18 @@ void ChatBridge::dispatch(const QString& commandJson) {
             return;
         }
         performanceProfile_->setMode(payload.value("mode").toString());
+    } else if (type == QStringLiteral("settings.setConnectionLogging")) {
+        NetworkDiagnostics::setEnabled(payload.value("enabled").toBool());
+        scheduleStateUpdate();
+    } else if (type == QStringLiteral("performance.reportFrameTimes")) {
+        if (performanceProfile_) {
+            const QJsonArray frameTimes = payload.value(QStringLiteral("frameTimesMs")).toArray();
+            for (const QJsonValue& value : frameTimes) {
+                performanceProfile_->observeFrameTime(value.toDouble());
+            }
+            scheduleStateUpdate();
+        }
+        return;
     }
 
     if (awaitRecallResult) {

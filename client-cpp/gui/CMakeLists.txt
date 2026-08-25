@@ -41,6 +41,8 @@ qt_add_executable(lan-chat-gui
     src/openssl_runtime.hpp
     src/lan_discovery_service.cpp
     src/lan_discovery_service.hpp
+    src/network_diagnostics.cpp
+    src/network_diagnostics.hpp
     src/performance_profile.cpp
     src/performance_profile.hpp
     src/gui_connection_worker.cpp
@@ -169,6 +171,29 @@ target_include_directories(bridge-protocol-tests PRIVATE
 enable_testing()
 add_test(NAME bridge-protocol-tests COMMAND bridge-protocol-tests)
 
+qt_add_executable(connection-endpoint-tests
+    tests/connection_endpoint_tests.cpp
+    ../src/auth.cpp
+    ../src/connection.cpp
+    ../src/message.cpp
+    ../src/protocol.cpp
+)
+
+target_link_libraries(connection-endpoint-tests PRIVATE
+    Qt6::Test
+    ws2_32
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)
+
+target_include_directories(connection-endpoint-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
+)
+
+add_test(NAME connection-endpoint-tests COMMAND connection-endpoint-tests)
+
 qt_add_executable(graphics-info-tests
     tests/graphics_info_tests.cpp
     src/graphics_info.cpp
@@ -242,6 +267,8 @@ qt_add_executable(chat-bridge-tests
     src/host_path_resolver.hpp
     src/openssl_runtime.cpp
     src/openssl_runtime.hpp
+    src/network_diagnostics.cpp
+    src/network_diagnostics.hpp
     src/gui_chat_controller.cpp
     src/gui_chat_controller.hpp
     src/gui_connection_worker.cpp
@@ -305,6 +332,23 @@ target_include_directories(reconnect-policy-tests PRIVATE
 
 add_test(NAME reconnect-policy-tests COMMAND reconnect-policy-tests)
 
+qt_add_executable(network-diagnostics-tests
+    tests/network_diagnostics_tests.cpp
+    src/network_diagnostics.cpp
+    src/network_diagnostics.hpp
+)
+
+target_link_libraries(network-diagnostics-tests PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+target_include_directories(network-diagnostics-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+add_test(NAME network-diagnostics-tests COMMAND network-diagnostics-tests)
+
 qt_add_executable(performance-sampler-tests
     tests/performance_sampler_tests.cpp
     src/performance_sampler.cpp
@@ -322,6 +366,23 @@ target_include_directories(performance-sampler-tests PRIVATE
 )
 
 add_test(NAME performance-sampler-tests COMMAND performance-sampler-tests)
+
+qt_add_executable(performance-benchmark-gate-tests
+    tests/performance_benchmark_gate_tests.cpp
+    src/performance_benchmark_gate.cpp
+    src/performance_benchmark_gate.hpp
+)
+
+target_link_libraries(performance-benchmark-gate-tests PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+target_include_directories(performance-benchmark-gate-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+add_test(NAME performance-benchmark-gate-tests COMMAND performance-benchmark-gate-tests)
 
 qt_add_executable(performance-profile-tests
     tests/performance_profile_tests.cpp
@@ -408,12 +469,15 @@ get_filename_component(LAN_CHAT_OPENSSL_ROOT "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
 set(LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR "${LAN_CHAT_OPENSSL_ROOT}/bin")
 set_tests_properties(
     bridge-protocol-tests
+    connection-endpoint-tests
     graphics-info-tests
     chat-model-tests
     conversation-filter-tests
     chat-bridge-tests
     reconnect-policy-tests
+    network-diagnostics-tests
     performance-sampler-tests
+    performance-benchmark-gate-tests
     performance-profile-tests
     host-path-resolver-tests
     local-host-bootstrap-tests
@@ -424,6 +488,11 @@ set_tests_properties(
     chat-bridge-tests
     PROPERTIES ENVIRONMENT
         "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED};LAN_CHAT_OPENSSL_RUNTIME_DIR=${LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR}"
+)
+set_tests_properties(
+    connection-endpoint-tests
+    PROPERTIES ENVIRONMENT
+        "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED}\;${LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR}"
 )
 
 if(LAN_CHAT_ENABLE_WEB_UI)

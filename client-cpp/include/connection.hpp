@@ -25,6 +25,11 @@ struct Config {
     std::string tls_server_name;
 };
 
+// Resolves either a numeric IPv4 address or a DNS hostname for an IPv4 TCP
+// connection. The certificate identity remains a separate Config field.
+bool resolve_ipv4_endpoint(const std::string& host, int port, sockaddr_in* endpoint,
+                           std::string* error = nullptr);
+
 enum class LoginResult {
     kSuccess,
     kRetryableFailure,

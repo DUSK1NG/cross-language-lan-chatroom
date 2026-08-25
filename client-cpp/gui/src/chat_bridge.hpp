@@ -31,6 +31,7 @@ public:
     Q_INVOKABLE QString currentStateJson() const { return latestStateJson_; }
     qint64 lastStateBuildDurationUs() const { return lastStateBuildDurationUs_; }
     int lastSerializedModelCount() const { return lastSerializedModelCount_; }
+    int cachedSerializedModelCount() const { return serializedModels_.size(); }
     int stateBuildCount() const { return stateBuildCount_; }
     Q_INVOKABLE void dispatch(const QString& commandJson);
 

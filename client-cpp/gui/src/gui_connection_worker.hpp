@@ -33,16 +33,17 @@ public slots:
                             const QString& userCode);
     void disconnectFromServer();
     void scheduleReconnect();
-    void sendChat(const QString& content);
-    void sendChatToRoom(const QString& content, const QString& room);
-    void sendPrivate(const QString& content, const QString& targetUserCode);
+    void sendChat(const QString& content, const QString& messageId = {});
+    void sendChatToRoom(const QString& content, const QString& room, const QString& messageId = {});
+    void sendPrivate(const QString& content, const QString& targetUserCode, const QString& messageId = {});
     void joinRoom(const QString& room);
     void createRoom(const QString& room, bool isPrivate);
     void sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode = {});
     void requestUsers();
     void requestRooms();
     void requestHistory(const QString& room, const QString& targetUserCode,
-                        bool isPrivate, const QString& beforeMessageId = {}, int limit = 50);
+                        bool isPrivate, const QString& beforeMessageId = {}, int limit = 50,
+                        const QString& searchQuery = {});
     void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {}, const QString& commandId = {});
 
 signals:
@@ -53,6 +54,7 @@ signals:
     void reconnectScheduled(int attempt, int delayMs);
     void reconnectAttempt(int attempt);
     void reconnectFailed(const QString& reason);
+    void messageDeliveryFailed(const QString& messageId);
     void messageReceived(const QString& type,
                          const QString& messageId,
 						 const QString& commandId,
@@ -61,13 +63,15 @@ signals:
                          const QString& content,
                          const QString& room,
                          const QString& targetUserCode,
+                         const QString& deliveryState,
                          const QStringList& users,
                          const QStringList& rooms,
                          const QVariantList& userDetails,
                          const QVariantList& roomDetails,
                          bool isAdmin);
     void historyReceived(const QString& room, const QString& targetUserCode,
-                         bool isPrivate, const QVariantList& messages, bool hasMore);
+                         bool isPrivate, const QVariantList& messages, bool hasMore,
+                         const QString& searchQuery);
 
 private:
     bool connectToServerWithRetries(const QString& serverIp,
