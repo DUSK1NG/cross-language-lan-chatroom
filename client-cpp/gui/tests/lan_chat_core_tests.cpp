@@ -92,22 +92,24 @@ void LanChatCoreTests::errorEventSurvivesStateQueuePressure() {
                  R"({"id":"missing-host","type":"session.connectLocalHost","payload":{"serverExe":"C:/missing/lan-chat-server.exe","certFile":"C:/missing/server.crt","keyFile":"C:/missing/server.key","dbFile":"C:/missing/chat.db","username":"Alice","userCode":"A001"}})"),
              0);
 
-    bool receivedCommandResult = false;
-    QElapsedTimer waitForResult;
-    waitForResult.start();
-    while (!receivedCommandResult && waitForResult.elapsed() < 1000) {
-        if (char* event = lan_chat_core_take_event_json(handle)) {
-            const QJsonObject envelope = QJsonDocument::fromJson(QByteArray(event)).object();
-            receivedCommandResult = envelope.value("kind").toString() == QStringLiteral("result");
-            lan_chat_core_free_string(event);
-        } else {
-            QTest::qWait(20);
+    bool bridgeReportsConnectionFailure = false;
+    QElapsedTimer waitForError;
+    waitForError.start();
+    while (!bridgeReportsConnectionFailure && waitForError.elapsed() < 2000) {
+        if (char* state = lan_chat_core_current_state_json(handle)) {
+            const QJsonObject connection = QJsonDocument::fromJson(QByteArray(state)).object()
+                                               .value("connection").toObject();
+            bridgeReportsConnectionFailure =
+                connection.value("phase").toString() == QStringLiteral("error") &&
+                connection.value("lastError").toObject().value("code").toString() ==
+                    QStringLiteral("connection_failed");
+            lan_chat_core_free_string(state);
         }
+        if (!bridgeReportsConnectionFailure) QTest::qWait(20);
     }
-    QVERIFY(receivedCommandResult);
+    QVERIFY(bridgeReportsConnectionFailure);
 
-    // The worker reports the missing executable asynchronously, then the bridge emits an error and state event.
-    QTest::qWait(250);
+    // State polling does not consume the error or state event needed to exercise the full queue.
     for (int index = 0; index < 255; ++index) {
         const QByteArray command = QByteArrayLiteral(
             R"({"id":"pressure-%1","type":"conversation.selectRoom","payload":{"room":"lobby"}})")
