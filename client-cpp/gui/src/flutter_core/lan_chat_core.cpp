@@ -3,6 +3,7 @@
 #include "chat_bridge.hpp"
 #include "gui_chat_controller.hpp"
 
+#include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
@@ -49,6 +50,28 @@ char* copyUtf8(const QByteArray& value) {
     std::memcpy(result, value.constData(), static_cast<size_t>(value.size()));
     result[value.size()] = '\0';
     return result;
+}
+
+bool ensureQtApplication() {
+    if (QCoreApplication::instance()) {
+        return true;
+    }
+
+    static QMutex applicationMutex;
+    QMutexLocker lock(&applicationMutex);
+    if (QCoreApplication::instance()) {
+        return true;
+    }
+
+    static int argumentCount = 1;
+    static char applicationName[] = "lan_chat_core";
+    static char* arguments[] = {applicationName, nullptr};
+    // The core can be loaded from Flutter's Win32 runner, which does not create a Qt
+    // application. Qt needs this process-lifetime object before its worker threads
+    // can receive queued invocations. It intentionally outlives all CoreSessions.
+    static QCoreApplication* ownedApplication =
+        new QCoreApplication(argumentCount, arguments);
+    return ownedApplication == QCoreApplication::instance();
 }
 
 bool isJsonObjectUtf8(const char* input, QString* json) {
@@ -130,6 +153,9 @@ void destroySession(CoreSession* session) {
 
 extern "C" LanChatCoreHandle lan_chat_core_create(void) {
     try {
+        if (!ensureQtApplication()) {
+            return nullptr;
+        }
         auto session = std::make_unique<CoreSession>();
         session->thread.start();
         session->executor = new QObject;

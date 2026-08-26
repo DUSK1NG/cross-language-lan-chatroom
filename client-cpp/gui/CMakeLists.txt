@@ -397,6 +397,18 @@ target_include_directories(lan-chat-core-tests PRIVATE
 
 add_test(NAME lan-chat-core-tests COMMAND lan-chat-core-tests)
 
+add_executable(lan-chat-core-no-app-tests
+    tests/lan_chat_core_no_app_tests.cpp
+)
+target_link_libraries(lan-chat-core-no-app-tests PRIVATE
+    lan-chat-core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Network
+)
+add_test(NAME lan-chat-core-no-app-tests COMMAND lan-chat-core-no-app-tests)
+
 qt_add_executable(reconnect-policy-tests
     tests/reconnect_policy_tests.cpp
     src/reconnect_policy.cpp
@@ -568,6 +580,7 @@ set_tests_properties(
     local-host-bootstrap-tests
     lan-discovery-service-tests
     lan-chat-core-tests
+    lan-chat-core-no-app-tests
     PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED}"
 )
 set_tests_properties(
@@ -577,6 +590,7 @@ set_tests_properties(
 )
 set_tests_properties(
     lan-chat-core-tests
+    lan-chat-core-no-app-tests
     PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_CORE_TEST_PATH_ESCAPED}"
 )
 set_tests_properties(
