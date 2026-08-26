@@ -6,7 +6,7 @@
 
 **Architecture:** 复用仓库现有 PowerShell 安装、构建和打包脚本，不修改产品源码。先完成环境与数据基线，再安装仓库本地 Qt/vcpkg 依赖和系统级 MSVC/Inno Setup；所有测试与包安全检查通过后才运行同 AppId 的每用户安装器。
 
-**Tech Stack:** PowerShell 7/Windows PowerShell、winget、Visual Studio 2022 Build Tools、Qt 6.11.2 MSVC、OpenSSL 3/vcpkg、Node.js/pnpm、Go、CMake/Ninja、Inno Setup 6。
+**Tech Stack:** PowerShell 7/Windows PowerShell、winget、Visual Studio 2022 Build Tools、Qt 6 MSVC（优先 6.11.2；官方 Windows SDK 不可用时显式使用最新可下载兼容版）、OpenSSL 3/vcpkg、Node.js/pnpm、Go、CMake/Ninja、Inno Setup 6。
 
 ## Global Constraints
 
@@ -114,17 +114,18 @@ Run:
 winget install --exact --id JRSoftware.InnoSetup --source winget --accept-source-agreements --accept-package-agreements
 ```
 
-Expected: 安装成功或报告已安装；`C:\Program Files (x86)\Inno Setup 6\ISCC.exe` 存在。
+Expected: 安装成功或报告已安装；记录 `ISCC.exe` 的实际绝对路径。winget 按用户安装时允许位于 `%LocalAppData%\Programs\Inno Setup 6\ISCC.exe`。
 
 - [ ] **Step 4: 验证仓库要求的工具链**
 
 Run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -CheckOnly
+$qtPrefix = (Resolve-Path .\.tools\qt\6.10.3\msvc2022_64).Path
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -CheckOnly -QtPrefix $qtPrefix
 ```
 
-Expected: Node.js、pnpm、Go、CMake、Ninja、MSVC、Qt 6.11.2 和 OpenSSL 均输出实际路径，命令退出码为 0。
+Expected: Node.js、pnpm、Go、CMake、Ninja、MSVC、实际安装的 Qt 6 MSVC SDK 和 OpenSSL 均输出实际路径，命令退出码为 0。2026-08-26 执行时 Qt 6.11.2 Windows SDK 元数据在官方源返回 404，因此透明使用可下载的 6.10.3，并在所有构建命令中显式传入该路径。
 
 ### Task 3: 完整构建和自动化验证
 
@@ -172,7 +173,8 @@ Expected: 两次 Go 测试均报告 `ok cross-language-lan-chat/server-go`，`go
 Run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
+$qtPrefix = (Resolve-Path .\.tools\qt\6.10.3\msvc2022_64).Path
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test -QtPrefix $qtPrefix
 ```
 
 Expected: Vite 生产构建、Go Server、Qt WebEngine 客户端构建成功，CTest `100% tests passed, 0 tests failed out of 15`。
@@ -215,7 +217,8 @@ Expected: 生成 `release\LANChat-Windows-x64` 和 `release\LANChat-Windows-x64.
 Run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.2.0 -SmokeTest
+$iscc = Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.2.0 -SmokeTest -InnoCompiler $iscc
 ```
 
 Expected: 运行包验证成功并生成 `release\LANChat-Setup-x64.exe`。
