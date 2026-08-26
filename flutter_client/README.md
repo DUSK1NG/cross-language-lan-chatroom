@@ -1,3 +1,14 @@
 # Flutter UI Prototype
 
-此目录用于 LAN Chat 的 Flutter Windows UI 原型。它将在获批的实施计划后接入现有 C++ Core 与 Go 服务端；当前不包含可运行客户端，也不替代 QML 或 React UI。
+此目录是 LAN Chat 的独立 Flutter Windows UI 原型壳，不修改现有 QML、React、Go、C++、安装器或发布包。
+
+## 本地验证
+
+需要 Flutter stable SDK、Windows desktop 支持和 Visual Studio Windows 工具链：
+
+```powershell
+flutter test test/app_smoke_test.dart
+flutter run -d windows
+```
+
+当前壳显示应用标题 `LAN Chat` 和连接状态 `未连接`；后续任务在本目录内扩展 UI 和核心接入。
