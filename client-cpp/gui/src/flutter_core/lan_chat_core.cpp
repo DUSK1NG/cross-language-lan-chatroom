@@ -11,6 +11,7 @@
 #include <QStringConverter>
 #include <QThread>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -24,6 +25,11 @@ constexpr int kInvalidJson = 2;
 constexpr int kClosing = 3;
 constexpr int kMaxQueuedEvents = 256;
 
+struct QueuedEvent {
+    QByteArray kind;
+    QByteArray serializedJson;
+};
+
 struct CoreSession {
     QThread thread;
     QObject* executor = nullptr;
@@ -31,7 +37,7 @@ struct CoreSession {
     ChatBridge* bridge = nullptr;
     QMutex apiMutex;
     QMutex eventsMutex;
-    QQueue<QByteArray> events;
+    QQueue<QueuedEvent> events;
     std::atomic_bool closing = false;
 };
 
@@ -68,6 +74,7 @@ bool isJsonObjectUtf8(const char* input, QString* json) {
 }
 
 void enqueueEvent(CoreSession* session, const char* kind, const QString& payload) {
+    const QByteArray eventKind(kind);
     QJsonParseError error{};
     const QJsonDocument document = QJsonDocument::fromJson(payload.toUtf8(), &error);
     const QJsonValue value = error.error == QJsonParseError::NoError && document.isObject()
@@ -82,10 +89,17 @@ void enqueueEvent(CoreSession* session, const char* kind, const QString& payload
     if (session->closing.load()) {
         return;
     }
-    while (session->events.size() >= kMaxQueuedEvents) {
-        session->events.dequeue();
+    if (session->events.size() >= kMaxQueuedEvents) {
+        const auto state = std::find_if(session->events.cbegin(), session->events.cend(),
+                                        [](const QueuedEvent& queued) {
+                                            return queued.kind == "state";
+                                        });
+        if (state == session->events.cend()) {
+            return;
+        }
+        session->events.erase(state);
     }
-    session->events.enqueue(event);
+    session->events.enqueue({eventKind, event});
 }
 
 template <typename Function>
@@ -225,8 +239,7 @@ extern "C" char* lan_chat_core_take_event_json(const LanChatCoreHandle handle) {
         if (session->events.isEmpty()) {
             return nullptr;
         }
-        const QByteArray event = session->events.dequeue();
-        return copyUtf8(event);
+        return copyUtf8(session->events.dequeue().serializedJson);
     } catch (...) {
         return nullptr;
     }

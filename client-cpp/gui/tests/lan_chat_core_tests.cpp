@@ -13,6 +13,7 @@ private slots:
     void invalidJsonReturnsValidationError();
     void eventStringCanBeFreedExactlyOnce();
     void eventQueueRetainsAtMost256Events();
+    void errorEventSurvivesStateQueuePressure();
     void destroyStopsCoreWithinFiveSeconds();
 };
 
@@ -78,6 +79,52 @@ void LanChatCoreTests::eventQueueRetainsAtMost256Events() {
         lan_chat_core_free_string(event);
     }
     QCOMPARE(eventCount, 256);
+
+    lan_chat_core_destroy(handle);
+}
+
+void LanChatCoreTests::errorEventSurvivesStateQueuePressure() {
+    auto* handle = lan_chat_core_create();
+    QVERIFY(handle != nullptr);
+
+    QCOMPARE(lan_chat_core_dispatch_json(
+                 handle,
+                 R"({"id":"missing-host","type":"session.connectLocalHost","payload":{"serverExe":"C:/missing/lan-chat-server.exe","certFile":"C:/missing/server.crt","keyFile":"C:/missing/server.key","dbFile":"C:/missing/chat.db","username":"Alice","userCode":"A001"}})"),
+             0);
+
+    bool receivedCommandResult = false;
+    QElapsedTimer waitForResult;
+    waitForResult.start();
+    while (!receivedCommandResult && waitForResult.elapsed() < 1000) {
+        if (char* event = lan_chat_core_take_event_json(handle)) {
+            const QJsonObject envelope = QJsonDocument::fromJson(QByteArray(event)).object();
+            receivedCommandResult = envelope.value("kind").toString() == QStringLiteral("result");
+            lan_chat_core_free_string(event);
+        } else {
+            QTest::qWait(20);
+        }
+    }
+    QVERIFY(receivedCommandResult);
+
+    // The worker reports the missing executable asynchronously, then the bridge emits an error and state event.
+    QTest::qWait(250);
+    for (int index = 0; index < 255; ++index) {
+        const QByteArray command = QByteArrayLiteral(
+            R"({"id":"pressure-%1","type":"conversation.selectRoom","payload":{"room":"lobby"}})")
+                                       .replace("%1", QByteArray::number(index));
+        QCOMPARE(lan_chat_core_dispatch_json(handle, command.constData()), 0);
+    }
+
+    bool foundConnectionError = false;
+    while (char* event = lan_chat_core_take_event_json(handle)) {
+        const QJsonObject envelope = QJsonDocument::fromJson(QByteArray(event)).object();
+        if (envelope.value("kind").toString() == QStringLiteral("error")) {
+            const QJsonObject payload = envelope.value("payload").toObject();
+            foundConnectionError = payload.value("code").toString() == QStringLiteral("connection_failed");
+        }
+        lan_chat_core_free_string(event);
+    }
+    QVERIFY(foundConnectionError);
 
     lan_chat_core_destroy(handle);
 }
