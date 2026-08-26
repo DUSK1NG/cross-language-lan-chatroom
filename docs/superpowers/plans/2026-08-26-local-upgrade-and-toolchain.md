@@ -78,7 +78,7 @@ Expected: 只输出路径、长度和时间，不读取文件内容。保存该�
 **Files:**
 - Execute: `scripts/install-modern-toolchain.ps1`
 - Read: `tools/bootstrap/lan-chat.vsconfig`
-- Generated/ignored: `.tools/qt/6.11.2/msvc2022_64`
+- Generated/ignored: `.tools/qt/6.10.3/msvc2022_64`（本机验证；6.11.2 可用时优先）
 - Generated/ignored: `.tools/vcpkg/installed/x64-windows`
 - External state: Visual Studio Build Tools、Python、pnpm、Inno Setup 6
 
@@ -364,4 +364,3 @@ git -c safe.directory='C:/Users/Q1573/Desktop/MY_project/lan-chat' status --shor
 ```
 
 Expected: 只允许原有 `LANChat-Launcher.exe` 和计划/规格文档的预期状态；不得出现产品源码修改、私钥、数据库、日志或 release/out 产物被跟踪。
-
