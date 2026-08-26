@@ -308,14 +308,17 @@ Run:
 ```powershell
 $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\LAN Chat'
 $launcher = Join-Path $installRoot 'LANChat.exe'
+$before = @(Get-Process lan-chat-gui -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
 $process = Start-Process -FilePath $launcher -WorkingDirectory $installRoot -PassThru
+$process.WaitForExit(5000) | Out-Null
+if ($process.ExitCode -ne 0) { throw "Installed LAN Chat launcher exited with code $($process.ExitCode)." }
 Start-Sleep -Seconds 8
-if ($process.HasExited) { throw "Installed LAN Chat exited early with code $($process.ExitCode)." }
-Stop-Process -Id $process.Id -Force
+$gui = @(Get-Process lan-chat-gui -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Id })
+if ($gui.Count -eq 0) { throw 'Installed LAN Chat GUI did not remain running for 8 seconds.' }
 Get-Process lan-chat-gui,chat-server,QtWebEngineProcess -ErrorAction SilentlyContinue | Stop-Process -Force
 ```
 
-Expected: 应用至少稳定运行 8 秒；验证后只关闭本次烟雾启动产生的 LAN Chat 进程。
+Expected: `LANChat.exe` 按设计以退出码 0 分离启动 GUI，GUI 至少稳定运行 8 秒；验证后只关闭 LAN Chat 进程。
 
 - [ ] **Step 6: 最终检查仓库未出现意外源码修改**
 
