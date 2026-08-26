@@ -210,11 +210,22 @@ add_library(lan_chat_core SHARED
     src/flutter_core/lan_chat_core.h
     # reuse the existing ChatBridge/controller/worker sources listed by lan-chat-gui
 )
-target_link_libraries(lan_chat_core PRIVATE Qt6::Core Qt6::Network Threads::Threads OpenSSL::SSL OpenSSL::Crypto ws2_32)
+target_link_libraries(lan_chat_core PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Threads::Threads OpenSSL::SSL OpenSSL::Crypto ws2_32)
 target_include_directories(lan_chat_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/../include ${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
 ```
 
-Create the analogous `lan-chat-core-tests` executable using the same Core, controller, worker, protocol and OpenSSL sources as `chat-bridge-tests`; register it as CTest test `lan-chat-core-tests` and give it the same Qt/OpenSSL PATH properties.
+Create the analogous `lan-chat-core-tests` executable using the same Core, controller, worker, protocol and OpenSSL sources as `chat-bridge-tests`; link it to `Qt6::Core Qt6::Gui Qt6::Quick Qt6::Test Qt6::Network`, register it as CTest test `lan-chat-core-tests`, and give it the same Qt/OpenSSL PATH properties. Add `destroyStopsCoreWithinFiveSeconds` before implementing the Core:
+
+```cpp
+void LanChatCoreTests::destroyStopsCoreWithinFiveSeconds() {
+    auto* handle = lan_chat_core_create();
+    QVERIFY(handle != nullptr);
+    QElapsedTimer timer;
+    timer.start();
+    lan_chat_core_destroy(handle);
+    QVERIFY2(timer.elapsed() <= 5000, "Core shutdown exceeded five seconds");
+}
+```
 
 - [ ] **Step 4: 验证 C ABI 生命周期和 JSON 校验**
 
@@ -417,7 +428,7 @@ git add flutter_client/lib flutter_client/test
 git commit -m "feat: add Flutter chat workspace prototype"
 ```
 
-### Task 5: 接入真实服务端并验证连接与回收
+### Task 5: 接入真实服务端并执行完整回归
 
 **Files:**
 - Create: `flutter_client/test_driver/real_connection_smoke.md`
@@ -428,34 +439,11 @@ git commit -m "feat: add Flutter chat workspace prototype"
 - Consumes: Flutter workspace、`lan_chat_core.dll`、现有 `server-go/chat-server.exe` 和 TLS host 路径。
 - Produces: 可重复的 Windows 端到端验收命令；Flutter 原型继续使用独立构建命令，不改变现有构建脚本。
 
-- [ ] **Step 1: 写入失败的 Core 关闭测试**
+- [ ] **Step 1: 编写真实连接烟测文档**
 
-Add `destroyStopsCoreWithinFiveSeconds` to `lan_chat_core_tests.cpp`:
+Document an exact two-client check in `flutter_client/test_driver/real_connection_smoke.md`: start one existing LAN Chat host, start Flutter with `serverIp`, `serverPort`, `username`, `userCode`, and public CA path through its connect command, send `flutter-smoke-<timestamp>`, verify the existing client receives it, then close Flutter and confirm only the Flutter Core connection stops. The document must direct the operator to use only public CA metadata and must not print or copy host private-key, certificate, database, chat or log contents.
 
-```cpp
-void LanChatCoreTests::destroyStopsCoreWithinFiveSeconds() {
-    auto* handle = lan_chat_core_create();
-    QVERIFY(handle != nullptr);
-    QElapsedTimer timer;
-    timer.start();
-    lan_chat_core_destroy(handle);
-    QVERIFY2(timer.elapsed() <= 5000, "Core shutdown exceeded five seconds");
-}
-```
-
-- [ ] **Step 2: 运行测试确认失败**
-
-Run: `ctest --test-dir .\out\modern-msvc-x64 -R lan-chat-core-tests --output-on-failure`
-
-Expected: FAIL，直到 Core 销毁逻辑真正等待并关闭其 Qt 线程。
-
-- [ ] **Step 3: 实现有界关闭与真实连接烟测文档**
-
-`lan_chat_core_destroy` must set `closing`, queue `disconnectFromServer`, request the Core thread to quit, wait at most 5000 ms, then release the handle. If the wait times out, return after recording a terminal error event; never call `terminate()`.
-
-Document an exact two-client check in `flutter_client/test_driver/real_connection_smoke.md`: start one existing LAN Chat host, start Flutter with `serverIp`, `serverPort`, `username`, `userCode`, and public CA path through its connect command, send `flutter-smoke-<timestamp>`, verify the existing client receives it, then close Flutter and confirm only the Flutter Core connection stops.
-
-- [ ] **Step 4: 验证全部回归与人工 Windows 场景**
+- [ ] **Step 2: 验证全部回归与人工 Windows 场景**
 
 Run:
 
@@ -468,7 +456,7 @@ flutter analyze
 
 Expected: 既有构建和 CTest 全部通过；Flutter 测试/分析通过。人工验证窗口缩放、高 DPI、Enter/Shift+Enter、连接失败、断线提示、双向收发与关闭回收。
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 3: 提交**
 
 ```powershell
 git add client-cpp/gui/src/flutter_core client-cpp/gui/tests/lan_chat_core_tests.cpp flutter_client docs/testing.md
