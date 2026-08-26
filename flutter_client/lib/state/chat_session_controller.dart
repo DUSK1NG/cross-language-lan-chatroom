@@ -61,10 +61,43 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
+  bool connectRemote({
+    required String serverIp,
+    required String serverPort,
+    required String username,
+    required String userCode,
+    String caFile = '',
+    bool useLocalhostTlsSni = false,
+  }) {
+    final address = serverIp.trim();
+    final port = int.tryParse(serverPort.trim());
+    final name = username.trim();
+    final code = userCode.trim();
+    if (address.isEmpty || name.isEmpty || code.isEmpty) {
+      _localError = '服务器地址、用户名和用户代码不能为空';
+      notifyListeners();
+      return false;
+    }
+    if (port == null || port < 1 || port > 65535) {
+      _localError = '端口必须是 1 到 65535 的整数';
+      notifyListeners();
+      return false;
+    }
+    _dispatch('session.connectRemote', {
+      'serverIp': address,
+      'serverPort': port,
+      'username': name,
+      'userCode': code,
+      'caFile': caFile.trim(),
+      if (useLocalhostTlsSni) 'tlsServerName': 'localhost',
+    });
+    return true;
+  }
+
   void selectConversation(BridgeConversation conversation) {
     _dispatch(
       conversation.kind == 'dm'
-          ? 'conversation.selectDirectMessage'
+          ? 'conversation.selectDirect'
           : 'conversation.selectRoom',
       conversation.kind == 'dm'
           ? {'userCode': conversation.id}

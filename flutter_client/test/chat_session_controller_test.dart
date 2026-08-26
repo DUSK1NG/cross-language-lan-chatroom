@@ -79,6 +79,83 @@ void main() {
     expect(changes, 1);
     expect(controller.connectionPhase, 'connected');
   });
+
+  test('dispatches an exact validated remote connection payload', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    final accepted = controller.connectRemote(
+      serverIp: ' 192.168.1.40 ',
+      serverPort: ' 8888 ',
+      username: ' Alice ',
+      userCode: ' A001 ',
+      caFile: ' C:/public-ca.pem ',
+      useLocalhostTlsSni: true,
+    );
+
+    expect(accepted, isTrue);
+    final command = jsonDecode(core.dispatched.single) as Map<String, dynamic>;
+    expect(command['type'], 'session.connectRemote');
+    expect(command['payload'], {
+      'serverIp': '192.168.1.40',
+      'serverPort': 8888,
+      'username': 'Alice',
+      'userCode': 'A001',
+      'caFile': 'C:/public-ca.pem',
+      'tlsServerName': 'localhost',
+    });
+  });
+
+  test('rejects incomplete remote connection fields without dispatching', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    expect(
+      controller.connectRemote(
+        serverIp: '',
+        serverPort: '8888',
+        username: '',
+        userCode: '',
+      ),
+      isFalse,
+    );
+    expect(core.dispatched, isEmpty);
+    expect(controller.lastError, '服务器地址、用户名和用户代码不能为空');
+  });
+
+  test('rejects an out-of-range remote port without dispatching', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    expect(
+      controller.connectRemote(
+        serverIp: '192.168.1.40',
+        serverPort: '70000',
+        username: 'Alice',
+        userCode: 'A001',
+      ),
+      isFalse,
+    );
+    expect(core.dispatched, isEmpty);
+    expect(controller.lastError, '端口必须是 1 到 65535 的整数');
+  });
+
+  test('selects a direct conversation using the bridge command name', () {
+    final core = FakeLanChatCore(
+      snapshot: '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"rooms":[],"directMessages":[{"userCode":"B002","displayName":"Bob","unreadCount":0}],"activeMessages":[]}',
+    );
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.selectConversation(controller.conversations.single);
+
+    final command = jsonDecode(core.dispatched.single) as Map<String, dynamic>;
+    expect(command['type'], 'conversation.selectDirect');
+    expect(command['payload'], {'userCode': 'B002'});
+  });
 }
 
 class FakeLanChatCore implements ChatCore {

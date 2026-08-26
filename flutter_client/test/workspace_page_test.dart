@@ -29,10 +29,37 @@ void main() {
 
     expect(core.dispatched.single, contains('chat.sendRoom'));
   });
+
+  testWidgets(
+    'shows remote connection fields and dispatches a connect command',
+    (tester) async {
+      final core = _FakeCore(snapshot: _idleStateJson);
+      await tester.pumpWidget(LanChatFlutterApp(core: core));
+      await tester.pump();
+
+      expect(find.bySemanticsLabel('服务器地址'), findsOneWidget);
+      expect(find.bySemanticsLabel('端口'), findsOneWidget);
+      expect(find.bySemanticsLabel('用户名'), findsOneWidget);
+      expect(find.bySemanticsLabel('用户代码'), findsOneWidget);
+      expect(find.bySemanticsLabel('公共 CA 文件路径'), findsOneWidget);
+      expect(find.bySemanticsLabel('使用 localhost TLS SNI'), findsOneWidget);
+
+      await tester.enterText(find.bySemanticsLabel('服务器地址'), '127.0.0.1');
+      await tester.enterText(find.bySemanticsLabel('端口'), '8888');
+      await tester.enterText(find.bySemanticsLabel('用户名'), 'Alice');
+      await tester.enterText(find.bySemanticsLabel('用户代码'), 'A001');
+      await tester.tap(find.widgetWithText(FilledButton, '连接到服务器'));
+
+      expect(core.dispatched.single, contains('session.connectRemote'));
+    },
+  );
 }
 
 class _FakeCore implements ChatCore {
+  _FakeCore({String? snapshot}) : _snapshot = snapshot ?? _connectedStateJson;
+
   final dispatched = <String>[];
+  final String _snapshot;
 
   @override
   int dispatch(String json) {
@@ -47,6 +74,11 @@ class _FakeCore implements ChatCore {
   void dispose() {}
 
   @override
-  String stateJson() =>
-      '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[{"sender":"Alice","content":"欢迎来到 LAN Chat"}]}';
+  String stateJson() => _snapshot;
 }
+
+const _connectedStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[{"sender":"Alice","content":"欢迎来到 LAN Chat"}]}';
+
+const _idleStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[]}';

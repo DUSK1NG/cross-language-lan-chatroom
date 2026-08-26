@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'native/lan_chat_core.dart';
 import 'state/chat_session_controller.dart';
 import 'widgets/connection_banner.dart';
+import 'widgets/connection_form.dart';
 import 'widgets/conversation_sidebar.dart';
 import 'widgets/message_composer.dart';
 import 'widgets/message_timeline.dart';
@@ -85,11 +86,45 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                         child: Text(error),
                       ),
                     ),
-                  Expanded(child: MessageTimeline(messages: _session.messages)),
-                  MessageComposer(
-                    enabled: _session.isConnected,
-                    onSend: _session.sendMessage,
-                  ),
+                  if (_session.connectionPhase == 'connecting')
+                    TextButton.icon(
+                      onPressed: _session.disconnect,
+                      icon: const Icon(Icons.cancel_outlined),
+                      label: const Text('取消连接'),
+                    ),
+                  if (!_session.isConnected)
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: ConnectionForm(
+                          enabled: _session.connectionPhase != 'connecting',
+                          onConnect:
+                              ({
+                                required serverIp,
+                                required serverPort,
+                                required username,
+                                required userCode,
+                                required caFile,
+                                required useLocalhostTlsSni,
+                              }) => _session.connectRemote(
+                                serverIp: serverIp,
+                                serverPort: serverPort,
+                                username: username,
+                                userCode: userCode,
+                                caFile: caFile,
+                                useLocalhostTlsSni: useLocalhostTlsSni,
+                              ),
+                        ),
+                      ),
+                    )
+                  else ...[
+                    Expanded(
+                      child: MessageTimeline(messages: _session.messages),
+                    ),
+                    MessageComposer(
+                      enabled: true,
+                      onSend: _session.sendMessage,
+                    ),
+                  ],
                 ],
               ),
             ),
