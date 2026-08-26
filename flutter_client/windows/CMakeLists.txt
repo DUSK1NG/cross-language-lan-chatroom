@@ -49,9 +49,16 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
+set(LAN_CHAT_CORE_DLL "$ENV{LAN_CHAT_CORE_DLL}")
+if(LAN_CHAT_CORE_DLL STREQUAL "")
+  message(FATAL_ERROR "LAN_CHAT_CORE_DLL must point to the built lan_chat_core.dll")
+endif()
+if(NOT EXISTS "${LAN_CHAT_CORE_DLL}")
+  message(FATAL_ERROR "LAN_CHAT_CORE_DLL does not exist: ${LAN_CHAT_CORE_DLL}")
+endif()
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
-
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
