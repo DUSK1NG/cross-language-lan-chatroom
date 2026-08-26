@@ -31,7 +31,7 @@ Flutter Windows UI
   -> existing Go TLS/TCP Hub
 ```
 
-`lan_chat_core.dll` 是 Flutter 和现有 C++ 实现之间唯一的新边界。它负责把现有异步连接能力投影为 C ABI：创建/销毁客户端、连接、断开、发送消息、读取状态快照和读取事件。Flutter 不直接调用 Qt/QML 对象，C++ 网络线程也绝不直接触碰 Flutter UI 线程。
+`lan_chat_core.dll` 是 Flutter 和现有 C++ 实现之间唯一的新边界。它复用现有 `ChatBridge` 的 JSON 命令模型，向 Dart 提供创建/销毁客户端、派发命令、读取状态快照和读取事件。Flutter 不直接调用 Qt/QML 对象，C++ 网络线程也绝不直接触碰 Flutter UI 线程。
 
 ## 事件与状态模型
 
@@ -54,9 +54,8 @@ typedef void* LanChatCoreHandle;
 
 LanChatCoreHandle lan_chat_core_create(void);
 void lan_chat_core_destroy(LanChatCoreHandle handle);
-int lan_chat_core_connect(LanChatCoreHandle handle, const char* request_json);
-int lan_chat_core_disconnect(LanChatCoreHandle handle);
-int lan_chat_core_send_message(LanChatCoreHandle handle, const char* request_json);
+int lan_chat_core_dispatch_json(LanChatCoreHandle handle, const char* command_json);
+char* lan_chat_core_current_state_json(LanChatCoreHandle handle);
 char* lan_chat_core_take_event_json(LanChatCoreHandle handle);
 void lan_chat_core_free_string(char* value);
 ```
