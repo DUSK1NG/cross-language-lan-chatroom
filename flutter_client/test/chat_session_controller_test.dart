@@ -37,6 +37,22 @@ void main() {
     expect(controller.lastError, '消息不能为空');
   });
 
+  test('uses navigation activeConversation name for a selected room send', () {
+    final core = FakeLanChatCore(
+      snapshot: '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"room","name":"study"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0},{"roomName":"study","memberCount":2,"unreadCount":0}],"directMessages":[],"activeMessages":[]}',
+    );
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.sendMessage('资料已更新');
+
+    expect(controller.selectedRoom, 'study');
+    expect(jsonDecode(core.dispatched.single)['payload'], {
+      'content': '资料已更新',
+      'room': 'study',
+    });
+  });
+
   test('keeps malformed bridge JSON as a non-throwing error', () {
     final core = FakeLanChatCore(snapshot: '{not json');
     final controller = ChatSessionController(core);

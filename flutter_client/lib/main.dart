@@ -10,15 +10,16 @@ import 'widgets/message_timeline.dart';
 void main() {
   try {
     runApp(LanChatFlutterApp(core: LanChatCore.open()));
-  } catch (_) {
-    runApp(const LanChatFlutterApp());
+  } catch (error) {
+    runApp(LanChatFlutterApp(startupError: '无法加载 LAN Chat 原生核心：$error'));
   }
 }
 
 class LanChatFlutterApp extends StatefulWidget {
-  const LanChatFlutterApp({this.core, super.key});
+  const LanChatFlutterApp({this.core, this.startupError, super.key});
 
   final ChatCore? core;
+  final String? startupError;
 
   @override
   State<LanChatFlutterApp> createState() => _LanChatFlutterAppState();
@@ -72,8 +73,18 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
             Expanded(
               child: Column(
                 children: [
-                  if (_session.lastError case final error?)
-                    MaterialBanner(content: Text(error), actions: const []),
+                  if (widget.startupError ?? _session.lastError
+                      case final error?)
+                    Semantics(
+                      liveRegion: true,
+                      label: '错误：$error',
+                      child: Container(
+                        width: double.infinity,
+                        color: Theme.of(context).colorScheme.errorContainer,
+                        padding: const EdgeInsets.all(12),
+                        child: Text(error),
+                      ),
+                    ),
                   Expanded(child: MessageTimeline(messages: _session.messages)),
                   MessageComposer(
                     enabled: _session.isConnected,

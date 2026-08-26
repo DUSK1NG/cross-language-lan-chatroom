@@ -99,8 +99,11 @@ class BridgeState {
           })
           .toList(growable: false),
       selectedRoom: _string(
-        activeConversation['id'],
-        _string(activeConversation['title'], 'lobby'),
+        activeConversation['name'],
+        _string(
+          activeConversation['id'],
+          _string(activeConversation['title'], 'lobby'),
+        ),
       ),
       lastError: _string(error['message']).isEmpty
           ? null

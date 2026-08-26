@@ -4,6 +4,16 @@ import 'package:lan_chat_flutter/main.dart';
 import 'package:lan_chat_flutter/native/lan_chat_core.dart';
 
 void main() {
+  testWidgets('shows a startup error instead of hiding a core load failure', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const LanChatFlutterApp(startupError: '无法加载 LAN Chat 原生核心'),
+    );
+
+    expect(find.text('无法加载 LAN Chat 原生核心'), findsOneWidget);
+  });
+
   testWidgets('renders the chat workspace and sends a room message', (
     tester,
   ) async {
