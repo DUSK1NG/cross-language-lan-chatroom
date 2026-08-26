@@ -1,7 +1,7 @@
 # LAN Chat 本机升级与开发工具链设计
 
-**日期：** 2026-08-26  
-**状态：** 已确认，等待实施计划
+**日期：** 2026-08-26
+**状态：** 已实施并验证
 
 ## 目标
 
@@ -26,11 +26,11 @@
 
 - Node.js LTS、pnpm 11.19.0、Go、Git、Python 3.12；
 - Visual Studio 2022 Build Tools x64；
-- Qt 6.11.2 `win64_msvc2022_64`，含 Qt WebEngine 和 Qt WebChannel；
+- Qt 6 MSVC SDK（6.11.2 优先；官方 Windows SDK 元数据不可用时使用已验证的 6.10.3），含 Qt WebEngine、Qt WebChannel 和 Qt Positioning；
 - 仓库本地 `.tools/vcpkg` 与 `openssl:x64-windows`；
 - Inno Setup 6，用于生成安装器。
 
-已有工具允许安装器修复或升级；Qt 和 vcpkg 依赖保存在仓库忽略的 `.tools` 目录。安装完成后必须重新执行 `scripts/build-modern.ps1 -CheckOnly`，不能仅依据安装命令退出码判断成功。
+已有工具允许安装器修复或升级；Qt 和 vcpkg 依赖保存在仓库忽略的 `.tools` 目录。安装完成后必须将实际 Qt 路径显式传给 `scripts/build-modern.ps1 -CheckOnly -QtPrefix <path>`，不能仅依据安装命令退出码判断成功。本机最终验证路径为 `.tools/qt/6.10.3/msvc2022_64`。
 
 ## 构建与升级流程
 
@@ -53,7 +53,7 @@
 
 ## 验收标准
 
-- `scripts/build-modern.ps1 -CheckOnly` 成功。
+- `scripts/build-modern.ps1 -CheckOnly -QtPrefix .tools/qt/6.10.3/msvc2022_64` 成功，并输出实际解析路径。
 - 前端测试与生产构建成功。
 - `go test ./...`、`go test -race ./...`、`go vet ./...` 成功。
 - Qt/C++ 完整构建成功，CTest 全部通过。

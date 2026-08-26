@@ -16,6 +16,7 @@
 - 房主数据目录 `%LocalAppData%\DUSK1NG\LAN Chat\host` 不参与卸载、打包或覆盖安装。
 - 任一构建、测试、包安全检查失败时停止覆盖安装，现有 v1.1.7 保持可用。
 - 工具链安装允许使用 winget、pip、Git 和 vcpkg 下载数 GB 依赖，并允许正常 UAC 授权；不得绕过系统权限控制。
+- 项目外清理必须逐项取得用户确认。本次获准范围为超过 24 小时的 Temp、vcpkg 构建/下载/包缓存、可再生的 Gradle/Conda/Go/npm/pnpm/pip/浏览器缓存、回收站、NVIDIA OTA 残留及 NVIDIA/DirectX 着色器缓存；保留 NVIDIA NGX、驱动、WSL、应用、个人文件和项目数据。
 
 ---
 
@@ -30,7 +31,7 @@
 - Consumes: 当前 Git 工作树、Windows 卸载项和已安装文件。
 - Produces: 可与安装后状态比较的提交号、版本号、房主数据文件元数据。
 
-- [ ] **Step 1: 确认源码基线和工作树边界**
+- [x] **Step 1: 确认源码基线和工作树边界**
 
 Run:
 
@@ -41,7 +42,7 @@ git -c safe.directory='C:/Users/Q1573/Desktop/MY_project/lan-chat' status --shor
 
 Expected: HEAD 包含 `df3fdb7` 作为产品构建基线之后的首个设计提交；工作树除 `LANChat-Launcher.exe` 外没有产品源码改动。若计划文档已提交，允许 HEAD 位于后续仅文档提交。
 
-- [ ] **Step 2: 记录现有安装版本**
+- [x] **Step 2: 记录现有安装版本**
 
 Run:
 
@@ -58,7 +59,7 @@ Get-ItemProperty $uninstallRoots -ErrorAction SilentlyContinue |
 
 Expected: `DisplayVersion` 为 `1.1.7`，安装目录为当前用户 LocalAppData 下的 `Programs\LAN Chat`。
 
-- [ ] **Step 3: 只记录房主数据文件元数据**
+- [x] **Step 3: 只记录房主数据文件元数据**
 
 Run:
 
@@ -85,7 +86,7 @@ Expected: 只输出路径、长度和时间，不读取文件内容。保存该�
 - Consumes: winget、npm、pip、Git 和仓库 `.vsconfig`。
 - Produces: `cl.exe`/MSVC、Qt CMake 配置、vcpkg OpenSSL、`ISCC.exe`，供 Tasks 3-4 使用。
 
-- [ ] **Step 1: 确认 winget 可用**
+- [x] **Step 1: 确认 winget 可用**
 
 Run:
 
@@ -96,7 +97,7 @@ winget source list
 
 Expected: 两条命令退出码为 0，`winget` 源可用。
 
-- [ ] **Step 2: 执行仓库工具链安装器**
+- [x] **Step 2: 执行仓库工具链安装器**
 
 Run:
 
@@ -106,7 +107,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-modern-too
 
 Expected: 最终输出 `Dependency installation completed.`；允许 winget 报告已有 Node/Go/Git 包无需重装。
 
-- [ ] **Step 3: 安装 Inno Setup 6**
+- [x] **Step 3: 安装 Inno Setup 6**
 
 Run:
 
@@ -116,7 +117,7 @@ winget install --exact --id JRSoftware.InnoSetup --source winget --accept-source
 
 Expected: 安装成功或报告已安装；记录 `ISCC.exe` 的实际绝对路径。winget 按用户安装时允许位于 `%LocalAppData%\Programs\Inno Setup 6\ISCC.exe`。
 
-- [ ] **Step 4: 验证仓库要求的工具链**
+- [x] **Step 4: 验证仓库要求的工具链**
 
 Run:
 
@@ -140,7 +141,7 @@ Expected: Node.js、pnpm、Go、CMake、Ninja、MSVC、实际安装的 Qt 6 MSVC
 - Consumes: Task 2 的完整工具链。
 - Produces: 已通过前端、Go、Qt/C++ 验证的 Release 构建，供 Task 4 打包。
 
-- [ ] **Step 1: 运行前端测试**
+- [x] **Step 1: 运行前端测试**
 
 Run:
 
@@ -150,7 +151,7 @@ pnpm.cmd --dir .\frontend test -- --run
 
 Expected: `13 passed`、`79 passed`，退出码为 0。
 
-- [ ] **Step 2: 运行 Go 完整验证**
+- [x] **Step 2: 运行 Go 完整验证**
 
 Run:
 
@@ -168,7 +169,7 @@ try {
 
 Expected: 两次 Go 测试均报告 `ok cross-language-lan-chat/server-go`，`go vet` 退出码为 0。
 
-- [ ] **Step 3: 构建前端、Go、Qt/C++ 并运行 CTest**
+- [x] **Step 3: 构建前端、Go、Qt/C++ 并运行 CTest**
 
 Run:
 
@@ -179,7 +180,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -
 
 Expected: Vite 生产构建、Go Server、Qt WebEngine 客户端构建成功，CTest `100% tests passed, 0 tests failed out of 15`。
 
-- [ ] **Step 4: 验证源码启动器参数转发**
+- [x] **Step 4: 验证源码启动器参数转发**
 
 Run:
 
@@ -202,7 +203,7 @@ Expected: 输出 `start-gui wait forwarding regression passed.`。
 - Consumes: Task 3 的 `out/modern-msvc-x64` 和 `server-go/chat-server.exe`。
 - Produces: 已通过禁止文件检查和烟雾验证的 v1.2.0 安装器。
 
-- [ ] **Step 1: 生成统一运行包**
+- [x] **Step 1: 生成统一运行包**
 
 Run:
 
@@ -212,7 +213,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-re
 
 Expected: 复用 Task 3 已验证的构建，生成 `release\LANChat-Windows-x64` 和 `release\LANChat-Windows-x64.zip`，安全验证报告禁止文件数量为 0。
 
-- [ ] **Step 2: 编译安装器并运行烟雾检查**
+- [x] **Step 2: 编译安装器并运行烟雾检查**
 
 Run:
 
@@ -223,7 +224,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.
 
 Expected: 运行包验证成功并生成 `release\LANChat-Setup-x64.exe`。
 
-- [ ] **Step 3: 记录安装器哈希**
+- [x] **Step 3: 记录安装器哈希**
 
 Run:
 
@@ -244,18 +245,22 @@ Expected: 输出一个 64 位十六进制 SHA-256；只用于本次安装结果�
 - Consumes: Task 4 已验证安装器和 Task 1 基线。
 - Produces: 已安装的 LAN Chat 1.2.0、有效快捷方式和未改变的房主数据元数据。
 
-- [ ] **Step 1: 停止正在使用安装目录的 LAN Chat 进程**
+- [x] **Step 1: 停止正在使用安装目录的 LAN Chat 进程**
 
 Run:
 
 ```powershell
-Get-Process LANChat,lan-chat-gui,chat-server,QtWebEngineProcess -ErrorAction SilentlyContinue |
-  Stop-Process -Force
+$installRoot = (Join-Path $env:LOCALAPPDATA 'Programs\LAN Chat').TrimEnd('\')
+$names = @('LANChat.exe','lan-chat-gui.exe','chat-server.exe','QtWebEngineProcess.exe')
+Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -in $names -and $_.ExecutablePath -and
+  ($_.ExecutablePath -eq $installRoot -or $_.ExecutablePath.StartsWith("$installRoot\", [StringComparison]::OrdinalIgnoreCase))
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
-Expected: 仅停止 LAN Chat 及其子进程；再次执行 `Get-Process` 不返回这些名称。
+Expected: 仅停止目标安装目录中的 LAN Chat 及其子进程；不影响其他目录的同名进程。
 
-- [ ] **Step 2: 执行无人值守覆盖安装**
+- [x] **Step 2: 执行无人值守覆盖安装**
 
 Run:
 
@@ -267,7 +272,7 @@ if ($process.ExitCode -ne 0) { throw "LAN Chat installer failed with exit code $
 
 Expected: 安装器退出码为 0，不启动应用，不要求重启。
 
-- [ ] **Step 3: 验证卸载项和运行文件**
+- [x] **Step 3: 验证卸载项和运行文件**
 
 Run:
 
@@ -284,43 +289,73 @@ $required | ForEach-Object {
   $path = Join-Path $entry.InstallLocation $_
   [PSCustomObject]@{ Path = $path; Exists = Test-Path -LiteralPath $path -PathType Leaf }
 }
+$shell = New-Object -ComObject WScript.Shell
+$shortcuts = @(
+  (Join-Path ([Environment]::GetFolderPath('Desktop')) 'LAN Chat.lnk'),
+  (Join-Path ([Environment]::GetFolderPath('Programs')) 'LAN Chat.lnk')
+)
+$shortcuts | ForEach-Object {
+  $shortcut = $shell.CreateShortcut($_)
+  [PSCustomObject]@{
+    Path = $_
+    Exists = Test-Path -LiteralPath $_ -PathType Leaf
+    Target = $shortcut.TargetPath
+    WorkingDirectory = $shortcut.WorkingDirectory
+  }
+}
 ```
 
-Expected: `DisplayVersion` 为 `1.2.0`，所有 `Exists` 均为 `True`。
+Expected: `DisplayVersion` 为 `1.2.0`，所有运行文件和两个快捷方式均存在；快捷方式目标为安装目录的 `LANChat.exe`，工作目录为安装根目录。
 
-- [ ] **Step 4: 核对房主数据元数据未被安装器改动**
+- [x] **Step 4: 核对房主数据元数据未被安装器改动**
 
 Run:
 
 ```powershell
-$hostData = Join-Path $env:LOCALAPPDATA 'DUSK1NG\LAN Chat\host'
-Get-ChildItem -LiteralPath $hostData -File -Recurse -ErrorAction SilentlyContinue |
-  Where-Object Name -in @('server-lan.crt','server-lan.key','chat.db') |
-  Select-Object FullName, Length, LastWriteTime
+$baseline = Get-Content -Raw '.\.superpowers\sdd\task-1-baseline.json' | ConvertFrom-Json
+$checks = @($baseline.hostData.files | ForEach-Object {
+  $item = Get-Item -LiteralPath $_.path -ErrorAction Stop
+  [PSCustomObject]@{
+    Name = $_.name
+    SizeMatch = $item.Length -eq [int64]$_.sizeBytes
+    TimeMatch = $item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') -eq [string]$_.lastWriteTime
+  }
+})
+if (($checks.SizeMatch -contains $false) -or ($checks.TimeMatch -contains $false)) {
+  throw 'Host metadata changed during upgrade.'
+}
+$checks
 ```
 
 Expected: 路径、长度和修改时间与 Task 1 相同；不读取或显示文件内容。
 
-- [ ] **Step 5: 执行安装后启动烟雾验证**
+- [x] **Step 5: 执行安装后启动烟雾验证**
 
 Run:
 
 ```powershell
 $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\LAN Chat'
 $launcher = Join-Path $installRoot 'LANChat.exe'
-$before = @(Get-Process lan-chat-gui -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+$guiPath = Join-Path $installRoot 'lan-chat-gui.exe'
+$before = @(Get-CimInstance Win32_Process | Where-Object ExecutablePath -eq $guiPath | Select-Object -ExpandProperty ProcessId)
 $process = Start-Process -FilePath $launcher -WorkingDirectory $installRoot -PassThru
 $process.WaitForExit(5000) | Out-Null
 if ($process.ExitCode -ne 0) { throw "Installed LAN Chat launcher exited with code $($process.ExitCode)." }
 Start-Sleep -Seconds 8
-$gui = @(Get-Process lan-chat-gui -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Id })
+$gui = @(Get-CimInstance Win32_Process | Where-Object {
+  $_.ExecutablePath -eq $guiPath -and $before -notcontains $_.ProcessId
+})
 if ($gui.Count -eq 0) { throw 'Installed LAN Chat GUI did not remain running for 8 seconds.' }
-Get-Process lan-chat-gui,chat-server,QtWebEngineProcess -ErrorAction SilentlyContinue | Stop-Process -Force
+$names = @('lan-chat-gui.exe','chat-server.exe','QtWebEngineProcess.exe')
+Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -in $names -and $_.ExecutablePath -and
+  $_.ExecutablePath.StartsWith("$installRoot\", [StringComparison]::OrdinalIgnoreCase)
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
 Expected: `LANChat.exe` 按设计以退出码 0 分离启动 GUI，GUI 至少稳定运行 8 秒；验证后只关闭 LAN Chat 进程。
 
-- [ ] **Step 6: 最终检查仓库未出现意外源码修改**
+- [x] **Step 6: 最终检查仓库未出现意外源码修改**
 
 Run:
 
