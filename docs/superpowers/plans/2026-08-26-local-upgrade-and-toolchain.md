@@ -207,10 +207,10 @@ Expected: 输出 `start-gui wait forwarding regression passed.`。
 Run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1 -SkipBuild
 ```
 
-Expected: 生成 `release\LANChat-Windows-x64` 和 `release\LANChat-Windows-x64.zip`，安全验证报告禁止文件数量为 0。
+Expected: 复用 Task 3 已验证的构建，生成 `release\LANChat-Windows-x64` 和 `release\LANChat-Windows-x64.zip`，安全验证报告禁止文件数量为 0。
 
 - [ ] **Step 2: 编译安装器并运行烟雾检查**
 
