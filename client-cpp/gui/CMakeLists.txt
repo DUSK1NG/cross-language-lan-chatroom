@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Test Network)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Test Network)
 find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
 find_package(Threads REQUIRED)
 
@@ -315,6 +315,100 @@ target_include_directories(chat-bridge-tests PRIVATE
 
 add_test(NAME chat-bridge-tests COMMAND chat-bridge-tests)
 
+set(LAN_CHAT_CORE_SOURCES
+    src/flutter_core/lan_chat_core.cpp
+    src/flutter_core/lan_chat_core.h
+    src/chat_bridge.cpp
+    src/chat_bridge.hpp
+    src/graphics_info.cpp
+    src/graphics_info.hpp
+    src/performance_profile.cpp
+    src/performance_profile.hpp
+    src/bridge_protocol.cpp
+    src/bridge_protocol.hpp
+    src/chat_model.cpp
+    src/chat_model.hpp
+    src/conversation_filter_model.cpp
+    src/conversation_filter_model.hpp
+    src/host_path_resolver.cpp
+    src/host_path_resolver.hpp
+    src/openssl_runtime.cpp
+    src/openssl_runtime.hpp
+    src/network_diagnostics.cpp
+    src/network_diagnostics.hpp
+    src/gui_chat_controller.cpp
+    src/gui_chat_controller.hpp
+    src/gui_connection_worker.cpp
+    src/gui_connection_worker.hpp
+    src/reconnect_policy.cpp
+    src/reconnect_policy.hpp
+    src/lan_discovery_service.cpp
+    src/lan_discovery_service.hpp
+    ../src/auth.cpp
+    ../src/connection.cpp
+    ../src/message.cpp
+    ../src/protocol.cpp
+)
+
+add_library(lan-chat-core SHARED ${LAN_CHAT_CORE_SOURCES})
+set_target_properties(lan-chat-core PROPERTIES OUTPUT_NAME lan_chat_core)
+target_compile_definitions(lan-chat-core PRIVATE LAN_CHAT_CORE_BUILD)
+target_link_libraries(lan-chat-core PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Network
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ws2_32
+)
+target_include_directories(lan-chat-core
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/flutter_core
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
+)
+
+qt_add_executable(lan-chat-core-tests
+    tests/lan_chat_core_tests.cpp
+)
+
+target_link_libraries(lan-chat-core-tests PRIVATE
+    lan-chat-core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Test
+    Qt6::Network
+    ws2_32
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)
+
+target_include_directories(lan-chat-core-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/flutter_core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
+)
+
+add_test(NAME lan-chat-core-tests COMMAND lan-chat-core-tests)
+
+add_executable(lan-chat-core-no-app-tests
+    tests/lan_chat_core_no_app_tests.cpp
+)
+target_link_libraries(lan-chat-core-no-app-tests PRIVATE
+    lan-chat-core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::Network
+)
+add_test(NAME lan-chat-core-no-app-tests COMMAND lan-chat-core-no-app-tests)
+
 qt_add_executable(reconnect-policy-tests
     tests/reconnect_policy_tests.cpp
     src/reconnect_policy.cpp
@@ -467,6 +561,9 @@ set(LAN_CHAT_QT_TEST_PATH "${LAN_CHAT_QT_PREFIX}/bin;${CMAKE_CURRENT_BINARY_DIR}
 string(REPLACE ";" "\\;" LAN_CHAT_QT_TEST_PATH_ESCAPED "${LAN_CHAT_QT_TEST_PATH}")
 get_filename_component(LAN_CHAT_OPENSSL_ROOT "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
 set(LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR "${LAN_CHAT_OPENSSL_ROOT}/bin")
+set(LAN_CHAT_CORE_TEST_PATH
+    "${LAN_CHAT_QT_TEST_PATH};${LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR}")
+string(REPLACE ";" "\\;" LAN_CHAT_CORE_TEST_PATH_ESCAPED "${LAN_CHAT_CORE_TEST_PATH}")
 set_tests_properties(
     bridge-protocol-tests
     connection-endpoint-tests
@@ -482,12 +579,19 @@ set_tests_properties(
     host-path-resolver-tests
     local-host-bootstrap-tests
     lan-discovery-service-tests
+    lan-chat-core-tests
+    lan-chat-core-no-app-tests
     PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED}"
 )
 set_tests_properties(
     chat-bridge-tests
     PROPERTIES ENVIRONMENT
         "PATH=${LAN_CHAT_QT_TEST_PATH_ESCAPED};LAN_CHAT_OPENSSL_RUNTIME_DIR=${LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR}"
+)
+set_tests_properties(
+    lan-chat-core-tests
+    lan-chat-core-no-app-tests
+    PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_CORE_TEST_PATH_ESCAPED}"
 )
 set_tests_properties(
     connection-endpoint-tests
