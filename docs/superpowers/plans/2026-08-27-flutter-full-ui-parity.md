@@ -193,7 +193,7 @@ Expected: 既有 C++ 测试、Flutter 测试和 Debug 构建均通过；真实�
 - Consumes: state JSON 的 `connectionApprovals` 条目与现有 `admin.action`。
 - Produces: 管理员可见的批准/拒绝入口，分别分发 `{"action":"approve_connection","messageId":...}` 和 `{"action":"deny_connection","messageId":...}`。
 
-- [ ] **Step 1: 写失败测试并运行 RED**
+- [x] **Step 1: 写失败测试并运行 RED**
 
 加入带 `connectionApprovals` 的管理员 state fixture，断言非管理员没有审批控件；断言管理员操作精确分发：
 
@@ -206,7 +206,7 @@ Run: `flutter test test/chat_session_controller_test.dart test/workspace_page_te
 
 Expected: FAIL，因为 state 未解析审批项且控制器/API 不存在。
 
-- [ ] **Step 2: 最小实现与 GREEN**
+- [x] **Step 2: 最小实现与 GREEN**
 
 解析审批条目的非敏感展示字段和 messageId；只在已连接管理员状态渲染批准/拒绝按钮。控制器在分发前再次检查管理员与已连接状态。不得显示或存储审批消息以外的聊天、证书或凭据。
 
@@ -221,6 +221,8 @@ git diff --check
 git add flutter_client docs/superpowers/plans/2026-08-27-flutter-full-ui-parity.md
 git commit -m "feat: add Flutter connection approvals"
 ```
+
+Task 5 执行报告（2026-08-27）：RED 已确认因审批 state/API 缺失而失败；GREEN 覆盖管理员可见、非管理员不可见、批准/拒绝的精确 `admin.action` payload，以及控制器的已连接管理员双重检查。`flutter test` 通过（38 通过，1 个受控原生加载测试按条件跳过），`flutter analyze` 通过。干净工作树缺少 `out/modern-msvc-x64/lan_chat_core.dll`，因此未执行 Windows Debug 构建；未复制或移动任何 DLL/运行时产物。
 
 ## Self-Review
 

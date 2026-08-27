@@ -66,6 +66,20 @@ class BridgeDiscoveredHost {
   final bool isKnown;
 }
 
+class BridgeConnectionApproval {
+  const BridgeConnectionApproval({
+    required this.id,
+    required this.displayName,
+    required this.userCode,
+    required this.requestedAt,
+  });
+
+  final String id;
+  final String displayName;
+  final String userCode;
+  final String requestedAt;
+}
+
 class BridgeState {
   const BridgeState({
     required this.connectionPhase,
@@ -78,6 +92,7 @@ class BridgeState {
     required this.localUserCode,
     required this.isAdmin,
     required this.activeRoomCanManage,
+    required this.connectionApprovals,
     required this.isLanDiscoveryScanning,
     required this.discoveredHosts,
     required this.performanceMode,
@@ -96,6 +111,7 @@ class BridgeState {
     localUserCode: '',
     isAdmin: false,
     activeRoomCanManage: false,
+    connectionApprovals: [],
     isLanDiscoveryScanning: false,
     discoveredHosts: [],
     performanceMode: 'Automatic',
@@ -139,6 +155,10 @@ class BridgeState {
     final discoveredHosts = _list(lanDiscovery['hosts'])
         .map(_discoveredHostFromJson)
         .whereType<BridgeDiscoveredHost>()
+        .toList(growable: false);
+    final connectionApprovals = _list(json['connectionApprovals'])
+        .map(_connectionApprovalFromJson)
+        .whereType<BridgeConnectionApproval>()
         .toList(growable: false);
     final error = _map(connection['lastError']);
 
@@ -190,6 +210,7 @@ class BridgeState {
       localUserCode: _string(identity['userCode']),
       isAdmin: identity['admin'] == true,
       activeRoomCanManage: permissions['activeRoomCanManage'] == true,
+      connectionApprovals: connectionApprovals,
       isLanDiscoveryScanning: lanDiscovery['scanning'] == true,
       discoveredHosts: discoveredHosts,
       performanceMode: _string(performance['mode'], 'Automatic'),
@@ -210,6 +231,7 @@ class BridgeState {
   final String localUserCode;
   final bool isAdmin;
   final bool activeRoomCanManage;
+  final List<BridgeConnectionApproval> connectionApprovals;
   final bool isLanDiscoveryScanning;
   final List<BridgeDiscoveredHost> discoveredHosts;
   final String performanceMode;
@@ -242,6 +264,20 @@ class BridgeState {
       serverIp: serverIp,
       serverPort: serverPort,
       isKnown: host['known'] == true,
+    );
+  }
+
+  static BridgeConnectionApproval? _connectionApprovalFromJson(Object? value) {
+    final approval = _map(value);
+    final id = _string(approval['id']);
+    final displayName = _string(approval['displayName']);
+    final userCode = _string(approval['userCode']);
+    if (id.isEmpty || displayName.isEmpty || userCode.isEmpty) return null;
+    return BridgeConnectionApproval(
+      id: id,
+      displayName: displayName,
+      userCode: userCode,
+      requestedAt: _string(approval['requestedAt']),
     );
   }
 }

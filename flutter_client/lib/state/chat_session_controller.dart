@@ -33,6 +33,8 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
   String get localUserCode => _state.localUserCode;
   bool get isAdmin => _state.isAdmin;
   bool get activeRoomCanManage => _state.activeRoomCanManage;
+  List<BridgeConnectionApproval> get connectionApprovals =>
+      _state.connectionApprovals;
   String get performanceMode => _state.performanceMode;
   bool get connectionLoggingEnabled => _state.connectionLoggingEnabled;
   bool get isLanDiscoveryScanning => _state.isLanDiscoveryScanning;
@@ -166,6 +168,27 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
     final approvalId = messageId?.trim() ?? '';
     if (approvalId.isNotEmpty) payload['messageId'] = approvalId;
     _dispatch('admin.action', payload);
+  }
+
+  void approveConnection(String messageId) =>
+      _sendConnectionDecision('approve_connection', messageId);
+
+  void denyConnection(String messageId) =>
+      _sendConnectionDecision('deny_connection', messageId);
+
+  void _sendConnectionDecision(String action, String messageId) {
+    if (!isConnected || !isAdmin) {
+      _localError = '当前状态不允许连接审批';
+      notifyListeners();
+      return;
+    }
+    final approvalId = messageId.trim();
+    if (approvalId.isEmpty) {
+      _localError = '连接审批标识不能为空';
+      notifyListeners();
+      return;
+    }
+    _dispatch('admin.action', {'action': action, 'messageId': approvalId});
   }
 
   void setPerformanceMode(String mode) {

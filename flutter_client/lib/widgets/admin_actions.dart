@@ -6,13 +6,19 @@ class AdminActions extends StatelessWidget {
   const AdminActions({
     required this.isAllowed,
     required this.members,
+    required this.connectionApprovals,
     required this.onAction,
+    required this.onApproveConnection,
+    required this.onDenyConnection,
     super.key,
   });
 
   final bool isAllowed;
   final List<BridgeMember> members;
+  final List<BridgeConnectionApproval> connectionApprovals;
   final void Function(String action, String userCode) onAction;
+  final void Function(String messageId) onApproveConnection;
+  final void Function(String messageId) onDenyConnection;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +33,36 @@ class AdminActions extends StatelessWidget {
             shrinkWrap: true,
             children: [
               const ListTile(title: Text('成员管理')),
+              if (connectionApprovals.isNotEmpty) ...[
+                const ListTile(title: Text('连接审批')),
+                for (final approval in connectionApprovals)
+                  ListTile(
+                    title: Text(approval.displayName),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(approval.userCode),
+                        if (approval.requestedAt.isNotEmpty)
+                          Text(approval.requestedAt),
+                      ],
+                    ),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        IconButton(
+                          tooltip: '批准连接 ${approval.id}',
+                          icon: const Icon(Icons.check_circle_outline),
+                          onPressed: () => onApproveConnection(approval.id),
+                        ),
+                        IconButton(
+                          tooltip: '拒绝连接 ${approval.id}',
+                          icon: const Icon(Icons.cancel_outlined),
+                          onPressed: () => onDenyConnection(approval.id),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
               for (final member in members)
                 ListTile(
                   title: Text(member.displayName),

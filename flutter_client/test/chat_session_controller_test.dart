@@ -360,6 +360,60 @@ void main() {
     expect(commands[3]['payload'], {'mode': 'Balanced'});
     expect(commands[4]['payload'], {'enabled': true});
   });
+
+  test('maps approvals and dispatches exact connection decisions', () {
+    final core = FakeLanChatCore(snapshot: adminConnectionApprovalStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    expect(controller.connectionApprovals, hasLength(1));
+    expect(controller.connectionApprovals.single.id, 'approval-1');
+    expect(controller.connectionApprovals.single.displayName, 'Cara');
+    expect(controller.connectionApprovals.single.userCode, 'C003');
+    expect(
+      controller.connectionApprovals.single.requestedAt,
+      '2026-08-27T10:00:00Z',
+    );
+
+    controller.approveConnection(' approval-1 ');
+    controller.denyConnection(' approval-2 ');
+
+    final commands = core.dispatched
+        .map((json) => jsonDecode(json) as Map<String, dynamic>)
+        .toList(growable: false);
+    expect(commands.map((command) => command['type']), [
+      'admin.action',
+      'admin.action',
+    ]);
+    expect(commands[0]['payload'], {
+      'action': 'approve_connection',
+      'messageId': 'approval-1',
+    });
+    expect(commands[1]['payload'], {
+      'action': 'deny_connection',
+      'messageId': 'approval-2',
+    });
+  });
+
+  test('rejects connection decisions outside a connected admin session', () {
+    final memberCore = FakeLanChatCore(snapshot: connectionApprovalStateJson);
+    final memberController = ChatSessionController(memberCore)..refresh();
+    addTearDown(memberController.dispose);
+    final disconnectedCore = FakeLanChatCore(
+      snapshot: disconnectedAdminConnectionApprovalStateJson,
+    );
+    final disconnectedController = ChatSessionController(disconnectedCore)
+      ..refresh();
+    addTearDown(disconnectedController.dispose);
+
+    memberController.approveConnection('approval-1');
+    disconnectedController.denyConnection('approval-1');
+
+    expect(memberCore.dispatched, isEmpty);
+    expect(memberController.lastError, '当前状态不允许连接审批');
+    expect(disconnectedCore.dispatched, isEmpty);
+    expect(disconnectedController.lastError, '当前状态不允许连接审批');
+  });
 }
 
 class FakeLanChatCore implements ChatCore {
@@ -395,6 +449,15 @@ const connectedLobbyStateJson =
 
 const adminConnectedLobbyStateJson =
     '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[]}';
+
+const adminConnectionApprovalStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[],"connectionApprovals":[{"id":"approval-1","displayName":"Cara","userCode":"C003","requestedAt":"2026-08-27T10:00:00Z"}]}';
+
+const connectionApprovalStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":false},"rooms":[],"directMessages":[],"activeMessages":[],"connectionApprovals":[{"id":"approval-1","displayName":"Cara","userCode":"C003","requestedAt":"2026-08-27T10:00:00Z"}]}';
+
+const disconnectedAdminConnectionApprovalStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"identity":{"admin":true},"rooms":[],"directMessages":[],"activeMessages":[],"connectionApprovals":[{"id":"approval-1","displayName":"Cara","userCode":"C003","requestedAt":"2026-08-27T10:00:00Z"}]}';
 
 const lanDiscoveryStateJson =
     '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[],"lanDiscovery":{"scanning":true,"hosts":[{"id":"host-1","hostName":"Alice PC","serverIp":"192.168.8.23","serverPort":8888,"fingerprintSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","known":false}]}}';

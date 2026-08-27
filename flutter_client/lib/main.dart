@@ -118,10 +118,13 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                   icon: const Icon(Icons.refresh),
                 ),
                 AdminActions(
-                  isAllowed: session.isAdmin,
+                  isAllowed: session.isConnected && session.isAdmin,
                   members: session.members,
+                  connectionApprovals: session.connectionApprovals,
                   onAction: (action, userCode) =>
                       session.sendAdminAction(action, targetUserCode: userCode),
+                  onApproveConnection: session.approveConnection,
+                  onDenyConnection: session.denyConnection,
                 ),
                 IconButton(
                   tooltip: '打开设置',

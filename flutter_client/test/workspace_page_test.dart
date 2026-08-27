@@ -249,6 +249,35 @@ void main() {
     await tester.pump();
     expect(find.byTooltip('管理成员'), findsOneWidget);
   });
+
+  testWidgets('only shows connection approvals to a connected administrator', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      LanChatFlutterApp(core: _FakeCore(snapshot: _memberApprovalStateJson)),
+    );
+    await tester.pump();
+    expect(find.byTooltip('管理成员'), findsNothing);
+    expect(find.byTooltip('批准连接 approval-1'), findsNothing);
+
+    final core = _FakeCore(snapshot: _adminApprovalStateJson);
+    await tester.pumpWidget(LanChatFlutterApp(key: UniqueKey(), core: core));
+    await tester.pump();
+    await tester.tap(find.byTooltip('管理成员'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('连接审批'), findsOneWidget);
+    expect(find.text('Cara'), findsOneWidget);
+    expect(find.text('C003'), findsOneWidget);
+    expect(find.text('2026-08-27T10:00:00Z'), findsOneWidget);
+    expect(find.byTooltip('批准连接 approval-1'), findsOneWidget);
+    expect(find.byTooltip('拒绝连接 approval-1'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('批准连接 approval-1'));
+    expect(core.dispatched.single, contains('admin.action'));
+    expect(core.dispatched.single, contains('approve_connection'));
+    expect(core.dispatched.single, contains('"messageId":"approval-1"'));
+  });
 }
 
 Future<void> _selectMode(WidgetTester tester, String label) async {
@@ -305,3 +334,9 @@ const _memberStateJson =
 
 const _adminMemberStateJson =
     '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":2,"unreadCount":0}],"directMessages":[],"activeMessages":[],"members":[{"displayName":"Bob","userCode":"B002","online":true,"admin":false}]}';
+
+const _memberApprovalStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":false},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[],"directMessages":[],"activeMessages":[],"connectionApprovals":[{"id":"approval-1","displayName":"Cara","userCode":"C003","requestedAt":"2026-08-27T10:00:00Z"}]}';
+
+const _adminApprovalStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[],"directMessages":[],"activeMessages":[],"connectionApprovals":[{"id":"approval-1","displayName":"Cara","userCode":"C003","requestedAt":"2026-08-27T10:00:00Z"}]}';
