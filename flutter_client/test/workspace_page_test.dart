@@ -14,6 +14,19 @@ void main() {
     expect(find.text('无法加载 LAN Chat 原生核心'), findsOneWidget);
   });
 
+  testWidgets('shows all three connection modes on the initial page', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      LanChatFlutterApp(core: _FakeCore(snapshot: _idleStateJson)),
+    );
+    await tester.pump();
+
+    expect(find.text('远程服务器'), findsOneWidget);
+    expect(find.text('创建本地聊天室'), findsOneWidget);
+    expect(find.text('加入局域网聊天室'), findsOneWidget);
+  });
+
   testWidgets('renders the chat workspace and sends a room message', (
     tester,
   ) async {
@@ -36,6 +49,7 @@ void main() {
       final core = _FakeCore(snapshot: _idleStateJson);
       await tester.pumpWidget(LanChatFlutterApp(core: core));
       await tester.pump();
+      await _selectMode(tester, '远程服务器');
 
       expect(find.bySemanticsLabel('服务器地址'), findsOneWidget);
       expect(find.bySemanticsLabel('端口'), findsOneWidget);
@@ -60,6 +74,7 @@ void main() {
     final core = _FakeCore(snapshot: _lanDiscoveryStateJson);
     await tester.pumpWidget(LanChatFlutterApp(core: core));
     await tester.pump();
+    await _selectMode(tester, '加入局域网聊天室');
 
     expect(find.bySemanticsLabel('搜索局域网主机'), findsOneWidget);
     expect(find.text('正在搜索局域网主机…'), findsOneWidget);
@@ -86,6 +101,7 @@ void main() {
     final core = _FakeCore(snapshot: _idleStateJson);
     await tester.pumpWidget(LanChatFlutterApp(core: core));
     await tester.pump();
+    await _selectMode(tester, '加入局域网聊天室');
 
     expect(find.text('未发现局域网主机'), findsOneWidget);
   });
@@ -96,6 +112,7 @@ void main() {
     final core = _FakeCore(snapshot: _scanningEmptyLanDiscoveryStateJson);
     await tester.pumpWidget(LanChatFlutterApp(core: core));
     await tester.pump();
+    await _selectMode(tester, '加入局域网聊天室');
 
     expect(find.text('正在搜索局域网主机…'), findsOneWidget);
     expect(find.text('未发现局域网主机'), findsNothing);
@@ -113,6 +130,11 @@ void main() {
 
     expect(find.text('局域网发现当前不可用'), findsOneWidget);
   });
+}
+
+Future<void> _selectMode(WidgetTester tester, String label) async {
+  await tester.tap(find.text(label));
+  await tester.pump();
 }
 
 class _FakeCore implements ChatCore {

@@ -5,8 +5,10 @@ import 'state/chat_session_controller.dart';
 import 'widgets/connection_banner.dart';
 import 'widgets/connection_form.dart';
 import 'widgets/conversation_sidebar.dart';
+import 'widgets/local_host_form.dart';
 import 'widgets/message_composer.dart';
 import 'widgets/message_timeline.dart';
+import 'widgets/mode_selection_page.dart';
 
 void main() {
   try {
@@ -30,6 +32,7 @@ class LanChatFlutterApp extends StatefulWidget {
 
 class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
   ChatSessionController? _session;
+  ConnectionMode? _connectionMode;
 
   @override
   void initState() {
@@ -99,6 +102,12 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                   onDisconnect: session.disconnect,
                 ),
               ),
+              if (!session.isConnected && _connectionMode != null)
+                IconButton(
+                  tooltip: '返回连接方式',
+                  onPressed: () => setState(() => _connectionMode = null),
+                  icon: const Icon(Icons.arrow_back),
+                ),
             ],
           ),
           body: Row(
@@ -131,39 +140,7 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                     if (!session.isConnected)
                       Expanded(
                         child: SingleChildScrollView(
-                          child: ConnectionForm(
-                            enabled: session.connectionPhase != 'connecting',
-                            onConnect:
-                                ({
-                                  required serverIp,
-                                  required serverPort,
-                                  required username,
-                                  required userCode,
-                                  required caFile,
-                                  required useLocalhostTlsSni,
-                                }) => session.connectRemote(
-                                  serverIp: serverIp,
-                                  serverPort: serverPort,
-                                  username: username,
-                                  userCode: userCode,
-                                  caFile: caFile,
-                                  useLocalhostTlsSni: useLocalhostTlsSni,
-                                ),
-                            isLanDiscoveryScanning:
-                                session.isLanDiscoveryScanning,
-                            discoveredHosts: session.discoveredHosts,
-                            onDiscoverLanHosts: session.discoverLanHosts,
-                            onConnectDiscoveredHost:
-                                ({
-                                  required hostId,
-                                  required username,
-                                  required userCode,
-                                }) => session.connectDiscoveredHost(
-                                  hostId,
-                                  username: username,
-                                  userCode: userCode,
-                                ),
-                          ),
+                          child: _connectionPage(session),
                         ),
                       )
                     else ...[
@@ -183,5 +160,62 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
         ),
       ),
     );
+  }
+
+  Widget _connectionPage(ChatSessionController session) {
+    final enabled = session.connectionPhase != 'connecting';
+    return switch (_connectionMode) {
+      null => ModeSelectionPage(
+        onSelected: (mode) => setState(() => _connectionMode = mode),
+      ),
+      ConnectionMode.localHost => LocalHostForm(
+        enabled: enabled,
+        onConnect:
+            ({
+              required serverExe,
+              required certFile,
+              required keyFile,
+              required dbFile,
+              required username,
+              required userCode,
+            }) => session.connectLocalHost(
+              serverExe: serverExe,
+              certFile: certFile,
+              keyFile: keyFile,
+              dbFile: dbFile,
+              username: username,
+              userCode: userCode,
+            ),
+      ),
+      ConnectionMode.remote || ConnectionMode.lan => ConnectionForm(
+        enabled: enabled,
+        onConnect:
+            ({
+              required serverIp,
+              required serverPort,
+              required username,
+              required userCode,
+              required caFile,
+              required useLocalhostTlsSni,
+            }) => session.connectRemote(
+              serverIp: serverIp,
+              serverPort: serverPort,
+              username: username,
+              userCode: userCode,
+              caFile: caFile,
+              useLocalhostTlsSni: useLocalhostTlsSni,
+            ),
+        isLanDiscoveryScanning: session.isLanDiscoveryScanning,
+        discoveredHosts: session.discoveredHosts,
+        onDiscoverLanHosts: session.discoverLanHosts,
+        onConnectDiscoveredHost:
+            ({required hostId, required username, required userCode}) =>
+                session.connectDiscoveredHost(
+                  hostId,
+                  username: username,
+                  userCode: userCode,
+                ),
+      ),
+    };
   }
 }

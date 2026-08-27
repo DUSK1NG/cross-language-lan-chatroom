@@ -128,6 +128,43 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
     return true;
   }
 
+  bool connectLocalHost({
+    required String serverExe,
+    required String certFile,
+    required String keyFile,
+    required String dbFile,
+    required String username,
+    required String userCode,
+  }) {
+    final executable = serverExe.trim();
+    final certificate = certFile.trim();
+    final key = keyFile.trim();
+    final database = dbFile.trim();
+    final name = username.trim();
+    final code = userCode.trim();
+    if ([
+      executable,
+      certificate,
+      key,
+      database,
+      name,
+      code,
+    ].any((value) => value.isEmpty)) {
+      _localError = '本地主机配置、用户名和用户代码不能为空';
+      notifyListeners();
+      return false;
+    }
+    _dispatch('session.connectLocalHost', {
+      'serverExe': executable,
+      'certFile': certificate,
+      'keyFile': key,
+      'dbFile': database,
+      'username': name,
+      'userCode': code,
+    });
+    return true;
+  }
+
   void discoverLanHosts() => _dispatch('session.discoverLanHosts', const {});
 
   void connectDiscoveredHost(

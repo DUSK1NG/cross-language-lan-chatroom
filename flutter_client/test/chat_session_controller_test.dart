@@ -158,6 +158,43 @@ void main() {
     expect(controller.lastError, '端口必须是 1 到 65535 的整数');
   });
 
+  test('dispatches local host paths without accessing their contents', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.connectLocalHost(
+      serverExe: ' C:/LAN Chat/server.exe ',
+      certFile: ' C:/LAN Chat/cert.pem ',
+      keyFile: ' C:/LAN Chat/key.pem ',
+      dbFile: ' C:/LAN Chat/chat.db ',
+      username: ' Alice ',
+      userCode: ' A001 ',
+    );
+
+    final command = jsonDecode(core.dispatched.single) as Map<String, dynamic>;
+    expect(command['type'], 'session.connectLocalHost');
+    expect(
+      command['payload'].keys,
+      containsAll(<String>[
+        'serverExe',
+        'certFile',
+        'keyFile',
+        'dbFile',
+        'username',
+        'userCode',
+      ]),
+    );
+    expect(command['payload'], {
+      'serverExe': 'C:/LAN Chat/server.exe',
+      'certFile': 'C:/LAN Chat/cert.pem',
+      'keyFile': 'C:/LAN Chat/key.pem',
+      'dbFile': 'C:/LAN Chat/chat.db',
+      'username': 'Alice',
+      'userCode': 'A001',
+    });
+  });
+
   test('selects a direct conversation using the bridge command name', () {
     final core = FakeLanChatCore(
       snapshot: '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"rooms":[],"directMessages":[{"userCode":"B002","displayName":"Bob","unreadCount":0}],"activeMessages":[]}',
