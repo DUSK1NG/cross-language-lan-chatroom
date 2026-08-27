@@ -89,13 +89,40 @@ void main() {
 
     expect(find.text('未发现局域网主机'), findsOneWidget);
   });
+
+  testWidgets('does not show an empty message while LAN discovery scans', (
+    tester,
+  ) async {
+    final core = _FakeCore(snapshot: _scanningEmptyLanDiscoveryStateJson);
+    await tester.pumpWidget(LanChatFlutterApp(core: core));
+    await tester.pump();
+
+    expect(find.text('正在搜索局域网主机…'), findsOneWidget);
+    expect(find.text('未发现局域网主机'), findsNothing);
+  });
+
+  testWidgets('shows a failed LAN discovery command message', (tester) async {
+    final core = _FakeCore(
+      snapshot: _idleStateJson,
+      events: const [
+        '{"kind":"result","payload":{"id":"flutter-1","ok":false,"error":{"code":"discovery_unavailable","message":"局域网发现当前不可用","retryable":true,"source":"bridge"}}}',
+      ],
+    );
+    await tester.pumpWidget(LanChatFlutterApp(core: core));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('局域网发现当前不可用'), findsOneWidget);
+  });
 }
 
 class _FakeCore implements ChatCore {
-  _FakeCore({String? snapshot}) : _snapshot = snapshot ?? _connectedStateJson;
+  _FakeCore({String? snapshot, List<String> events = const []})
+    : _snapshot = snapshot ?? _connectedStateJson,
+      _events = List.of(events);
 
   final dispatched = <String>[];
   final String _snapshot;
+  final List<String> _events;
 
   @override
   int dispatch(String json) {
@@ -104,7 +131,11 @@ class _FakeCore implements ChatCore {
   }
 
   @override
-  List<String> drainEvents() => const [];
+  List<String> drainEvents() {
+    final events = List<String>.of(_events);
+    _events.clear();
+    return events;
+  }
 
   @override
   void dispose() {}
@@ -121,3 +152,6 @@ const _idleStateJson =
 
 const _lanDiscoveryStateJson =
     '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[],"lanDiscovery":{"scanning":true,"hosts":[{"id":"host-1","hostName":"Alice PC","serverIp":"192.168.8.23","serverPort":8888,"fingerprintSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","known":false}]}}';
+
+const _scanningEmptyLanDiscoveryStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[],"lanDiscovery":{"scanning":true,"hosts":[]}}';

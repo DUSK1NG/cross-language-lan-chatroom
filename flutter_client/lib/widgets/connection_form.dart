@@ -107,7 +107,7 @@ class _ConnectionFormState extends State<ConnectionForm> {
           ),
           const SizedBox(height: 8),
           if (widget.isLanDiscoveryScanning) const Text('正在搜索局域网主机…'),
-          if (widget.discoveredHosts.isEmpty)
+          if (!widget.isLanDiscoveryScanning && widget.discoveredHosts.isEmpty)
             const Text('未发现局域网主机')
           else
             ...widget.discoveredHosts.map(

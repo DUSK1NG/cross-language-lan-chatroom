@@ -39,7 +39,39 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final events = _core.drainEvents();
       if (events.isEmpty) return;
-      _readSnapshot(notify: true);
+      var hasStateEvent = false;
+      String? bridgeError;
+      for (final eventJson in events) {
+        final decoded = jsonDecode(eventJson);
+        if (decoded is! Map) continue;
+        final event = decoded.map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        final kind = event['kind'] is String
+            ? event['kind'] as String
+            : event['type'] as String?;
+        if (kind == 'state') {
+          hasStateEvent = true;
+          continue;
+        }
+        final payload = event['payload'];
+        if (payload is! Map) continue;
+        final details = payload.map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        final error = kind == 'result' && details['ok'] == false
+            ? details['error']
+            : kind == 'error'
+            ? details
+            : null;
+        if (error is Map && error['message'] is String) {
+          final message = (error['message'] as String).trim();
+          if (message.isNotEmpty) bridgeError = message;
+        }
+      }
+      if (hasStateEvent) _readSnapshot(notify: false);
+      if (bridgeError != null) _localError = bridgeError;
+      notifyListeners();
     } catch (error) {
       _setError(error);
     }

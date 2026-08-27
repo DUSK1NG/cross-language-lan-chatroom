@@ -80,6 +80,21 @@ void main() {
     expect(controller.connectionPhase, 'connected');
   });
 
+  test('surfaces a failed bridge command result as a safe error message', () {
+    final core = FakeLanChatCore(
+      snapshot: connectedLobbyStateJson,
+      events: const [
+        '{"kind":"result","payload":{"id":"flutter-1","ok":false,"error":{"code":"discovery_unavailable","message":"局域网发现当前不可用","retryable":true,"source":"bridge"}}}',
+      ],
+    );
+    final controller = ChatSessionController(core);
+    addTearDown(controller.dispose);
+
+    controller.drainPendingEvents();
+
+    expect(controller.lastError, '局域网发现当前不可用');
+  });
+
   test('dispatches an exact validated remote connection payload', () {
     final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
     final controller = ChatSessionController(core)..refresh();
