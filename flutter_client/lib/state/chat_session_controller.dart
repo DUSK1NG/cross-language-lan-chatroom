@@ -127,10 +127,18 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
     String targetUserCode = '',
     String? room,
   }) {
+    final normalizedAction = action.trim();
+    final normalizedTargetUserCode = targetUserCode.trim();
+    if ((normalizedAction == 'invite' || normalizedAction == 'remove_member') &&
+        normalizedTargetUserCode.isEmpty) {
+      _localError = '成员代码不能为空';
+      notifyListeners();
+      return;
+    }
     _dispatch('room.action', {
-      'action': action.trim(),
+      'action': normalizedAction,
       'room': (room ?? _state.selectedRoom).trim(),
-      'targetUserCode': targetUserCode.trim(),
+      'targetUserCode': normalizedTargetUserCode,
     });
   }
 
@@ -161,9 +169,17 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return;
     }
+    final normalizedTargetUserCode = targetUserCode.trim();
+    final normalizedLocalUserCode = _state.localUserCode.trim();
+    if (normalizedLocalUserCode.isNotEmpty &&
+        normalizedTargetUserCode == normalizedLocalUserCode) {
+      _localError = '不能对自己执行成员管理操作';
+      notifyListeners();
+      return;
+    }
     final payload = <String, dynamic>{
       'action': action.trim(),
-      'targetUserCode': targetUserCode.trim(),
+      'targetUserCode': normalizedTargetUserCode,
     };
     final approvalId = messageId?.trim() ?? '';
     if (approvalId.isNotEmpty) payload['messageId'] = approvalId;

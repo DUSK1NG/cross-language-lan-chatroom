@@ -6,6 +6,7 @@ class AdminActions extends StatelessWidget {
   const AdminActions({
     required this.isAllowed,
     required this.members,
+    required this.localUserCode,
     required this.connectionApprovals,
     required this.onAction,
     required this.onApproveConnection,
@@ -15,6 +16,7 @@ class AdminActions extends StatelessWidget {
 
   final bool isAllowed;
   final List<BridgeMember> members;
+  final String localUserCode;
   final List<BridgeConnectionApproval> connectionApprovals;
   final void Function(String action, String userCode) onAction;
   final void Function(String messageId) onApproveConnection;
@@ -67,21 +69,25 @@ class AdminActions extends StatelessWidget {
                 ListTile(
                   title: Text(member.displayName),
                   subtitle: Text(member.userCode),
-                  trailing: Wrap(
-                    spacing: 4,
-                    children: [
-                      IconButton(
-                        tooltip: '禁言或解禁 ${member.userCode}',
-                        icon: const Icon(Icons.volume_off_outlined),
-                        onPressed: () => onAction('mute', member.userCode),
-                      ),
-                      IconButton(
-                        tooltip: '踢出 ${member.userCode}',
-                        icon: const Icon(Icons.person_remove_outlined),
-                        onPressed: () => onAction('kick', member.userCode),
-                      ),
-                    ],
-                  ),
+                  trailing: member.userCode.trim() == localUserCode.trim()
+                      ? null
+                      : Wrap(
+                          spacing: 4,
+                          children: [
+                            IconButton(
+                              tooltip: '禁言或解禁 ${member.userCode}',
+                              icon: const Icon(Icons.volume_off_outlined),
+                              onPressed: () =>
+                                  onAction('mute', member.userCode),
+                            ),
+                            IconButton(
+                              tooltip: '踢出 ${member.userCode}',
+                              icon: const Icon(Icons.person_remove_outlined),
+                              onPressed: () =>
+                                  onAction('kick', member.userCode),
+                            ),
+                          ],
+                        ),
                 ),
             ],
           ),

@@ -12,7 +12,8 @@ class RoomActions extends StatefulWidget {
   final bool canCreateRoom;
   final bool canManageActiveRoom;
   final void Function(String room, {required bool isPrivate}) onCreateRoom;
-  final void Function(String action, {required String targetUserCode}) onRoomAction;
+  final void Function(String action, {required String targetUserCode})
+  onRoomAction;
 
   @override
   State<RoomActions> createState() => _RoomActionsState();
@@ -81,9 +82,11 @@ class _RoomActionsState extends State<RoomActions> {
           ),
           TextButton(
             onPressed: () {
+              final targetUserCode = memberCode.text.trim();
+              if (targetUserCode.isEmpty) return;
               widget.onRoomAction(
                 'remove_member',
-                targetUserCode: memberCode.text.trim(),
+                targetUserCode: targetUserCode,
               );
               Navigator.pop(context);
             },
@@ -91,10 +94,9 @@ class _RoomActionsState extends State<RoomActions> {
           ),
           FilledButton(
             onPressed: () {
-              widget.onRoomAction(
-                'invite',
-                targetUserCode: memberCode.text.trim(),
-              );
+              final targetUserCode = memberCode.text.trim();
+              if (targetUserCode.isEmpty) return;
+              widget.onRoomAction('invite', targetUserCode: targetUserCode);
               Navigator.pop(context);
             },
             child: const Text('邀请成员'),

@@ -250,6 +250,82 @@ void main() {
     expect(find.byTooltip('管理成员'), findsOneWidget);
   });
 
+  testWidgets(
+    'lets a connected member open a private conversation from the directory',
+    (tester) async {
+      final core = _FakeCore(snapshot: _memberStateJson);
+      await tester.pumpWidget(LanChatFlutterApp(core: core));
+      await tester.pump();
+
+      expect(find.byTooltip('查看成员目录'), findsOneWidget);
+      expect(find.byTooltip('管理成员'), findsNothing);
+
+      await tester.tap(find.byTooltip('查看成员目录'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Alice'), findsOneWidget);
+      expect(find.text('Bob'), findsOneWidget);
+      expect(find.byTooltip('与 B002 私聊'), findsOneWidget);
+      expect(find.byTooltip('与 A001 私聊'), findsNothing);
+
+      await tester.tap(find.byTooltip('与 B002 私聊'));
+
+      expect(core.dispatched.single, contains('conversation.openPrivate'));
+      expect(core.dispatched.single, contains('"displayName":"Bob"'));
+      expect(core.dispatched.single, contains('"userCode":"B002"'));
+    },
+  );
+
+  testWidgets('does not show administrator controls for the local member', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      LanChatFlutterApp(core: _FakeCore(snapshot: _adminMemberStateJson)),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('管理成员'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('禁言或解禁 A001'), findsNothing);
+    expect(find.byTooltip('踢出 A001'), findsNothing);
+    expect(find.byTooltip('禁言或解禁 B002'), findsOneWidget);
+    expect(find.byTooltip('踢出 B002'), findsOneWidget);
+  });
+
+  testWidgets('requires a member code for invite and remove room actions', (
+    tester,
+  ) async {
+    final actions = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RoomActions(
+            canCreateRoom: false,
+            canManageActiveRoom: true,
+            onCreateRoom: (_, {required isPrivate}) {},
+            onRoomAction: (action, {required targetUserCode}) {
+              actions.add('$action:$targetUserCode');
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('管理频道'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('邀请成员'));
+    await tester.pump();
+    await tester.tap(find.text('移除成员'));
+    await tester.pump();
+
+    expect(actions, isEmpty);
+    expect(find.text('管理频道'), findsWidgets);
+
+    await tester.tap(find.text('删除频道'));
+    expect(actions, ['delete:']);
+  });
+
   testWidgets('only shows connection approvals to a connected administrator', (
     tester,
   ) async {
@@ -330,10 +406,10 @@ const _settingsStateJson =
     '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[],"diagnostics":{"enabled":false},"performance":{"mode":"Automatic"}}';
 
 const _memberStateJson =
-    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":false},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":2,"unreadCount":0}],"directMessages":[],"activeMessages":[],"members":[{"displayName":"Bob","userCode":"B002","online":true,"admin":false}]}';
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"userCode":"A001","admin":false},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":2,"unreadCount":0}],"directMessages":[],"activeMessages":[],"members":[{"displayName":"Alice","userCode":"A001","online":true,"admin":false},{"displayName":"Bob","userCode":"B002","online":true,"admin":false}]}';
 
 const _adminMemberStateJson =
-    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":2,"unreadCount":0}],"directMessages":[],"activeMessages":[],"members":[{"displayName":"Bob","userCode":"B002","online":true,"admin":false}]}';
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"userCode":"A001","admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":2,"unreadCount":0}],"directMessages":[],"activeMessages":[],"members":[{"displayName":"Alice","userCode":"A001","online":true,"admin":true},{"displayName":"Bob","userCode":"B002","online":true,"admin":false}]}';
 
 const _memberApprovalStateJson =
     '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":false},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[],"directMessages":[],"activeMessages":[],"connectionApprovals":[{"id":"approval-1","displayName":"Cara","userCode":"C003","requestedAt":"2026-08-27T10:00:00Z"}]}';

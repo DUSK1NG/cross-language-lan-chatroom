@@ -8,6 +8,7 @@ import 'widgets/conversation_sidebar.dart';
 import 'widgets/admin_actions.dart';
 import 'widgets/local_host_form.dart';
 import 'widgets/message_composer.dart';
+import 'widgets/member_directory.dart';
 import 'widgets/message_timeline.dart';
 import 'widgets/mode_selection_page.dart';
 import 'widgets/room_actions.dart';
@@ -112,6 +113,11 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                   onPressed: session.refreshUsersDirectory,
                   icon: const Icon(Icons.people_outline),
                 ),
+                MemberDirectory(
+                  members: session.members,
+                  localUserCode: session.localUserCode,
+                  onOpenPrivate: session.openPrivateConversation,
+                ),
                 IconButton(
                   tooltip: '刷新频道目录',
                   onPressed: session.refreshRoomsDirectory,
@@ -120,6 +126,7 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                 AdminActions(
                   isAllowed: session.isConnected && session.isAdmin,
                   members: session.members,
+                  localUserCode: session.localUserCode,
                   connectionApprovals: session.connectionApprovals,
                   onAction: (action, userCode) =>
                       session.sendAdminAction(action, targetUserCode: userCode),

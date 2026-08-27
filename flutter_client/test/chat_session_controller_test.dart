@@ -301,6 +301,28 @@ void main() {
     });
   });
 
+  test('rejects member room actions without a target user code', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    for (final action in ['invite', 'remove_member']) {
+      controller.sendRoomAction(action, targetUserCode: '   ');
+
+      expect(core.dispatched, isEmpty);
+      expect(controller.lastError, '成员代码不能为空');
+    }
+
+    controller.sendRoomAction('delete');
+
+    expect(core.dispatched, hasLength(1));
+    expect(jsonDecode(core.dispatched.single)['payload'], {
+      'action': 'delete',
+      'room': 'lobby',
+      'targetUserCode': '',
+    });
+  });
+
   test(
     'dispatches copy, local removal, recall and retry without local records',
     () {
@@ -359,6 +381,18 @@ void main() {
     });
     expect(commands[3]['payload'], {'mode': 'Balanced'});
     expect(commands[4]['payload'], {'enabled': true});
+  });
+
+  test('rejects an administrator action targeting the local user', () {
+    final core = FakeLanChatCore(snapshot: adminConnectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.sendAdminAction('kick', targetUserCode: ' A001 ');
+
+    expect(controller.localUserCode, 'A001');
+    expect(core.dispatched, isEmpty);
+    expect(controller.lastError, '不能对自己执行成员管理操作');
   });
 
   test('maps approvals and dispatches exact connection decisions', () {
@@ -448,7 +482,7 @@ const connectedLobbyStateJson =
     '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[]}';
 
 const adminConnectedLobbyStateJson =
-    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[]}';
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"userCode":"A001","admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[]}';
 
 const adminConnectionApprovalStateJson =
     '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[],"connectionApprovals":[{"id":"approval-1","displayName":"Cara","userCode":"C003","requestedAt":"2026-08-27T10:00:00Z"}]}';
