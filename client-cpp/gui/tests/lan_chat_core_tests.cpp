@@ -5,6 +5,10 @@
 #include <QJsonObject>
 #include <QtTest>
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 class LanChatCoreTests final : public QObject {
     Q_OBJECT
 
@@ -15,6 +19,8 @@ private slots:
     void eventQueueRetainsAtMost256Events();
     void errorEventSurvivesStateQueuePressure();
     void destroyStopsCoreWithinFiveSeconds();
+    void destroyIsSafeWithConcurrentAbiCalls();
+    void destroyRetiresHandleBeforeConcurrentCalls();
 };
 
 void LanChatCoreTests::createReturnsStateSnapshot() {
@@ -139,6 +145,62 @@ void LanChatCoreTests::destroyStopsCoreWithinFiveSeconds() {
     timer.start();
     lan_chat_core_destroy(handle);
     QVERIFY2(timer.elapsed() <= 5000, "Core shutdown exceeded five seconds");
+}
+
+void LanChatCoreTests::destroyIsSafeWithConcurrentAbiCalls() {
+    auto* handle = lan_chat_core_create();
+    QVERIFY(handle != nullptr);
+
+    constexpr int workerCount = 12;
+    constexpr int callsPerWorker = 64;
+    std::atomic_int ready = 0;
+    std::atomic_bool start = false;
+    std::vector<std::thread> workers;
+    workers.reserve(workerCount);
+
+    for (int worker = 0; worker < workerCount; ++worker) {
+        workers.emplace_back([&]() {
+            ready.fetch_add(1);
+            while (!start.load()) {
+                std::this_thread::yield();
+            }
+            for (int call = 0; call < callsPerWorker; ++call) {
+                char* state = lan_chat_core_current_state_json(handle);
+                lan_chat_core_free_string(state);
+            }
+        });
+    }
+
+    QTRY_COMPARE(ready.load(), workerCount);
+    start.store(true);
+    lan_chat_core_destroy(handle);
+
+    for (auto& worker : workers) {
+        worker.join();
+    }
+}
+
+void LanChatCoreTests::destroyRetiresHandleBeforeConcurrentCalls() {
+    auto* staleHandle = lan_chat_core_create();
+    QVERIFY(staleHandle != nullptr);
+    lan_chat_core_destroy(staleHandle);
+
+    auto* liveHandle = lan_chat_core_create();
+    QVERIFY(liveHandle != nullptr);
+
+    QCOMPARE(lan_chat_core_dispatch_json(
+                 staleHandle,
+                 R"({"id":"stale","type":"conversation.selectRoom","payload":{"room":"lobby"}})"),
+             1);
+
+    char* staleState = reinterpret_cast<char*>(1);
+    std::thread caller([&]() {
+        staleState = lan_chat_core_current_state_json(staleHandle);
+    });
+    caller.join();
+
+    QVERIFY(staleState == nullptr);
+    lan_chat_core_destroy(liveHandle);
 }
 
 QTEST_GUILESS_MAIN(LanChatCoreTests)

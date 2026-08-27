@@ -14,9 +14,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <unordered_map>
 #include <utility>
 
 namespace {
@@ -41,6 +43,39 @@ struct CoreSession {
     QQueue<QueuedEvent> events;
     std::atomic_bool closing = false;
 };
+
+using HandleId = std::uintptr_t;
+
+QMutex sessionRegistryMutex;
+std::unordered_map<HandleId, std::shared_ptr<CoreSession>> sessionRegistry;
+std::atomic<HandleId> nextHandleId = 1;
+
+LanChatCoreHandle makeHandle(const HandleId id) {
+    return reinterpret_cast<LanChatCoreHandle>(id);
+}
+
+std::shared_ptr<CoreSession> acquireSession(const LanChatCoreHandle handle) {
+    if (!handle) {
+        return {};
+    }
+    QMutexLocker lock(&sessionRegistryMutex);
+    const auto session = sessionRegistry.find(reinterpret_cast<HandleId>(handle));
+    return session == sessionRegistry.cend() ? std::shared_ptr<CoreSession>{} : session->second;
+}
+
+std::shared_ptr<CoreSession> retireSession(const LanChatCoreHandle handle) {
+    if (!handle) {
+        return {};
+    }
+    QMutexLocker lock(&sessionRegistryMutex);
+    const auto session = sessionRegistry.find(reinterpret_cast<HandleId>(handle));
+    if (session == sessionRegistry.cend()) {
+        return {};
+    }
+    auto retired = std::move(session->second);
+    sessionRegistry.erase(session);
+    return retired;
+}
 
 char* copyUtf8(const QByteArray& value) {
     auto* result = static_cast<char*>(std::malloc(static_cast<size_t>(value.size()) + 1));
@@ -156,7 +191,7 @@ extern "C" LanChatCoreHandle lan_chat_core_create(void) {
         if (!ensureQtApplication()) {
             return nullptr;
         }
-        auto session = std::make_unique<CoreSession>();
+        auto session = std::make_shared<CoreSession>();
         session->thread.start();
         session->executor = new QObject;
         session->executor->moveToThread(&session->thread);
@@ -183,7 +218,19 @@ extern "C" LanChatCoreHandle lan_chat_core_create(void) {
             destroySession(session.get());
             return nullptr;
         }
-        return session.release();
+        const HandleId handleId = nextHandleId.fetch_add(1);
+        if (!handleId) {
+            destroySession(session.get());
+            return nullptr;
+        }
+        try {
+            QMutexLocker lock(&sessionRegistryMutex);
+            sessionRegistry.emplace(handleId, session);
+        } catch (...) {
+            destroySession(session.get());
+            return nullptr;
+        }
+        return makeHandle(handleId);
     } catch (...) {
         return nullptr;
     }
@@ -194,11 +241,12 @@ extern "C" void lan_chat_core_destroy(const LanChatCoreHandle handle) {
         return;
     }
     try {
-        auto* session = static_cast<CoreSession*>(handle);
+        const auto session = retireSession(handle);
+        if (!session) {
+            return;
+        }
         QMutexLocker lock(&session->apiMutex);
-        destroySession(session);
-        lock.unlock();
-        delete session;
+        destroySession(session.get());
     } catch (...) {
         // C ABI exports must never leak C++ exceptions.
     }
@@ -210,7 +258,10 @@ extern "C" int lan_chat_core_dispatch_json(const LanChatCoreHandle handle,
         return kInvalidHandle;
     }
     try {
-        auto* session = static_cast<CoreSession*>(handle);
+        const auto session = acquireSession(handle);
+        if (!session) {
+            return kInvalidHandle;
+        }
         QMutexLocker lock(&session->apiMutex);
         if (session->closing.load()) {
             return kClosing;
@@ -220,7 +271,7 @@ extern "C" int lan_chat_core_dispatch_json(const LanChatCoreHandle handle,
         if (!isJsonObjectUtf8(command_json, &command)) {
             return kInvalidJson;
         }
-        return invokeOnCoreThread(session, [session, command]() {
+        return invokeOnCoreThread(session.get(), [session, command]() {
             session->bridge->dispatch(command);
         }) ? kSuccess : kClosing;
     } catch (...) {
@@ -233,14 +284,17 @@ extern "C" char* lan_chat_core_current_state_json(const LanChatCoreHandle handle
         return nullptr;
     }
     try {
-        auto* session = static_cast<CoreSession*>(handle);
+        const auto session = acquireSession(handle);
+        if (!session) {
+            return nullptr;
+        }
         QMutexLocker lock(&session->apiMutex);
         if (session->closing.load()) {
             return nullptr;
         }
 
         QString state;
-        if (!invokeOnCoreThread(session, [session, &state]() {
+        if (!invokeOnCoreThread(session.get(), [session, &state]() {
                 state = session->bridge->currentStateJson();
             })) {
             return nullptr;
@@ -256,7 +310,10 @@ extern "C" char* lan_chat_core_take_event_json(const LanChatCoreHandle handle) {
         return nullptr;
     }
     try {
-        auto* session = static_cast<CoreSession*>(handle);
+        const auto session = acquireSession(handle);
+        if (!session) {
+            return nullptr;
+        }
         QMutexLocker apiLock(&session->apiMutex);
         if (session->closing.load()) {
             return nullptr;
