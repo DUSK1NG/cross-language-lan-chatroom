@@ -9,6 +9,7 @@ import 'widgets/local_host_form.dart';
 import 'widgets/message_composer.dart';
 import 'widgets/message_timeline.dart';
 import 'widgets/mode_selection_page.dart';
+import 'widgets/room_actions.dart';
 
 void main() {
   try {
@@ -144,8 +145,33 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                         ),
                       )
                     else ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                        child: RoomActions(
+                          canCreateRoom: session.isConnected,
+                          canManageActiveRoom:
+                              session.selectedConversationKind == 'room' &&
+                              session.activeRoomCanManage,
+                          onCreateRoom: session.createRoom,
+                          onRoomAction: (
+                            action, {
+                            required targetUserCode,
+                          }) => session.sendRoomAction(
+                            action,
+                            targetUserCode: targetUserCode,
+                          ),
+                        ),
+                      ),
                       Expanded(
-                        child: MessageTimeline(messages: session.messages),
+                        child: MessageTimeline(
+                          messages: session.messages,
+                          canRecallMessages: session.isAdmin,
+                          onCopy: session.copyMessage,
+                          onRemoveLocal: session.removeLocalMessage,
+                          onRecall: session.recallMessage,
+                          onRetry: session.retryMessage,
+                          onOpenPrivate: session.openPrivateConversation,
+                        ),
                       ),
                       MessageComposer(
                         enabled: true,

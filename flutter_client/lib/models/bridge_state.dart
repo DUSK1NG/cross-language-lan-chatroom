@@ -16,18 +16,38 @@ class BridgeConversation {
 
 class BridgeMessage {
   const BridgeMessage({
+    required this.id,
     required this.sender,
+    required this.userCode,
     required this.content,
     required this.time,
     required this.isSelf,
     required this.isSystem,
+    required this.deliveryState,
   });
 
+  final String id;
   final String sender;
+  final String userCode;
   final String content;
   final String time;
   final bool isSelf;
   final bool isSystem;
+  final String deliveryState;
+}
+
+class BridgeMember {
+  const BridgeMember({
+    required this.displayName,
+    required this.userCode,
+    required this.isOnline,
+    required this.isAdmin,
+  });
+
+  final String displayName;
+  final String userCode;
+  final bool isOnline;
+  final bool isAdmin;
 }
 
 class BridgeDiscoveredHost {
@@ -52,7 +72,12 @@ class BridgeState {
     required this.statusText,
     required this.conversations,
     required this.messages,
+    required this.members,
     required this.selectedRoom,
+    required this.selectedConversationKind,
+    required this.localUserCode,
+    required this.isAdmin,
+    required this.activeRoomCanManage,
     required this.isLanDiscoveryScanning,
     required this.discoveredHosts,
     this.lastError,
@@ -63,7 +88,12 @@ class BridgeState {
     statusText: '未连接',
     conversations: [],
     messages: [],
+    members: [],
     selectedRoom: 'lobby',
+    selectedConversationKind: 'room',
+    localUserCode: '',
+    isAdmin: false,
+    activeRoomCanManage: false,
     isLanDiscoveryScanning: false,
     discoveredHosts: [],
   );
@@ -75,6 +105,8 @@ class BridgeState {
     final connection = _map(json['connection']);
     final navigation = _map(json['navigation']);
     final activeConversation = _map(navigation['activeConversation']);
+    final identity = _map(json['identity']);
+    final permissions = _map(json['permissions']);
     final rooms = _list(json['rooms']).map((value) {
       final room = _map(value);
       final name = _string(room['roomName'], 'lobby');
@@ -112,24 +144,46 @@ class BridgeState {
           .map((value) {
             final message = _map(value);
             return BridgeMessage(
+              id: _string(message['messageId']),
               sender: _string(
                 message['displayName'],
                 _string(message['sender'], '系统'),
               ),
+              userCode: _string(message['userCode']),
               content: _string(message['content']),
               time: _string(message['time']),
               isSelf: message['selfMessage'] == true,
               isSystem: message['systemMessage'] == true,
+              deliveryState: _string(message['deliveryState']),
             );
           })
+          .toList(growable: false),
+      members: _list(json['members'])
+          .map((value) {
+            final member = _map(value);
+            return BridgeMember(
+              displayName: _string(member['displayName']),
+              userCode: _string(member['userCode']),
+              isOnline: member['online'] == true,
+              isAdmin: member['admin'] == true,
+            );
+          })
+          .where((member) => member.userCode.isNotEmpty)
           .toList(growable: false),
       selectedRoom: _string(
         activeConversation['name'],
         _string(
           activeConversation['id'],
-          _string(activeConversation['title'], 'lobby'),
+          _string(
+            activeConversation['userCode'],
+            _string(activeConversation['title'], 'lobby'),
+          ),
         ),
       ),
+      selectedConversationKind: _string(activeConversation['kind'], 'room'),
+      localUserCode: _string(identity['userCode']),
+      isAdmin: identity['admin'] == true,
+      activeRoomCanManage: permissions['activeRoomCanManage'] == true,
       isLanDiscoveryScanning: lanDiscovery['scanning'] == true,
       discoveredHosts: discoveredHosts,
       lastError: _string(error['message']).isEmpty
@@ -142,7 +196,12 @@ class BridgeState {
   final String statusText;
   final List<BridgeConversation> conversations;
   final List<BridgeMessage> messages;
+  final List<BridgeMember> members;
   final String selectedRoom;
+  final String selectedConversationKind;
+  final String localUserCode;
+  final bool isAdmin;
+  final bool activeRoomCanManage;
   final bool isLanDiscoveryScanning;
   final List<BridgeDiscoveredHost> discoveredHosts;
   final String? lastError;

@@ -27,7 +27,12 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
   String get statusText => _state.statusText;
   List<BridgeConversation> get conversations => _state.conversations;
   List<BridgeMessage> get messages => _state.messages;
+  List<BridgeMember> get members => _state.members;
   String get selectedRoom => _state.selectedRoom;
+  String get selectedConversationKind => _state.selectedConversationKind;
+  String get localUserCode => _state.localUserCode;
+  bool get isAdmin => _state.isAdmin;
+  bool get activeRoomCanManage => _state.activeRoomCanManage;
   bool get isLanDiscoveryScanning => _state.isLanDiscoveryScanning;
   List<BridgeDiscoveredHost> get discoveredHosts => _state.discoveredHosts;
   String? get lastError => _localError ?? _state.lastError;
@@ -89,11 +94,49 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return;
     }
-    _dispatch('chat.sendRoom', {
-      'content': content,
-      'room': _state.selectedRoom,
+    if (_state.selectedConversationKind == 'dm') {
+      _dispatch('chat.sendPrivate', {
+        'content': content,
+        'targetUserCode': _state.selectedRoom,
+      });
+      return;
+    }
+    _dispatch('chat.sendRoom', {'content': content, 'room': _state.selectedRoom});
+  }
+
+  void openPrivateConversation(String displayName, String userCode) {
+    _dispatch('conversation.openPrivate', {
+      'displayName': displayName.trim(),
+      'userCode': userCode.trim(),
     });
   }
+
+  void createRoom(String room, {required bool isPrivate}) {
+    _dispatch('room.create', {'room': room.trim(), 'isPrivate': isPrivate});
+  }
+
+  void sendRoomAction(
+    String action, {
+    String targetUserCode = '',
+    String? room,
+  }) {
+    _dispatch('room.action', {
+      'action': action.trim(),
+      'room': (room ?? _state.selectedRoom).trim(),
+      'targetUserCode': targetUserCode.trim(),
+    });
+  }
+
+  void copyMessage(String text) => _dispatch('message.copy', {'text': text});
+
+  void removeLocalMessage(String messageId) =>
+      _dispatch('message.removeLocal', {'messageId': messageId.trim()});
+
+  void recallMessage(String messageId) =>
+      _dispatch('message.recall', {'messageId': messageId.trim()});
+
+  void retryMessage(String messageId) =>
+      _dispatch('message.retry', {'messageId': messageId.trim()});
 
   bool connectRemote({
     required String serverIp,

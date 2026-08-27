@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lan_chat_flutter/main.dart';
+import 'package:lan_chat_flutter/models/bridge_state.dart';
 import 'package:lan_chat_flutter/native/lan_chat_core.dart';
+import 'package:lan_chat_flutter/widgets/message_timeline.dart';
+import 'package:lan_chat_flutter/widgets/room_actions.dart';
 
 void main() {
   testWidgets('shows a startup error instead of hiding a core load failure', (
@@ -129,6 +132,61 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('局域网发现当前不可用'), findsOneWidget);
+  });
+
+  testWidgets('only exposes room management when the state permits it', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RoomActions(
+            canCreateRoom: true,
+            canManageActiveRoom: false,
+            onCreateRoom: (_, {required isPrivate}) {},
+            onRoomAction: (_, {required targetUserCode}) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('新建频道'), findsOneWidget);
+    expect(find.text('管理频道'), findsNothing);
+  });
+
+  testWidgets('only exposes authorized message operations', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MessageTimeline(
+            messages: const [
+              BridgeMessage(
+                id: 'm-1',
+                sender: 'Bob',
+                userCode: 'B002',
+                content: '你好',
+                time: '10:00',
+                isSelf: false,
+                isSystem: false,
+                deliveryState: 'sent',
+              ),
+            ],
+            canRecallMessages: false,
+            onCopy: (_) {},
+            onRemoveLocal: (_) {},
+            onRecall: (_) {},
+            onRetry: (_) {},
+            onOpenPrivate: (_, ignoredUserCode) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byTooltip('复制消息'), findsOneWidget);
+    expect(find.byTooltip('删除本地消息'), findsOneWidget);
+    expect(find.byTooltip('撤回消息'), findsNothing);
+    expect(find.byTooltip('重试发送'), findsNothing);
+    expect(find.byTooltip('发起私聊'), findsOneWidget);
   });
 }
 

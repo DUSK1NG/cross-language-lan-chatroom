@@ -246,6 +246,87 @@ void main() {
       });
     },
   );
+
+  test('creates a room with the exact bridge payload', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.createRoom(' study ', isPrivate: true);
+
+    final command = jsonDecode(core.dispatched.single) as Map<String, dynamic>;
+    expect(command['type'], 'room.create');
+    expect(command['payload'], {'room': 'study', 'isPrivate': true});
+  });
+
+  test('sends a private message for the active direct conversation', () {
+    final core = FakeLanChatCore(
+      snapshot:
+          '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"dm","userCode":"B002"}},"rooms":[],"directMessages":[{"userCode":"B002","displayName":"Bob","unreadCount":0}],"activeMessages":[]}',
+    );
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.sendMessage(' 私聊你好 ');
+
+    final command = jsonDecode(core.dispatched.single) as Map<String, dynamic>;
+    expect(command['type'], 'chat.sendPrivate');
+    expect(command['payload'], {'content': '私聊你好', 'targetUserCode': 'B002'});
+  });
+
+  test('opens a private conversation with the exact bridge payload', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.openPrivateConversation(' Bob ', ' B002 ');
+
+    final command = jsonDecode(core.dispatched.single) as Map<String, dynamic>;
+    expect(command['type'], 'conversation.openPrivate');
+    expect(command['payload'], {'displayName': 'Bob', 'userCode': 'B002'});
+  });
+
+  test('dispatches a room action with the exact bridge payload', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.sendRoomAction(' invite ', targetUserCode: ' B002 ');
+
+    final command = jsonDecode(core.dispatched.single) as Map<String, dynamic>;
+    expect(command['type'], 'room.action');
+    expect(command['payload'], {
+      'action': 'invite',
+      'room': 'lobby',
+      'targetUserCode': 'B002',
+    });
+  });
+
+  test('dispatches copy, local removal, recall and retry without local records', () {
+    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+    final controller = ChatSessionController(core)..refresh();
+    addTearDown(controller.dispose);
+
+    controller.copyMessage('只交给原生核心');
+    controller.removeLocalMessage('m-1');
+    controller.recallMessage('m-2');
+    controller.retryMessage('m-3');
+
+    final commands = core.dispatched
+        .map((json) => jsonDecode(json) as Map<String, dynamic>)
+        .toList(growable: false);
+    expect(commands.map((command) => command['type']), [
+      'message.copy',
+      'message.removeLocal',
+      'message.recall',
+      'message.retry',
+    ]);
+    expect(commands[0]['payload'], {'text': '只交给原生核心'});
+    expect(commands[1]['payload'], {'messageId': 'm-1'});
+    expect(commands[2]['payload'], {'messageId': 'm-2'});
+    expect(commands[3]['payload'], {'messageId': 'm-3'});
+    expect(controller.messages, isEmpty);
+  });
 }
 
 class FakeLanChatCore implements ChatCore {
