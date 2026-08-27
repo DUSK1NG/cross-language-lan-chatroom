@@ -70,7 +70,7 @@ function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvail
   return (
     <main className="app-shell mode-shell">
       <section className="mode-panel">
-        <p className="eyebrow">LAN CHAT / AURORA GLASS</p>
+        <p className="eyebrow">LAN CHAT / LOCAL WORKSPACE</p>
         <h1>选择聊天方式</h1>
         <p className="lede">安全、稳定的 Go + Qt 局域网聊天</p>
         <div className="mode-grid">

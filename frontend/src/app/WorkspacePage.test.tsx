@@ -86,17 +86,23 @@ describe('WorkspacePage', () => {
     ]);
   });
 
-  it('separates 群 and 私 navigation lists', () => {
+  it('separates 群 and 私 navigation lists', async () => {
     const bridge = createFakeBridge(workspaceState);
-
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    const { rerender } = render(<WorkspacePage bridge={bridge} state={workspaceState} />);
 
     expect(screen.getByRole('button', { name: 'room-study' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'room-lobby' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: 'direct-bob' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '私' }));
 
     expect(screen.getByRole('button', { name: 'direct-bob' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'direct-bob' }));
+    rerender(<WorkspacePage bridge={bridge} state={{
+      ...workspaceState,
+      navigation: { page: 'workspace', activeConversation: { kind: 'dm', id: 'B002', title: 'Bob', userCode: 'B002' } }
+    }} />);
+    expect(screen.getByRole('button', { name: 'direct-bob' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: 'room-study' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '群' }));
