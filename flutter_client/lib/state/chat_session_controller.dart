@@ -33,6 +33,8 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
   String get localUserCode => _state.localUserCode;
   bool get isAdmin => _state.isAdmin;
   bool get activeRoomCanManage => _state.activeRoomCanManage;
+  String get performanceMode => _state.performanceMode;
+  bool get connectionLoggingEnabled => _state.connectionLoggingEnabled;
   bool get isLanDiscoveryScanning => _state.isLanDiscoveryScanning;
   List<BridgeDiscoveredHost> get discoveredHosts => _state.discoveredHosts;
   String? get lastError => _localError ?? _state.lastError;
@@ -101,7 +103,10 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
       });
       return;
     }
-    _dispatch('chat.sendRoom', {'content': content, 'room': _state.selectedRoom});
+    _dispatch('chat.sendRoom', {
+      'content': content,
+      'room': _state.selectedRoom,
+    });
   }
 
   void openPrivateConversation(String displayName, String userCode) {
@@ -137,6 +142,44 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
 
   void retryMessage(String messageId) =>
       _dispatch('message.retry', {'messageId': messageId.trim()});
+
+  void refreshUsersDirectory() =>
+      _dispatch('directory.refreshUsers', const <String, dynamic>{});
+
+  void refreshRoomsDirectory() =>
+      _dispatch('directory.refreshRooms', const <String, dynamic>{});
+
+  void sendAdminAction(
+    String action, {
+    required String targetUserCode,
+    String? messageId,
+  }) {
+    if (!isConnected || !isAdmin) {
+      _localError = '当前状态不允许成员管理';
+      notifyListeners();
+      return;
+    }
+    final payload = <String, dynamic>{
+      'action': action.trim(),
+      'targetUserCode': targetUserCode.trim(),
+    };
+    final approvalId = messageId?.trim() ?? '';
+    if (approvalId.isNotEmpty) payload['messageId'] = approvalId;
+    _dispatch('admin.action', payload);
+  }
+
+  void setPerformanceMode(String mode) {
+    const modes = <String>{'Automatic', 'High', 'Balanced', 'Power Saving'};
+    if (!modes.contains(mode)) {
+      _localError = '不支持的性能等级';
+      notifyListeners();
+      return;
+    }
+    _dispatch('settings.setPerformanceMode', {'mode': mode});
+  }
+
+  void setConnectionLogging(bool enabled) =>
+      _dispatch('settings.setConnectionLogging', {'enabled': enabled});
 
   bool connectRemote({
     required String serverIp,

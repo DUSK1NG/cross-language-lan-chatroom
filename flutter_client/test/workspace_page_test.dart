@@ -188,6 +188,67 @@ void main() {
     expect(find.byTooltip('重试发送'), findsNothing);
     expect(find.byTooltip('发起私聊'), findsOneWidget);
   });
+
+  testWidgets('refreshes both directories with explicit controls', (
+    tester,
+  ) async {
+    final core = _FakeCore();
+    await tester.pumpWidget(LanChatFlutterApp(core: core));
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('刷新成员目录'));
+    await tester.tap(find.byTooltip('刷新频道目录'));
+
+    expect(core.dispatched, hasLength(2));
+    expect(core.dispatched[0], contains('directory.refreshUsers'));
+    expect(core.dispatched[0], contains('"payload":{}'));
+    expect(core.dispatched[1], contains('directory.refreshRooms'));
+    expect(core.dispatched[1], contains('"payload":{}'));
+  });
+
+  testWidgets('opens settings and changes only supported core settings', (
+    tester,
+  ) async {
+    final core = _FakeCore(snapshot: _settingsStateJson);
+    await tester.pumpWidget(LanChatFlutterApp(core: core));
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('打开设置'));
+    await tester.pump();
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.bySemanticsLabel('性能等级'), findsOneWidget);
+    expect(find.bySemanticsLabel('记录连接日志'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('性能等级'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('均衡').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('记录连接日志'));
+
+    expect(core.dispatched[0], contains('settings.setPerformanceMode'));
+    expect(core.dispatched[0], contains('"mode":"Balanced"'));
+    expect(core.dispatched[1], contains('settings.setConnectionLogging'));
+    expect(core.dispatched[1], contains('"enabled":true'));
+  });
+
+  testWidgets('only shows member administration for an administrator', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      LanChatFlutterApp(core: _FakeCore(snapshot: _memberStateJson)),
+    );
+    await tester.pump();
+    expect(find.byTooltip('管理成员'), findsNothing);
+
+    await tester.pumpWidget(
+      LanChatFlutterApp(
+        key: UniqueKey(),
+        core: _FakeCore(snapshot: _adminMemberStateJson),
+      ),
+    );
+    await tester.pump();
+    expect(find.byTooltip('管理成员'), findsOneWidget);
+  });
 }
 
 Future<void> _selectMode(WidgetTester tester, String label) async {
@@ -235,3 +296,12 @@ const _lanDiscoveryStateJson =
 
 const _scanningEmptyLanDiscoveryStateJson =
     '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[],"lanDiscovery":{"scanning":true,"hosts":[]}}';
+
+const _settingsStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[],"diagnostics":{"enabled":false},"performance":{"mode":"Automatic"}}';
+
+const _memberStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":false},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":2,"unreadCount":0}],"directMessages":[],"activeMessages":[],"members":[{"displayName":"Bob","userCode":"B002","online":true,"admin":false}]}';
+
+const _adminMemberStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":2,"unreadCount":0}],"directMessages":[],"activeMessages":[],"members":[{"displayName":"Bob","userCode":"B002","online":true,"admin":false}]}';

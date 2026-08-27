@@ -320,3 +320,7 @@ ctest --test-dir .\client-cpp\gui\build-bridge -R "^(performance-sampler-tests|b
 如果 CTest 报 0xc0000135，说明测试进程找不到 libssl-3-x64.dll 或 libcrypto-3-x64.dll；将包含这些 DLL 的 OpenSSL bin 目录加入当前 PowerShell 的 PATH 后重新执行。TLS 聊天联调时，先启动已配置证书和私钥的 Go Server，再用 --ca-file 指定签发服务端证书的 CA。
 
 TLS 当前已完成 Go Server 与 C++ Client 的端到端 localhost 联调；自签名证书必须通过 `--ca-file` 显式指定，不提供关闭证书验证的模式。
+
+## Flutter 双客户端人工验收
+
+Flutter Windows 客户端的真实连接只按 [人工验收清单](../flutter_client/test_driver/real_connection_smoke.md) 由操作员执行。操作员仅通过可信渠道提供服务器地址、端口和公共 CA 文件路径；本仓库的自动化验证不连接服务端。验收记录不得包含或复制私钥、证书内容、数据库、聊天或日志。

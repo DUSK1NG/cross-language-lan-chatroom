@@ -5,11 +5,13 @@ import 'state/chat_session_controller.dart';
 import 'widgets/connection_banner.dart';
 import 'widgets/connection_form.dart';
 import 'widgets/conversation_sidebar.dart';
+import 'widgets/admin_actions.dart';
 import 'widgets/local_host_form.dart';
 import 'widgets/message_composer.dart';
 import 'widgets/message_timeline.dart';
 import 'widgets/mode_selection_page.dart';
 import 'widgets/room_actions.dart';
+import 'widgets/settings_page.dart';
 
 void main() {
   try {
@@ -34,6 +36,7 @@ class LanChatFlutterApp extends StatefulWidget {
 class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
   ChatSessionController? _session;
   ConnectionMode? _connectionMode;
+  bool _settingsOpen = false;
 
   @override
   void initState() {
@@ -103,6 +106,29 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                   onDisconnect: session.disconnect,
                 ),
               ),
+              if (session.isConnected) ...[
+                IconButton(
+                  tooltip: '刷新成员目录',
+                  onPressed: session.refreshUsersDirectory,
+                  icon: const Icon(Icons.people_outline),
+                ),
+                IconButton(
+                  tooltip: '刷新频道目录',
+                  onPressed: session.refreshRoomsDirectory,
+                  icon: const Icon(Icons.refresh),
+                ),
+                AdminActions(
+                  isAllowed: session.isAdmin,
+                  members: session.members,
+                  onAction: (action, userCode) =>
+                      session.sendAdminAction(action, targetUserCode: userCode),
+                ),
+                IconButton(
+                  tooltip: '打开设置',
+                  onPressed: () => setState(() => _settingsOpen = true),
+                  icon: const Icon(Icons.settings_outlined),
+                ),
+              ],
               if (!session.isConnected && _connectionMode != null)
                 IconButton(
                   tooltip: '返回连接方式',
@@ -111,78 +137,88 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                 ),
             ],
           ),
-          body: Row(
-            children: [
-              ConversationSidebar(
-                conversations: session.conversations,
-                selectedRoom: session.selectedRoom,
-                onSelected: session.selectConversation,
-              ),
-              Expanded(
-                child: Column(
+          body: _settingsOpen && session.isConnected
+              ? SettingsPage(
+                  performanceMode: session.performanceMode,
+                  connectionLoggingEnabled: session.connectionLoggingEnabled,
+                  onPerformanceModeChanged: session.setPerformanceMode,
+                  onConnectionLoggingChanged: session.setConnectionLogging,
+                  onBack: () => setState(() => _settingsOpen = false),
+                )
+              : Row(
                   children: [
-                    if (session.lastError case final error?)
-                      Semantics(
-                        liveRegion: true,
-                        label: '错误：$error',
-                        child: Container(
-                          width: double.infinity,
-                          color: Theme.of(context).colorScheme.errorContainer,
-                          padding: const EdgeInsets.all(12),
-                          child: Text(error),
-                        ),
+                    ConversationSidebar(
+                      conversations: session.conversations,
+                      selectedRoom: session.selectedRoom,
+                      onSelected: session.selectConversation,
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          if (session.lastError case final error?)
+                            Semantics(
+                              liveRegion: true,
+                              label: '错误：$error',
+                              child: Container(
+                                width: double.infinity,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .errorContainer,
+                                padding: const EdgeInsets.all(12),
+                                child: Text(error),
+                              ),
+                            ),
+                          if (session.connectionPhase == 'connecting')
+                            TextButton.icon(
+                              onPressed: session.disconnect,
+                              icon: const Icon(Icons.cancel_outlined),
+                              label: const Text('取消连接'),
+                            ),
+                          if (!session.isConnected)
+                            Expanded(
+                              child: SingleChildScrollView(
+                                child: _connectionPage(session),
+                              ),
+                            )
+                          else ...[
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                              child: RoomActions(
+                                canCreateRoom: session.isConnected,
+                                canManageActiveRoom:
+                                    session.selectedConversationKind ==
+                                        'room' &&
+                                    session.activeRoomCanManage,
+                                onCreateRoom: session.createRoom,
+                                onRoomAction:
+                                    (action, {required targetUserCode}) =>
+                                        session.sendRoomAction(
+                                          action,
+                                          targetUserCode: targetUserCode,
+                                        ),
+                              ),
+                            ),
+                            Expanded(
+                              child: MessageTimeline(
+                                messages: session.messages,
+                                canRecallMessages: session.isAdmin,
+                                onCopy: session.copyMessage,
+                                onRemoveLocal: session.removeLocalMessage,
+                                onRecall: session.recallMessage,
+                                onRetry: session.retryMessage,
+                                onOpenPrivate: session.openPrivateConversation,
+                              ),
+                            ),
+                            MessageComposer(
+                              enabled: true,
+                              onSend: session.sendMessage,
+                            ),
+                          ],
+                        ],
                       ),
-                    if (session.connectionPhase == 'connecting')
-                      TextButton.icon(
-                        onPressed: session.disconnect,
-                        icon: const Icon(Icons.cancel_outlined),
-                        label: const Text('取消连接'),
-                      ),
-                    if (!session.isConnected)
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: _connectionPage(session),
-                        ),
-                      )
-                    else ...[
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                        child: RoomActions(
-                          canCreateRoom: session.isConnected,
-                          canManageActiveRoom:
-                              session.selectedConversationKind == 'room' &&
-                              session.activeRoomCanManage,
-                          onCreateRoom: session.createRoom,
-                          onRoomAction: (
-                            action, {
-                            required targetUserCode,
-                          }) => session.sendRoomAction(
-                            action,
-                            targetUserCode: targetUserCode,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: MessageTimeline(
-                          messages: session.messages,
-                          canRecallMessages: session.isAdmin,
-                          onCopy: session.copyMessage,
-                          onRemoveLocal: session.removeLocalMessage,
-                          onRecall: session.recallMessage,
-                          onRetry: session.retryMessage,
-                          onOpenPrivate: session.openPrivateConversation,
-                        ),
-                      ),
-                      MessageComposer(
-                        enabled: true,
-                        onSend: session.sendMessage,
-                      ),
-                    ],
+                    ),
                   ],
                 ),
-              ),
-            ],
-          ),
         ),
       ),
     );

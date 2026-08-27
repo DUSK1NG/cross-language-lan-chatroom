@@ -80,6 +80,8 @@ class BridgeState {
     required this.activeRoomCanManage,
     required this.isLanDiscoveryScanning,
     required this.discoveredHosts,
+    required this.performanceMode,
+    required this.connectionLoggingEnabled,
     this.lastError,
   });
 
@@ -96,6 +98,8 @@ class BridgeState {
     activeRoomCanManage: false,
     isLanDiscoveryScanning: false,
     discoveredHosts: [],
+    performanceMode: 'Automatic',
+    connectionLoggingEnabled: false,
   );
 
   factory BridgeState.fromJson(Map<String, dynamic> json) {
@@ -130,6 +134,8 @@ class BridgeState {
       );
     });
     final lanDiscovery = _map(json['lanDiscovery']);
+    final performance = _map(json['performance']);
+    final diagnostics = _map(json['diagnostics']);
     final discoveredHosts = _list(lanDiscovery['hosts'])
         .map(_discoveredHostFromJson)
         .whereType<BridgeDiscoveredHost>()
@@ -186,6 +192,8 @@ class BridgeState {
       activeRoomCanManage: permissions['activeRoomCanManage'] == true,
       isLanDiscoveryScanning: lanDiscovery['scanning'] == true,
       discoveredHosts: discoveredHosts,
+      performanceMode: _string(performance['mode'], 'Automatic'),
+      connectionLoggingEnabled: diagnostics['enabled'] == true,
       lastError: _string(error['message']).isEmpty
           ? null
           : _string(error['message']),
@@ -204,6 +212,8 @@ class BridgeState {
   final bool activeRoomCanManage;
   final bool isLanDiscoveryScanning;
   final List<BridgeDiscoveredHost> discoveredHosts;
+  final String performanceMode;
+  final bool connectionLoggingEnabled;
   final String? lastError;
 
   static Map<String, dynamic> _map(Object? value) => value is Map

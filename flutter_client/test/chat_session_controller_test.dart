@@ -261,8 +261,7 @@ void main() {
 
   test('sends a private message for the active direct conversation', () {
     final core = FakeLanChatCore(
-      snapshot:
-          '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"dm","userCode":"B002"}},"rooms":[],"directMessages":[{"userCode":"B002","displayName":"Bob","unreadCount":0}],"activeMessages":[]}',
+      snapshot: '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"dm","userCode":"B002"}},"rooms":[],"directMessages":[{"userCode":"B002","displayName":"Bob","unreadCount":0}],"activeMessages":[]}',
     );
     final controller = ChatSessionController(core)..refresh();
     addTearDown(controller.dispose);
@@ -302,30 +301,64 @@ void main() {
     });
   });
 
-  test('dispatches copy, local removal, recall and retry without local records', () {
-    final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+  test(
+    'dispatches copy, local removal, recall and retry without local records',
+    () {
+      final core = FakeLanChatCore(snapshot: connectedLobbyStateJson);
+      final controller = ChatSessionController(core)..refresh();
+      addTearDown(controller.dispose);
+
+      controller.copyMessage('只交给原生核心');
+      controller.removeLocalMessage('m-1');
+      controller.recallMessage('m-2');
+      controller.retryMessage('m-3');
+
+      final commands = core.dispatched
+          .map((json) => jsonDecode(json) as Map<String, dynamic>)
+          .toList(growable: false);
+      expect(commands.map((command) => command['type']), [
+        'message.copy',
+        'message.removeLocal',
+        'message.recall',
+        'message.retry',
+      ]);
+      expect(commands[0]['payload'], {'text': '只交给原生核心'});
+      expect(commands[1]['payload'], {'messageId': 'm-1'});
+      expect(commands[2]['payload'], {'messageId': 'm-2'});
+      expect(commands[3]['payload'], {'messageId': 'm-3'});
+      expect(controller.messages, isEmpty);
+    },
+  );
+
+  test('dispatches exact directory, admin, and settings bridge payloads', () {
+    final core = FakeLanChatCore(snapshot: adminConnectedLobbyStateJson);
     final controller = ChatSessionController(core)..refresh();
     addTearDown(controller.dispose);
 
-    controller.copyMessage('只交给原生核心');
-    controller.removeLocalMessage('m-1');
-    controller.recallMessage('m-2');
-    controller.retryMessage('m-3');
+    controller.refreshUsersDirectory();
+    controller.refreshRoomsDirectory();
+    controller.sendAdminAction(' mute ', targetUserCode: ' B002 ');
+    controller.setPerformanceMode('Balanced');
+    controller.setConnectionLogging(true);
 
     final commands = core.dispatched
         .map((json) => jsonDecode(json) as Map<String, dynamic>)
         .toList(growable: false);
     expect(commands.map((command) => command['type']), [
-      'message.copy',
-      'message.removeLocal',
-      'message.recall',
-      'message.retry',
+      'directory.refreshUsers',
+      'directory.refreshRooms',
+      'admin.action',
+      'settings.setPerformanceMode',
+      'settings.setConnectionLogging',
     ]);
-    expect(commands[0]['payload'], {'text': '只交给原生核心'});
-    expect(commands[1]['payload'], {'messageId': 'm-1'});
-    expect(commands[2]['payload'], {'messageId': 'm-2'});
-    expect(commands[3]['payload'], {'messageId': 'm-3'});
-    expect(controller.messages, isEmpty);
+    expect(commands[0]['payload'], <String, dynamic>{});
+    expect(commands[1]['payload'], <String, dynamic>{});
+    expect(commands[2]['payload'], {
+      'action': 'mute',
+      'targetUserCode': 'B002',
+    });
+    expect(commands[3]['payload'], {'mode': 'Balanced'});
+    expect(commands[4]['payload'], {'enabled': true});
   });
 }
 
@@ -359,6 +392,9 @@ class FakeLanChatCore implements ChatCore {
 
 const connectedLobbyStateJson =
     '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[]}';
+
+const adminConnectedLobbyStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"identity":{"admin":true},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[]}';
 
 const lanDiscoveryStateJson =
     '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[],"lanDiscovery":{"scanning":true,"hosts":[{"id":"host-1","hostName":"Alice PC","serverIp":"192.168.8.23","serverPort":8888,"fingerprintSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","known":false}]}}';
