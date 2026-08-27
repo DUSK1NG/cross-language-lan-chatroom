@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
@@ -35,17 +36,29 @@ void main() {
   });
 
   test(
-    'reads a schema-versioned initial snapshot from the real core',
+    'loads the real core and returns a schema-versioned initial snapshot',
     () {
       final core = LanChatCore.openForTest();
       addTearDown(core.dispose);
 
-      expect(core.stateJson(), contains('"schemaVersion":1'));
+      final state = jsonDecode(core.stateJson()) as Map<String, dynamic>;
+      expect(state['schemaVersion'], 1);
     },
-    skip: Platform.environment['LAN_CHAT_CORE_DLL'] == null
-        ? 'Set LAN_CHAT_CORE_DLL to run against the built native core.'
-        : false,
+    skip: _canRunNativeCoreTest()
+        ? false
+        : 'Set LAN_CHAT_CORE_DLL, LAN_CHAT_CORE_RUNTIME_DIR, and '
+              'LAN_CHAT_CORE_NATIVE_TEST=1 only in a host with controlled Qt DLL loading.',
   );
+}
+
+bool _canRunNativeCoreTest() {
+  final coreDll = Platform.environment['LAN_CHAT_CORE_DLL'];
+  final runtimeDirectory = Platform.environment['LAN_CHAT_CORE_RUNTIME_DIR'];
+  return coreDll != null &&
+      File(coreDll).existsSync() &&
+      runtimeDirectory != null &&
+      Directory(runtimeDirectory).existsSync() &&
+      Platform.environment['LAN_CHAT_CORE_NATIVE_TEST'] == '1';
 }
 
 class _FakeNativeApi implements LanChatCoreNativeApi {

@@ -11,7 +11,9 @@ import 'widgets/message_timeline.dart';
 void main() {
   try {
     runApp(LanChatFlutterApp(core: LanChatCore.open()));
-  } catch (error) {
+  } on StateError catch (error) {
+    runApp(LanChatFlutterApp(startupError: error.toString()));
+  } on ArgumentError catch (error) {
     runApp(LanChatFlutterApp(startupError: '无法加载 LAN Chat 原生核心：$error'));
   }
 }
@@ -27,139 +29,159 @@ class LanChatFlutterApp extends StatefulWidget {
 }
 
 class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
-  late final ChatSessionController _session;
+  ChatSessionController? _session;
 
   @override
   void initState() {
     super.initState();
-    _session = ChatSessionController(widget.core ?? _IdleChatCore())..refresh();
+    if (widget.core case final core?) {
+      _session = ChatSessionController(core)..refresh();
+    }
   }
 
   @override
   void dispose() {
-    _session.dispose();
+    _session?.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'LAN Chat',
-    theme: ThemeData(
-      colorSchemeSeed: const Color(0xFF4F46E5),
-      useMaterial3: true,
-    ),
-    home: ListenableBuilder(
-      listenable: _session,
-      builder: (context, _) => Scaffold(
-        appBar: AppBar(
-          title: const Text('LAN Chat'),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: ConnectionBanner(
-                phase: _session.connectionPhase,
-                statusText: _session.statusText,
-                onDisconnect: _session.disconnect,
-              ),
-            ),
-          ],
+  Widget build(BuildContext context) {
+    if (widget.startupError case final error?) {
+      final detail = error == '无法加载 LAN Chat 原生核心'
+          ? '请检查 Windows 原生运行时后重试。'
+          : error;
+      return MaterialApp(
+        title: 'LAN Chat',
+        theme: ThemeData(
+          colorSchemeSeed: const Color(0xFF4F46E5),
+          useMaterial3: true,
         ),
-        body: Row(
-          children: [
-            ConversationSidebar(
-              conversations: _session.conversations,
-              selectedRoom: _session.selectedRoom,
-              onSelected: _session.selectConversation,
-            ),
-            Expanded(
+        home: Scaffold(
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (widget.startupError ?? _session.lastError
-                      case final error?)
-                    Semantics(
-                      liveRegion: true,
-                      label: '错误：$error',
-                      child: Container(
-                        width: double.infinity,
-                        color: Theme.of(context).colorScheme.errorContainer,
-                        padding: const EdgeInsets.all(12),
-                        child: Text(error),
-                      ),
-                    ),
-                  if (_session.connectionPhase == 'connecting')
-                    TextButton.icon(
-                      onPressed: _session.disconnect,
-                      icon: const Icon(Icons.cancel_outlined),
-                      label: const Text('取消连接'),
-                    ),
-                  if (!_session.isConnected)
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: ConnectionForm(
-                          enabled: _session.connectionPhase != 'connecting',
-                          onConnect:
-                              ({
-                                required serverIp,
-                                required serverPort,
-                                required username,
-                                required userCode,
-                                required caFile,
-                                required useLocalhostTlsSni,
-                              }) => _session.connectRemote(
-                                serverIp: serverIp,
-                                serverPort: serverPort,
-                                username: username,
-                                userCode: userCode,
-                                caFile: caFile,
-                                useLocalhostTlsSni: useLocalhostTlsSni,
-                              ),
-                          isLanDiscoveryScanning:
-                              _session.isLanDiscoveryScanning,
-                          discoveredHosts: _session.discoveredHosts,
-                          onDiscoverLanHosts: _session.discoverLanHosts,
-                          onConnectDiscoveredHost:
-                              ({
-                                required hostId,
-                                required username,
-                                required userCode,
-                              }) => _session.connectDiscoveredHost(
-                                hostId,
-                                username: username,
-                                userCode: userCode,
-                              ),
-                        ),
-                      ),
-                    )
-                  else ...[
-                    Expanded(
-                      child: MessageTimeline(messages: _session.messages),
-                    ),
-                    MessageComposer(
-                      enabled: true,
-                      onSend: _session.sendMessage,
-                    ),
-                  ],
+                  const Text('无法加载 LAN Chat 原生核心'),
+                  const SizedBox(height: 12),
+                  Text(detail),
                 ],
               ),
             ),
-          ],
+          ),
+        ),
+      );
+    }
+
+    final session = _session;
+    if (session == null) {
+      throw StateError('LanChatFlutterApp 需要原生核心或启动错误。');
+    }
+    return MaterialApp(
+      title: 'LAN Chat',
+      theme: ThemeData(
+        colorSchemeSeed: const Color(0xFF4F46E5),
+        useMaterial3: true,
+      ),
+      home: ListenableBuilder(
+        listenable: session,
+        builder: (context, _) => Scaffold(
+          appBar: AppBar(
+            title: const Text('LAN Chat'),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: ConnectionBanner(
+                  phase: session.connectionPhase,
+                  statusText: session.statusText,
+                  onDisconnect: session.disconnect,
+                ),
+              ),
+            ],
+          ),
+          body: Row(
+            children: [
+              ConversationSidebar(
+                conversations: session.conversations,
+                selectedRoom: session.selectedRoom,
+                onSelected: session.selectConversation,
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    if (session.lastError case final error?)
+                      Semantics(
+                        liveRegion: true,
+                        label: '错误：$error',
+                        child: Container(
+                          width: double.infinity,
+                          color: Theme.of(context).colorScheme.errorContainer,
+                          padding: const EdgeInsets.all(12),
+                          child: Text(error),
+                        ),
+                      ),
+                    if (session.connectionPhase == 'connecting')
+                      TextButton.icon(
+                        onPressed: session.disconnect,
+                        icon: const Icon(Icons.cancel_outlined),
+                        label: const Text('取消连接'),
+                      ),
+                    if (!session.isConnected)
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: ConnectionForm(
+                            enabled: session.connectionPhase != 'connecting',
+                            onConnect:
+                                ({
+                                  required serverIp,
+                                  required serverPort,
+                                  required username,
+                                  required userCode,
+                                  required caFile,
+                                  required useLocalhostTlsSni,
+                                }) => session.connectRemote(
+                                  serverIp: serverIp,
+                                  serverPort: serverPort,
+                                  username: username,
+                                  userCode: userCode,
+                                  caFile: caFile,
+                                  useLocalhostTlsSni: useLocalhostTlsSni,
+                                ),
+                            isLanDiscoveryScanning:
+                                session.isLanDiscoveryScanning,
+                            discoveredHosts: session.discoveredHosts,
+                            onDiscoverLanHosts: session.discoverLanHosts,
+                            onConnectDiscoveredHost:
+                                ({
+                                  required hostId,
+                                  required username,
+                                  required userCode,
+                                }) => session.connectDiscoveredHost(
+                                  hostId,
+                                  username: username,
+                                  userCode: userCode,
+                                ),
+                          ),
+                        ),
+                      )
+                    else ...[
+                      Expanded(
+                        child: MessageTimeline(messages: session.messages),
+                      ),
+                      MessageComposer(
+                        enabled: true,
+                        onSend: session.sendMessage,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
-
-class _IdleChatCore implements ChatCore {
-  @override
-  int dispatch(String json) => 0;
-
-  @override
-  List<String> drainEvents() => const [];
-
-  @override
-  void dispose() {}
-
-  @override
-  String stateJson() =>
-      '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[]}';
+    );
+  }
 }

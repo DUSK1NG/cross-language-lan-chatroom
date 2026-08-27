@@ -35,10 +35,14 @@ class LanChatCore implements ChatCore {
   }
 
   factory LanChatCore.openForTest() {
-    final libraryPath = Platform.environment['LAN_CHAT_CORE_DLL'];
-    if (libraryPath == null || libraryPath.isEmpty) {
+    final coreDll = Platform.environment['LAN_CHAT_CORE_DLL'];
+    if (coreDll == null || coreDll.isEmpty) {
       throw StateError('LAN_CHAT_CORE_DLL 未设置，无法加载原生核心。');
     }
+    final runtimeDirectory = Platform.environment['LAN_CHAT_CORE_RUNTIME_DIR'];
+    final libraryPath = runtimeDirectory == null || runtimeDirectory.isEmpty
+        ? coreDll
+        : '$runtimeDirectory${Platform.pathSeparator}lan_chat_core.dll';
     return LanChatCore._(
       LanChatCoreBindings(DynamicLibrary.open(_requireLibrary(libraryPath))),
     );

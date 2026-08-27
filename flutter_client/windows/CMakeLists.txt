@@ -57,6 +57,34 @@ if(NOT EXISTS "${LAN_CHAT_CORE_DLL}")
   message(FATAL_ERROR "LAN_CHAT_CORE_DLL does not exist: ${LAN_CHAT_CORE_DLL}")
 endif()
 
+set(LAN_CHAT_QT_PREFIX "$ENV{LAN_CHAT_QT_PREFIX}")
+set(LAN_CHAT_OPENSSL_ROOT "$ENV{LAN_CHAT_OPENSSL_ROOT}")
+if(LAN_CHAT_QT_PREFIX STREQUAL "")
+  message(FATAL_ERROR "LAN_CHAT_QT_PREFIX must point to the Qt 6.10.3 prefix")
+endif()
+if(LAN_CHAT_OPENSSL_ROOT STREQUAL "")
+  message(FATAL_ERROR "LAN_CHAT_OPENSSL_ROOT must point to the OpenSSL 3.6.3 prefix")
+endif()
+
+set(LAN_CHAT_RUNTIME_DLLS
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6Core.dll"
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6Gui.dll"
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6Network.dll"
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6Quick.dll"
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6OpenGL.dll"
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6Qml.dll"
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6QmlModels.dll"
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6QmlMeta.dll"
+  "${LAN_CHAT_QT_PREFIX}/bin/Qt6QmlWorkerScript.dll"
+  "${LAN_CHAT_OPENSSL_ROOT}/bin/libssl-3-x64.dll"
+  "${LAN_CHAT_OPENSSL_ROOT}/bin/libcrypto-3-x64.dll"
+)
+foreach(LAN_CHAT_RUNTIME_DLL IN LISTS LAN_CHAT_RUNTIME_DLLS)
+  if(NOT EXISTS "${LAN_CHAT_RUNTIME_DLL}")
+    message(FATAL_ERROR "Required LAN Chat runtime DLL does not exist: ${LAN_CHAT_RUNTIME_DLL}")
+  endif()
+endforeach()
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
