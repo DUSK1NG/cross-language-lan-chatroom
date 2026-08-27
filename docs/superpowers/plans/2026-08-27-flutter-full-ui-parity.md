@@ -180,6 +180,48 @@ git commit -m "feat: complete Flutter UI parity"
 
 Expected: 既有 C++ 测试、Flutter 测试和 Debug 构建均通过；真实双客户端仅按人工验收执行。
 
+### Task 5: 连接审批保留
+
+**Files:**
+- Modify: `flutter_client/lib/models/bridge_state.dart`
+- Modify: `flutter_client/lib/state/chat_session_controller.dart`
+- Modify: `flutter_client/lib/widgets/admin_actions.dart`
+- Modify: `flutter_client/test/chat_session_controller_test.dart`
+- Modify: `flutter_client/test/workspace_page_test.dart`
+
+**Interfaces:**
+- Consumes: state JSON 的 `connectionApprovals` 条目与现有 `admin.action`。
+- Produces: 管理员可见的批准/拒绝入口，分别分发 `{"action":"approve_connection","messageId":...}` 和 `{"action":"deny_connection","messageId":...}`。
+
+- [ ] **Step 1: 写失败测试并运行 RED**
+
+加入带 `connectionApprovals` 的管理员 state fixture，断言非管理员没有审批控件；断言管理员操作精确分发：
+
+```dart
+expect(command['type'], 'admin.action');
+expect(command['payload'], {'action': 'approve_connection', 'messageId': 'approval-1'});
+```
+
+Run: `flutter test test/chat_session_controller_test.dart test/workspace_page_test.dart`
+
+Expected: FAIL，因为 state 未解析审批项且控制器/API 不存在。
+
+- [ ] **Step 2: 最小实现与 GREEN**
+
+解析审批条目的非敏感展示字段和 messageId；只在已连接管理员状态渲染批准/拒绝按钮。控制器在分发前再次检查管理员与已连接状态。不得显示或存储审批消息以外的聊天、证书或凭据。
+
+- [ ] **Step 3: 验证与提交**
+
+```powershell
+flutter test
+flutter analyze
+$env:LAN_CHAT_CORE_DLL = 'C:\Users\Q1573\Desktop\MY_project\lan-chat\.worktrees\flutter-ui-parity-clean\out\modern-msvc-x64\lan_chat_core.dll'
+flutter build windows --debug
+git diff --check
+git add flutter_client docs/superpowers/plans/2026-08-27-flutter-full-ui-parity.md
+git commit -m "feat: add Flutter connection approvals"
+```
+
 ## Self-Review
 
 - Task 1 覆盖截图中的 DLL 加载故障；Task 2 覆盖缺失选择页和三种连接入口；Task 3、4 覆盖既有聊天、管理和设置命令。
