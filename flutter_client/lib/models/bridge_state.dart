@@ -30,6 +30,22 @@ class BridgeMessage {
   final bool isSystem;
 }
 
+class BridgeDiscoveredHost {
+  const BridgeDiscoveredHost({
+    required this.id,
+    required this.hostName,
+    required this.serverIp,
+    required this.serverPort,
+    required this.isKnown,
+  });
+
+  final String id;
+  final String hostName;
+  final String serverIp;
+  final int serverPort;
+  final bool isKnown;
+}
+
 class BridgeState {
   const BridgeState({
     required this.connectionPhase,
@@ -37,6 +53,8 @@ class BridgeState {
     required this.conversations,
     required this.messages,
     required this.selectedRoom,
+    required this.isLanDiscoveryScanning,
+    required this.discoveredHosts,
     this.lastError,
   });
 
@@ -46,6 +64,8 @@ class BridgeState {
     conversations: [],
     messages: [],
     selectedRoom: 'lobby',
+    isLanDiscoveryScanning: false,
+    discoveredHosts: [],
   );
 
   factory BridgeState.fromJson(Map<String, dynamic> json) {
@@ -77,6 +97,11 @@ class BridgeState {
         memberCount: 0,
       );
     });
+    final lanDiscovery = _map(json['lanDiscovery']);
+    final discoveredHosts = _list(lanDiscovery['hosts'])
+        .map(_discoveredHostFromJson)
+        .whereType<BridgeDiscoveredHost>()
+        .toList(growable: false);
     final error = _map(connection['lastError']);
 
     return BridgeState(
@@ -105,6 +130,8 @@ class BridgeState {
           _string(activeConversation['title'], 'lobby'),
         ),
       ),
+      isLanDiscoveryScanning: lanDiscovery['scanning'] == true,
+      discoveredHosts: discoveredHosts,
       lastError: _string(error['message']).isEmpty
           ? null
           : _string(error['message']),
@@ -116,6 +143,8 @@ class BridgeState {
   final List<BridgeConversation> conversations;
   final List<BridgeMessage> messages;
   final String selectedRoom;
+  final bool isLanDiscoveryScanning;
+  final List<BridgeDiscoveredHost> discoveredHosts;
   final String? lastError;
 
   static Map<String, dynamic> _map(Object? value) => value is Map
@@ -128,4 +157,22 @@ class BridgeState {
       value is String ? value : fallback;
 
   static int _int(Object? value) => value is num ? value.toInt() : 0;
+
+  static BridgeDiscoveredHost? _discoveredHostFromJson(Object? value) {
+    final host = _map(value);
+    final id = _string(host['id']);
+    final hostName = _string(host['hostName']);
+    final serverIp = _string(host['serverIp']);
+    final serverPort = _int(host['serverPort']);
+    if (id.isEmpty || hostName.isEmpty || serverIp.isEmpty || serverPort < 1) {
+      return null;
+    }
+    return BridgeDiscoveredHost(
+      id: id,
+      hostName: hostName,
+      serverIp: serverIp,
+      serverPort: serverPort,
+      isKnown: host['known'] == true,
+    );
+  }
 }

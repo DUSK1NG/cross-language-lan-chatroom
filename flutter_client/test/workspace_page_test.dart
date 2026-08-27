@@ -53,6 +53,42 @@ void main() {
       expect(core.dispatched.single, contains('session.connectRemote'));
     },
   );
+
+  testWidgets('shows discovered LAN hosts and joins with identity only', (
+    tester,
+  ) async {
+    final core = _FakeCore(snapshot: _lanDiscoveryStateJson);
+    await tester.pumpWidget(LanChatFlutterApp(core: core));
+    await tester.pump();
+
+    expect(find.bySemanticsLabel('搜索局域网主机'), findsOneWidget);
+    expect(find.text('正在搜索局域网主机…'), findsOneWidget);
+    expect(find.text('Alice PC'), findsOneWidget);
+    expect(find.text('192.168.8.23:8888\n新发现的主机'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('搜索局域网主机'));
+    expect(core.dispatched.single, contains('session.discoverLanHosts'));
+
+    await tester.enterText(find.bySemanticsLabel('用户名'), 'Alice');
+    await tester.enterText(find.bySemanticsLabel('用户代码'), 'A001');
+    final connectDiscoveredHost = find.widgetWithText(FilledButton, '使用此主机连接');
+    await tester.ensureVisible(connectDiscoveredHost);
+    await tester.tap(connectDiscoveredHost);
+
+    expect(core.dispatched.last, contains('session.connectDiscoveredHost'));
+    expect(core.dispatched.last, contains('"hostId":"host-1"'));
+    expect(core.dispatched.last, contains('"username":"Alice"'));
+    expect(core.dispatched.last, contains('"userCode":"A001"'));
+    expect(core.dispatched.last, isNot(contains('caFile')));
+  });
+
+  testWidgets('shows an empty LAN discovery message', (tester) async {
+    final core = _FakeCore(snapshot: _idleStateJson);
+    await tester.pumpWidget(LanChatFlutterApp(core: core));
+    await tester.pump();
+
+    expect(find.text('未发现局域网主机'), findsOneWidget);
+  });
 }
 
 class _FakeCore implements ChatCore {
@@ -82,3 +118,6 @@ const _connectedStateJson =
 
 const _idleStateJson =
     '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[]}';
+
+const _lanDiscoveryStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[],"lanDiscovery":{"scanning":true,"hosts":[{"id":"host-1","hostName":"Alice PC","serverIp":"192.168.8.23","serverPort":8888,"fingerprintSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","known":false}]}}';

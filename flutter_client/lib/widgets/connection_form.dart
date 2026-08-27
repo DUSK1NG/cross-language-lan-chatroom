@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/bridge_state.dart';
+
 typedef ConnectRequested = void Function({
   required String serverIp,
   required String serverPort,
@@ -9,15 +11,29 @@ typedef ConnectRequested = void Function({
   required bool useLocalhostTlsSni,
 });
 
+typedef DiscoveredHostConnectRequested = void Function({
+  required String hostId,
+  required String username,
+  required String userCode,
+});
+
 class ConnectionForm extends StatefulWidget {
   const ConnectionForm({
     required this.enabled,
     required this.onConnect,
+    required this.isLanDiscoveryScanning,
+    required this.discoveredHosts,
+    required this.onDiscoverLanHosts,
+    required this.onConnectDiscoveredHost,
     super.key,
   });
 
   final bool enabled;
   final ConnectRequested onConnect;
+  final bool isLanDiscoveryScanning;
+  final List<BridgeDiscoveredHost> discoveredHosts;
+  final VoidCallback onDiscoverLanHosts;
+  final DiscoveredHostConnectRequested onConnectDiscoveredHost;
 
   @override
   State<ConnectionForm> createState() => _ConnectionFormState();
@@ -78,6 +94,39 @@ class _ConnectionFormState extends State<ConnectionForm> {
               label: const Text('连接到服务器'),
             ),
           ),
+          const Divider(height: 32),
+          Text('局域网主机', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: widget.enabled ? widget.onDiscoverLanHosts : null,
+              icon: const Icon(Icons.search),
+              label: const Text('搜索局域网主机'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (widget.isLanDiscoveryScanning) const Text('正在搜索局域网主机…'),
+          if (widget.discoveredHosts.isEmpty)
+            const Text('未发现局域网主机')
+          else
+            ...widget.discoveredHosts.map(
+              (host) => Card(
+                child: ListTile(
+                  title: Text(host.hostName),
+                  subtitle: Text(
+                    '${host.serverIp}:${host.serverPort}\n${host.isKnown ? '已知主机' : '新发现的主机'}',
+                  ),
+                  isThreeLine: true,
+                  trailing: FilledButton(
+                    onPressed: widget.enabled
+                        ? () => _connectDiscoveredHost(host.id)
+                        : null,
+                    child: const Text('使用此主机连接'),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     ),
@@ -111,6 +160,19 @@ class _ConnectionFormState extends State<ConnectionForm> {
       userCode: _userCode.text,
       caFile: _caFile.text,
       useLocalhostTlsSni: _useLocalhostTlsSni,
+    );
+  }
+
+  void _connectDiscoveredHost(String hostId) {
+    if (_username.text.trim().isEmpty || _userCode.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入用户名和用户代码')));
+      return;
+    }
+    widget.onConnectDiscoveredHost(
+      hostId: hostId,
+      username: _username.text,
+      userCode: _userCode.text,
     );
   }
 }

@@ -28,6 +28,8 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
   List<BridgeConversation> get conversations => _state.conversations;
   List<BridgeMessage> get messages => _state.messages;
   String get selectedRoom => _state.selectedRoom;
+  bool get isLanDiscoveryScanning => _state.isLanDiscoveryScanning;
+  List<BridgeDiscoveredHost> get discoveredHosts => _state.discoveredHosts;
   String? get lastError => _localError ?? _state.lastError;
   bool get isConnected => connectionPhase == 'connected';
 
@@ -92,6 +94,20 @@ class ChatSessionController extends ChangeNotifier with WidgetsBindingObserver {
       if (useLocalhostTlsSni) 'tlsServerName': 'localhost',
     });
     return true;
+  }
+
+  void discoverLanHosts() => _dispatch('session.discoverLanHosts', const {});
+
+  void connectDiscoveredHost(
+    String hostId, {
+    required String username,
+    required String userCode,
+  }) {
+    _dispatch('session.connectDiscoveredHost', {
+      'hostId': hostId.trim(),
+      'username': username.trim(),
+      'userCode': userCode.trim(),
+    });
   }
 
   void selectConversation(BridgeConversation conversation) {

@@ -113,6 +113,20 @@ class _LanChatFlutterAppState extends State<LanChatFlutterApp> {
                                 caFile: caFile,
                                 useLocalhostTlsSni: useLocalhostTlsSni,
                               ),
+                          isLanDiscoveryScanning:
+                              _session.isLanDiscoveryScanning,
+                          discoveredHosts: _session.discoveredHosts,
+                          onDiscoverLanHosts: _session.discoverLanHosts,
+                          onConnectDiscoveredHost:
+                              ({
+                                required hostId,
+                                required username,
+                                required userCode,
+                              }) => _session.connectDiscoveredHost(
+                                hostId,
+                                username: username,
+                                userCode: userCode,
+                              ),
                         ),
                       ),
                     )

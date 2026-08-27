@@ -156,6 +156,44 @@ void main() {
     expect(command['type'], 'conversation.selectDirect');
     expect(command['payload'], {'userCode': 'B002'});
   });
+
+  test(
+    'maps discovered host metadata and dispatches LAN discovery commands',
+    () {
+      final core = FakeLanChatCore(snapshot: lanDiscoveryStateJson);
+      final controller = ChatSessionController(core)..refresh();
+      addTearDown(controller.dispose);
+
+      expect(controller.isLanDiscoveryScanning, isTrue);
+      expect(controller.discoveredHosts, hasLength(1));
+      expect(controller.discoveredHosts.single.hostName, 'Alice PC');
+      expect(controller.discoveredHosts.single.serverIp, '192.168.8.23');
+      expect(controller.discoveredHosts.single.serverPort, 8888);
+      expect(controller.discoveredHosts.single.isKnown, isFalse);
+
+      controller.discoverLanHosts();
+
+      expect(jsonDecode(core.dispatched.single), {
+        'id': startsWith('flutter-'),
+        'type': 'session.discoverLanHosts',
+        'payload': <String, dynamic>{},
+      });
+
+      controller.connectDiscoveredHost(
+        'host-1',
+        username: ' Alice ',
+        userCode: ' A001 ',
+      );
+
+      final command = jsonDecode(core.dispatched.last) as Map<String, dynamic>;
+      expect(command['type'], 'session.connectDiscoveredHost');
+      expect(command['payload'], {
+        'hostId': 'host-1',
+        'username': 'Alice',
+        'userCode': 'A001',
+      });
+    },
+  );
 }
 
 class FakeLanChatCore implements ChatCore {
@@ -188,3 +226,6 @@ class FakeLanChatCore implements ChatCore {
 
 const connectedLobbyStateJson =
     '{"schemaVersion":1,"connection":{"phase":"connected","statusText":"已连接"},"navigation":{"activeConversation":{"kind":"room","name":"lobby"}},"rooms":[{"roomName":"lobby","memberCount":1,"unreadCount":0}],"directMessages":[],"activeMessages":[]}';
+
+const lanDiscoveryStateJson =
+    '{"schemaVersion":1,"connection":{"phase":"idle","statusText":"未连接"},"rooms":[],"directMessages":[],"activeMessages":[],"lanDiscovery":{"scanning":true,"hosts":[{"id":"host-1","hostName":"Alice PC","serverIp":"192.168.8.23","serverPort":8888,"fingerprintSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","known":false}]}}';
