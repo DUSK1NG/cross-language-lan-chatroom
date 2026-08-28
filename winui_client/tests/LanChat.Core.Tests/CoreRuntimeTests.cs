@@ -378,7 +378,12 @@ public sealed class CoreRuntimeTests
     [TestMethod]
     public async Task Active_runtime_polls_while_dispatch_queue_remains_nonempty()
     {
-        var fake = new FakeLanChatCore { DispatchDelay = TimeSpan.FromMilliseconds(10) };
+        using var firstDispatchGate = new ManualResetEventSlim(false);
+        var fake = new FakeLanChatCore
+        {
+            DispatchDelay = TimeSpan.FromMilliseconds(10),
+            DispatchGate = firstDispatchGate,
+        };
         await using var runtime = new CoreRuntime(() => fake, TimeSpan.FromMilliseconds(20));
         var snapshots = new System.Collections.Concurrent.ConcurrentQueue<Core.Models.CoreSnapshot>();
         runtime.StateChanged += (_, snapshot) => snapshots.Enqueue(snapshot);
@@ -386,11 +391,16 @@ public sealed class CoreRuntimeTests
         runtime.SetActive(true);
         await WaitUntilAsync(() => fake.DrainEventsCallCount > 0);
 
+        var firstCommand = runtime.DispatchAsync("blocked-first");
+        await WaitUntilAsync(() => fake.Calls.Any(call =>
+            call.Operation == nameof(ILanChatCore.Dispatch) && call.Value == "blocked-first"));
         fake.EnqueueEvent("{\"kind\":\"state\"}");
         fake.EnqueueState("{\"schemaVersion\":1,\"connection\":{\"phase\":\"connected\"}}");
-        var commands = Enumerable.Range(0, 120)
+        var commands = Enumerable.Range(0, 119)
             .Select(index => runtime.DispatchAsync($"queued-{index}"))
+            .Prepend(firstCommand)
             .ToArray();
+        firstDispatchGate.Set();
 
         await WaitUntilAsync(() => snapshots.Count == 2, TimeSpan.FromMilliseconds(500));
         Assert.IsTrue(commands.Any(command => !command.IsCompleted));
