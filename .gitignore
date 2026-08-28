@@ -37,6 +37,7 @@ out/
 .npm-cache/
 frontend/node_modules/
 frontend/dist/
+winui_client/artifacts/
 
 # Local diagnostics and image-generation scratch files
 /build-*.log

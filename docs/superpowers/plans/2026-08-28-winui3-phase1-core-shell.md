@@ -25,6 +25,7 @@
 ### Task 1: 固定工具链并创建解决方案骨架
 
 **Files:**
+- Modify: `.gitignore`
 - Create: `global.json`
 - Create: `winui_client/LANChat.WinUI.slnx`
 - Create: `winui_client/Directory.Build.props`
@@ -578,31 +579,34 @@ Expected: 单元测试全通过，WinUI Debug 构建零警告、零错误。
 
 **Files:**
 - Create: `winui_client/build/NativeRuntime.targets`
+- Modify: `winui_client/LANChat.WinUI.slnx`
 - Modify: `winui_client/src/LanChat.WinUI/LanChat.WinUI.csproj`
-- Modify: `winui_client/tests/LanChat.Core.Tests/LanChat.Core.Tests.csproj`
-- Create: `winui_client/tests/LanChat.Core.Tests/RealCoreSmokeTests.cs`
+- Create: `winui_client/tests/LanChat.Core.Native.Tests/LanChat.Core.Native.Tests.csproj`
+- Create: `winui_client/tests/LanChat.Core.Native.Tests/MSTestSettings.cs`
+- Create: `winui_client/tests/LanChat.Core.Native.Tests/RealCoreSmokeTests.cs`
+- Create: `winui_client/tests/LanChat.Core.Native.Tests/packages.lock.json`
 - Generate: `winui_client/artifacts/publish/win-x64/`
 
 **Interfaces:**
 - Consumes: `LanChatCoreDll`、`LanChatQtPrefix`、`LanChatOpenSslRoot` MSBuild 属性。
-- Produces: 带 8 个目标 native DLL、可独立启动并显示真实初始状态的 WinUI Release 目录。
+- Produces: 带 12 个目标 native DLL、可独立启动并显示真实初始状态的 WinUI Release 目录。
 
 - [ ] **Step 1: 写真实 Core 受控失败测试**
 
-`RealCoreSmokeTests` 仅在 `LAN_CHAT_CORE_NATIVE_TEST=1` 时运行；调用 resolver 和真实 client，断言快照 `schemaVersion == 1`、phase 为 `idle`，然后正常释放。未设置开关时使用 `Assert.Inconclusive`，不自动搜索其他目录的 DLL。
+`RealCoreSmokeTests` 位于独立的 `LanChat.Core.Native.Tests` MSTest 项目，仅在 `LAN_CHAT_CORE_NATIVE_TEST=1` 时运行；独立 testhost 避免与 `LanChat.Core.Tests` 中会安装测试 resolver 的单元测试共享进程状态。测试调用 resolver 和真实 client，断言快照 `schemaVersion == 1`、phase 为 `idle`，然后正常释放。未设置开关时使用 `Assert.Inconclusive`，不自动搜索其他目录的 DLL。
 
 - [ ] **Step 2: 运行受控测试并确认 RED**
 
 Run without copying runtime files:
 ```powershell
 $env:LAN_CHAT_CORE_NATIVE_TEST = '1'
-dotnet test winui_client/tests/LanChat.Core.Tests/LanChat.Core.Tests.csproj --filter "FullyQualifiedName~RealCoreSmokeTests"
+dotnet test winui_client/tests/LanChat.Core.Native.Tests/LanChat.Core.Native.Tests.csproj --filter "FullyQualifiedName~RealCoreSmokeTests"
 ```
 Expected: FAIL，诊断明确指出测试输出目录缺少 `lan_chat_core.dll`。
 
 - [ ] **Step 3: 实现严格 native 运行库复制**
 
-`NativeRuntime.targets` 要求三个非空属性，并复制以下 8 个文件到 app/test 输出目录；任一源文件不存在时 MSBuild 立即失败并显示绝对路径：
+`NativeRuntime.targets` 要求三个非空属性，并复制以下 12 个文件到 app/test 输出目录；任一源文件不存在时 MSBuild 立即失败并显示绝对路径。后四个文件是 Qt 6.10.3 中 `Qt6Quick.dll` 的必要传递依赖闭包，必须与其他 Qt DLL 来自同一 MSVC Qt prefix，不得从 PATH 搜索或回退到 MinGW 版本：
 
 ```text
 lan_chat_core.dll
@@ -613,9 +617,13 @@ Qt6Gui.dll
 Qt6Network.dll
 Qt6Quick.dll
 Qt6Qml.dll
+Qt6QmlMeta.dll
+Qt6QmlModels.dll
+Qt6QmlWorkerScript.dll
+Qt6OpenGL.dll
 ```
 
-App 与 Core test 项目都导入该 targets。命令行属性必须显式传入，不在仓库写死本机路径。
+App 与独立的 Core native test 项目都导入该 targets。命令行属性必须显式传入，不在仓库写死本机路径。
 
 - [ ] **Step 4: 运行真实 Core GREEN 和全量测试**
 
@@ -636,7 +644,7 @@ Run:
 ```powershell
 dotnet publish winui_client/src/LanChat.WinUI/LanChat.WinUI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:LanChatCoreDll=$core -p:LanChatQtPrefix=$qt -p:LanChatOpenSslRoot=$openssl -o winui_client/artifacts/publish/win-x64
 ```
-Expected: 输出目录包含 `LanChat.WinUI.exe`、Windows App SDK/.NET 自包含文件和 8 个目标 native DLL，不生成或安装 MSIX。
+Expected: 输出目录包含 `LanChat.WinUI.exe`、Windows App SDK/.NET 自包含文件、项目 PRI、所有生成的 XBF、Assets 和 12 个目标 native DLL；发布门禁对缺失资源显示绝对路径并立即失败，不生成或安装 MSIX。
 
 - [ ] **Step 6: 验证独立启动和运行库来源**
 
@@ -645,7 +653,7 @@ Run:
 ```powershell
 $releaseDir = (Resolve-Path 'winui_client/artifacts/publish/win-x64').Path
 $exe = Join-Path $releaseDir 'LanChat.WinUI.exe'
-$targets = @('lan_chat_core.dll','libssl-3-x64.dll','libcrypto-3-x64.dll','Qt6Core.dll','Qt6Gui.dll','Qt6Network.dll','Qt6Quick.dll','Qt6Qml.dll')
+$targets = @('lan_chat_core.dll','libssl-3-x64.dll','libcrypto-3-x64.dll','Qt6Core.dll','Qt6Gui.dll','Qt6Network.dll','Qt6Quick.dll','Qt6Qml.dll','Qt6QmlMeta.dll','Qt6QmlModels.dll','Qt6QmlWorkerScript.dll','Qt6OpenGL.dll')
 $process = Start-Process -FilePath $exe -WorkingDirectory $releaseDir -WindowStyle Hidden -PassThru
 try {
   Start-Sleep -Seconds 3
@@ -665,7 +673,7 @@ try {
 }
 ```
 
-Expected: `已加载目标运行库: 8/8`；主窗口通过 UI Automation 可读取 `未连接`，没有 Core 诊断错误。
+Expected: `已加载目标运行库: 12/12`；主窗口通过 UI Automation 可读取 `未连接`，没有 Core 诊断错误。
 
 - [ ] **Step 7: 自动缩放性能检查**
 
@@ -681,28 +689,36 @@ public static class WinUiResizeNative {
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 }
 '@
-$process = Get-Process 'LanChat.WinUI' | Where-Object { $_.Path -eq $exe } | Select-Object -First 1
-if (-not $process -or $process.MainWindowHandle -eq 0) { throw '未找到本次 WinUI Release 窗口' }
+$process = Start-Process -FilePath $exe -WorkingDirectory $releaseDir -WindowStyle Hidden -PassThru
 $original = New-Object WinUiResizeNative+RECT
-[WinUiResizeNative]::GetWindowRect($process.MainWindowHandle, [ref]$original) | Out-Null
-$durations = [Collections.Generic.List[double]]::new()
-$total = [Diagnostics.Stopwatch]::StartNew()
-for ($index = 0; $index -lt 120; $index++) {
-  if ($index % 2 -eq 0) { $width = 900; $height = 620 } else { $width = 1380; $height = 860 }
-  $step = [Diagnostics.Stopwatch]::StartNew()
-  [WinUiResizeNative]::MoveWindow($process.MainWindowHandle, $original.Left, $original.Top, $width, $height, $true) | Out-Null
-  $step.Stop()
-  $durations.Add($step.Elapsed.TotalMilliseconds)
-  Start-Sleep -Milliseconds 40
+try {
+  Start-Sleep -Seconds 3
+  $process.Refresh()
+  if ($process.HasExited -or $process.MainWindowHandle -eq 0) { throw '本次 WinUI Release 未创建窗口' }
+  $handle = $process.MainWindowHandle
+  [WinUiResizeNative]::GetWindowRect($handle, [ref]$original) | Out-Null
+  $durations = [Collections.Generic.List[double]]::new()
+  $total = [Diagnostics.Stopwatch]::StartNew()
+  for ($index = 0; $index -lt 120; $index++) {
+    if ($index % 2 -eq 0) { $width = 900; $height = 620 } else { $width = 1380; $height = 860 }
+    $step = [Diagnostics.Stopwatch]::StartNew()
+    [WinUiResizeNative]::MoveWindow($handle, $original.Left, $original.Top, $width, $height, $true) | Out-Null
+    $step.Stop()
+    $durations.Add($step.Elapsed.TotalMilliseconds)
+    Start-Sleep -Milliseconds 40
+  }
+  [WinUiResizeNative]::MoveWindow($handle, $original.Left, $original.Top, $original.Right - $original.Left, $original.Bottom - $original.Top, $true) | Out-Null
+  $total.Stop()
+  $sorted = $durations | Sort-Object
+  $p95 = $sorted[[math]::Ceiling($sorted.Count * 0.95) - 1]
+  "Resize total: $($total.Elapsed.TotalSeconds)s"
+  "MoveWindow P95: $p95 ms"
+  if ($total.Elapsed.TotalSeconds -gt 8) { throw 'WinUI 自动缩放总耗时超过 8 秒' }
+  if ($p95 -gt 33) { throw 'WinUI MoveWindow P95 超过 33ms' }
+} finally {
+  if ($handle) { [WinUiResizeNative]::MoveWindow($handle, $original.Left, $original.Top, $original.Right - $original.Left, $original.Bottom - $original.Top, $true) | Out-Null }
+  if (-not $process.HasExited) { Stop-Process -Id $process.Id }
 }
-[WinUiResizeNative]::MoveWindow($process.MainWindowHandle, $original.Left, $original.Top, $original.Right - $original.Left, $original.Bottom - $original.Top, $true) | Out-Null
-$total.Stop()
-$sorted = $durations | Sort-Object
-$p95 = $sorted[[math]::Ceiling($sorted.Count * 0.95) - 1]
-"Resize total: $($total.Elapsed.TotalSeconds)s"
-"MoveWindow P95: $p95 ms"
-if ($total.Elapsed.TotalSeconds -gt 8) { throw 'WinUI 自动缩放总耗时超过 8 秒' }
-if ($p95 -gt 33) { throw 'WinUI MoveWindow P95 超过 33ms' }
 ```
 
 Expected: 总耗时不超过 8 秒，单次调用 P95 不超过 33ms；若失败，停止阶段验收并按系统化调试处理，不修改 UI 来掩盖问题。

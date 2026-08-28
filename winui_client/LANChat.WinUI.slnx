@@ -5,6 +5,7 @@
     <Project Path="src/LanChat.WinUI/LanChat.WinUI.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/LanChat.Core.Native.Tests/LanChat.Core.Native.Tests.csproj" />
     <Project Path="tests/LanChat.Core.Tests/LanChat.Core.Tests.csproj" />
     <Project Path="tests/LanChat.Presentation.Tests/LanChat.Presentation.Tests.csproj" />
   </Folder>
