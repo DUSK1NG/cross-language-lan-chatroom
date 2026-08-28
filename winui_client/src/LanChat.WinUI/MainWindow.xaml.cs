@@ -6,7 +6,6 @@ using LanChat.Presentation;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
-using Windows.Graphics;
 
 namespace LanChat_WinUI;
 
@@ -31,7 +30,7 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon("Assets/AppIcon.ico");
         _minimumSizeController = new WindowMinimumSizeController(this, 900, 620);
-        AppWindow.Resize(new SizeInt32(1100, 720));
+        AppWindow.Resize(_minimumSizeController.ScaleToPhysicalSize(1100, 720));
 
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         Activated += OnActivated;

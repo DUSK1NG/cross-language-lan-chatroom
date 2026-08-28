@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
+using Windows.Graphics;
 using WinRT.Interop;
 
 namespace LanChat_WinUI;
@@ -45,6 +46,17 @@ internal sealed class WindowMinimumSizeController : IDisposable
         }
 
         _isInstalled = true;
+    }
+
+    internal SizeInt32 ScaleToPhysicalSize(int effectiveWidth, int effectiveHeight)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(effectiveWidth);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(effectiveHeight);
+
+        var dpi = GetWindowDpi(_windowHandle);
+        return new SizeInt32(
+            ScaleForDpi(effectiveWidth, dpi),
+            ScaleForDpi(effectiveHeight, dpi));
     }
 
     public void Dispose()
@@ -106,13 +118,7 @@ internal sealed class WindowMinimumSizeController : IDisposable
             throw new InvalidOperationException("WM_GETMINMAXINFO 未提供 MINMAXINFO。");
         }
 
-        Marshal.SetLastPInvokeError(0);
-        var dpi = GetDpiForWindow(windowHandle);
-        if (dpi == 0)
-        {
-            throw CreateWin32Exception("无法读取 WinUI 窗口 DPI。");
-        }
-
+        var dpi = GetWindowDpi(windowHandle);
         var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(minMaxInfoAddress);
         minMaxInfo.MinTrackSize.X = Math.Max(
             minMaxInfo.MinTrackSize.X,
@@ -125,6 +131,18 @@ internal sealed class WindowMinimumSizeController : IDisposable
 
     private static int ScaleForDpi(int effectivePixels, uint dpi) =>
         checked((int)Math.Ceiling(effectivePixels * dpi / (double)DefaultDpi));
+
+    private static uint GetWindowDpi(nint windowHandle)
+    {
+        Marshal.SetLastPInvokeError(0);
+        var dpi = GetDpiForWindow(windowHandle);
+        if (dpi == 0)
+        {
+            throw CreateWin32Exception("无法读取 WinUI 窗口 DPI。");
+        }
+
+        return dpi;
+    }
 
     private static Win32Exception CreateWin32Exception(string message)
     {
