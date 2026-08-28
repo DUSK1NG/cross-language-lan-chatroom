@@ -11,7 +11,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly object _lifecycleLock = new();
     private readonly SemaphoreSlim _setActiveGate = new(1, 1);
     [ThreadStatic]
-    private static Task? s_executingUiTicket;
+    private static Stack<Task>? s_executingUiTickets;
     private readonly List<Task> _pendingUiOperations = [];
     private string _connectionPhase = "starting";
     private string _statusText = "正在初始化…";
@@ -78,7 +78,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         TaskCompletionSource disposeCompletion;
         TaskCompletionSource? cancelledStart;
         Task[] pendingUiOperations;
-        var currentUiTicket = s_executingUiTicket;
+        var executingUiTickets = SnapshotExecutingUiTickets();
         lock (_lifecycleLock)
         {
             if (_disposeTask is not null)
@@ -91,7 +91,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             disposeCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _disposeTask = disposeCompletion.Task;
             cancelledStart = _startCompletion;
-            pendingUiOperations = [.. _pendingUiOperations.Where(ticket => ticket != currentUiTicket)];
+            pendingUiOperations = [.. _pendingUiOperations.Where(ticket => !executingUiTickets.Contains(ticket))];
         }
 
         cancelledStart?.TrySetException(new ObjectDisposedException(nameof(ShellViewModel)));
@@ -272,17 +272,24 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void ExecuteUiAction(Task ticket, Action<int> action, int generation)
     {
-        var previousTicket = s_executingUiTicket;
-        s_executingUiTicket = ticket;
+        var tickets = s_executingUiTickets ??= new Stack<Task>();
+        tickets.Push(ticket);
         try
         {
             action(generation);
         }
         finally
         {
-            s_executingUiTicket = previousTicket;
+            tickets.Pop();
+            if (tickets.Count == 0)
+            {
+                s_executingUiTickets = null;
+            }
         }
     }
+
+    private static HashSet<Task> SnapshotExecutingUiTickets() =>
+        s_executingUiTickets is null ? [] : [.. s_executingUiTickets];
 
     private void ApplySnapshot(CoreSnapshot snapshot, int generation)
     {

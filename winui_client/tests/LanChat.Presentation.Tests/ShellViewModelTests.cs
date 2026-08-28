@@ -212,12 +212,18 @@ public sealed class ShellViewModelTests
         var viewModel = new ShellViewModel(runtime, new BackgroundDispatcher());
         using var notificationStarted = new ManualResetEventSlim();
         using var releaseNotification = new ManualResetEventSlim();
+        using var enteredDispose = new ManualResetEventSlim();
         Task? dispose = null;
         viewModel.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
             {
-                dispose = Task.Run(async () => await viewModel.DisposeAsync());
+                dispose = Task.Run(async () =>
+                {
+                    var disposeTask = viewModel.DisposeAsync().AsTask();
+                    enteredDispose.Set();
+                    await disposeTask;
+                });
                 notificationStarted.Set();
                 releaseNotification.Wait();
             }
@@ -225,9 +231,66 @@ public sealed class ShellViewModelTests
 
         runtime.PublishState(new CoreSnapshot(1, "idle", "未连接"));
         Assert.IsTrue(notificationStarted.Wait(TimeSpan.FromSeconds(1)));
+        Assert.IsTrue(enteredDispose.Wait(TimeSpan.FromSeconds(1)));
         Assert.IsFalse(dispose!.Wait(TimeSpan.FromMilliseconds(100)));
         releaseNotification.Set();
         await dispose.WaitAsync(TimeSpan.FromSeconds(1));
+    }
+
+    [TestMethod]
+    public async Task Nested_immediate_action_can_synchronously_wait_for_its_dispose()
+    {
+        var runtime = new FakeCoreRuntime();
+        var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName != nameof(ShellViewModel.ConnectionPhase))
+            {
+                return;
+            }
+
+            if (viewModel.ConnectionPhase == "outer")
+            {
+                runtime.PublishState(new CoreSnapshot(1, "inner", "内部"));
+            }
+            else if (viewModel.ConnectionPhase == "inner")
+            {
+                viewModel.DisposeAsync().GetAwaiter().GetResult();
+            }
+        };
+
+        await Task.Run(() => runtime.PublishState(new CoreSnapshot(1, "outer", "外部")))
+            .WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.AreEqual(1, runtime.DisposeCount);
+    }
+
+    [TestMethod]
+    public async Task Nested_cross_viewmodel_action_excludes_outer_ticket_of_disposed_viewmodel()
+    {
+        var runtime1 = new FakeCoreRuntime();
+        var runtime2 = new FakeCoreRuntime();
+        var viewModel1 = new ShellViewModel(runtime1, new ImmediateDispatcher());
+        var viewModel2 = new ShellViewModel(runtime2, new ImmediateDispatcher());
+        viewModel1.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
+            {
+                runtime2.PublishState(new CoreSnapshot(1, "inner", "内部"));
+            }
+        };
+        viewModel2.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
+            {
+                viewModel1.DisposeAsync().GetAwaiter().GetResult();
+            }
+        };
+
+        await Task.Run(() => runtime1.PublishState(new CoreSnapshot(1, "outer", "外部")))
+            .WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.AreEqual(1, runtime1.DisposeCount);
     }
 
     [TestMethod]
