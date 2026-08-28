@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using LanChat.Core.Models;
 
 namespace LanChat.Core.Runtime;
@@ -6,7 +7,7 @@ namespace LanChat.Core.Runtime;
 public sealed class CoreRuntime : ICoreRuntime
 {
     private readonly Func<ILanChatCore> _coreFactory;
-    private readonly int _pollIntervalMilliseconds;
+    private readonly long _pollIntervalTimestampTicks;
     private readonly BlockingCollection<Action<ILanChatCore>> _workItems = new();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly TaskCompletionSource _started = NewCompletionSource();
@@ -17,6 +18,7 @@ public sealed class CoreRuntime : ICoreRuntime
     private bool _disposeRequested;
     private bool _threadFinished;
     private bool _isActive;
+    private long _nextPollTimestamp;
 
     public CoreRuntime(Func<ILanChatCore> coreFactory, TimeSpan? pollInterval = null)
     {
@@ -27,7 +29,9 @@ public sealed class CoreRuntime : ICoreRuntime
             throw new ArgumentOutOfRangeException(nameof(pollInterval));
         }
 
-        _pollIntervalMilliseconds = Math.Max(1, (int)Math.Ceiling(effectivePollInterval.TotalMilliseconds));
+        _pollIntervalTimestampTicks = Math.Max(
+            1,
+            (long)Math.Ceiling(effectivePollInterval.TotalSeconds * Stopwatch.Frequency));
         _thread = new Thread(Run)
         {
             IsBackground = true,
@@ -99,6 +103,7 @@ public sealed class CoreRuntime : ICoreRuntime
                 if (active && !wasActive)
                 {
                     DrainEvents(core);
+                    ScheduleNextPoll();
                 }
             });
         }
@@ -186,9 +191,15 @@ public sealed class CoreRuntime : ICoreRuntime
         {
             try
             {
+                if (_isActive && Stopwatch.GetTimestamp() >= _nextPollTimestamp)
+                {
+                    DrainEvents(core);
+                    ScheduleNextPoll();
+                }
+
                 if (_workItems.TryTake(
                     out var workItem,
-                    _isActive ? _pollIntervalMilliseconds : Timeout.Infinite,
+                    _isActive ? GetPollWaitMilliseconds() : Timeout.Infinite,
                     _cancellation.Token))
                 {
                     workItem(core);
@@ -196,6 +207,7 @@ public sealed class CoreRuntime : ICoreRuntime
                 else if (_isActive && !_workItems.IsCompleted)
                 {
                     DrainEvents(core);
+                    ScheduleNextPoll();
                 }
             }
             catch (OperationCanceledException) when (_cancellation.IsCancellationRequested)
@@ -207,6 +219,22 @@ public sealed class CoreRuntime : ICoreRuntime
                 PublishError(exception);
             }
         }
+    }
+
+    private void ScheduleNextPoll() =>
+        _nextPollTimestamp = Stopwatch.GetTimestamp() + _pollIntervalTimestampTicks;
+
+    private int GetPollWaitMilliseconds()
+    {
+        var remainingTimestampTicks = _nextPollTimestamp - Stopwatch.GetTimestamp();
+        if (remainingTimestampTicks <= 0)
+        {
+            return 0;
+        }
+
+        var remainingMilliseconds = Math.Ceiling(
+            remainingTimestampTicks * 1000d / Stopwatch.Frequency);
+        return (int)Math.Clamp(remainingMilliseconds, 1, int.MaxValue);
     }
 
     private void DrainEvents(ILanChatCore core)

@@ -375,16 +375,71 @@ public sealed class CoreRuntimeTests
         Assert.AreEqual(1, fake.DisposeCallCount);
     }
 
+    [TestMethod]
+    public async Task Active_runtime_polls_while_dispatch_queue_remains_nonempty()
+    {
+        var fake = new FakeLanChatCore { DispatchDelay = TimeSpan.FromMilliseconds(10) };
+        await using var runtime = new CoreRuntime(() => fake, TimeSpan.FromMilliseconds(20));
+        var snapshots = new System.Collections.Concurrent.ConcurrentQueue<Core.Models.CoreSnapshot>();
+        runtime.StateChanged += (_, snapshot) => snapshots.Enqueue(snapshot);
+        await runtime.StartAsync().WaitAsync(Timeout);
+        runtime.SetActive(true);
+        await WaitUntilAsync(() => fake.DrainEventsCallCount > 0);
+
+        fake.EnqueueEvent("{\"kind\":\"state\"}");
+        fake.EnqueueState("{\"schemaVersion\":1,\"connection\":{\"phase\":\"connected\"}}");
+        var commands = Enumerable.Range(0, 120)
+            .Select(index => runtime.DispatchAsync($"queued-{index}"))
+            .ToArray();
+
+        await WaitUntilAsync(() => snapshots.Count == 2, TimeSpan.FromMilliseconds(500));
+        Assert.IsTrue(commands.Any(command => !command.IsCompleted));
+        await Task.WhenAll(commands).WaitAsync(Timeout);
+        Assert.AreEqual("connected", snapshots.Last().ConnectionPhase);
+    }
+
+    [TestMethod]
+    public async Task State_changed_subscriber_failure_reports_error_and_core_thread_continues()
+    {
+        var failure = new InvalidOperationException("subscriber failed");
+        var fake = new FakeLanChatCore { DispatchResult = 29 };
+        await using var runtime = new CoreRuntime(() => fake, TimeSpan.FromMilliseconds(20));
+        var handlerCalls = 0;
+        var successfulPublications = 0;
+        var reported = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        runtime.StateChanged += (_, _) =>
+        {
+            if (Interlocked.Increment(ref handlerCalls) == 1)
+            {
+                throw failure;
+            }
+        };
+        runtime.StateChanged += (_, _) => Interlocked.Increment(ref successfulPublications);
+        runtime.RuntimeError += (_, error) => reported.TrySetResult(error);
+
+        await runtime.StartAsync().WaitAsync(Timeout);
+        Assert.AreSame(failure, await reported.Task.WaitAsync(Timeout));
+        fake.EnqueueEvent("{\"kind\":\"state\"}");
+        fake.EnqueueState("{\"schemaVersion\":1,\"connection\":{\"phase\":\"connected\"}}");
+        runtime.SetActive(true);
+
+        await WaitUntilAsync(() => successfulPublications == 2);
+        Assert.AreEqual(29, await runtime.DispatchAsync("still-running").WaitAsync(Timeout));
+        Assert.AreEqual(0, fake.DisposeCallCount);
+    }
+
     private static Task<int> RecordSynchronousContinuationThread(Task task) => task.ContinueWith(
         _ => Environment.CurrentManagedThreadId,
         CancellationToken.None,
         TaskContinuationOptions.ExecuteSynchronously,
         TaskScheduler.Default);
 
-    private static async Task WaitUntilAsync(Func<bool> condition)
+    private static Task WaitUntilAsync(Func<bool> condition) => WaitUntilAsync(condition, Timeout);
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
-        while (!condition() && System.Diagnostics.Stopwatch.GetElapsedTime(started) < Timeout)
+        while (!condition() && System.Diagnostics.Stopwatch.GetElapsedTime(started) < timeout)
         {
             await Task.Delay(10);
         }

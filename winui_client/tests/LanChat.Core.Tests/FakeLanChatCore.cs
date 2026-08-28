@@ -20,6 +20,7 @@ internal sealed class FakeLanChatCore : ILanChatCore
     public IReadOnlyList<Call> Calls => _calls.ToArray();
     public IReadOnlyList<int> CallThreadIds => Calls.Select(call => call.ThreadId).ToArray();
     public int DispatchResult { get; set; }
+    public TimeSpan DispatchDelay { get; set; }
     public ManualResetEventSlim? ReadStateGate { get; set; }
     public ManualResetEventSlim? DispatchGate { get; set; }
     public ManualResetEventSlim? DisposeGate { get; set; }
@@ -45,6 +46,11 @@ internal sealed class FakeLanChatCore : ILanChatCore
     {
         RecordCall(nameof(Dispatch), commandJson);
         WaitForGate(DispatchGate);
+        if (DispatchDelay > TimeSpan.Zero)
+        {
+            Thread.Sleep(DispatchDelay);
+        }
+
         if (_dispatchFailures.TryDequeue(out var failure))
         {
             throw failure;
