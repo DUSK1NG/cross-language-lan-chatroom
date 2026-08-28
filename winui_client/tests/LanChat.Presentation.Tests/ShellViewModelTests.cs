@@ -206,6 +206,44 @@ public sealed class ShellViewModelTests
     }
 
     [TestMethod]
+    public async Task Child_task_dispose_does_not_bypass_notification_barrier()
+    {
+        var runtime = new FakeCoreRuntime();
+        var viewModel = new ShellViewModel(runtime, new BackgroundDispatcher());
+        using var notificationStarted = new ManualResetEventSlim();
+        using var releaseNotification = new ManualResetEventSlim();
+        Task? dispose = null;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
+            {
+                dispose = Task.Run(async () => await viewModel.DisposeAsync());
+                notificationStarted.Set();
+                releaseNotification.Wait();
+            }
+        };
+
+        runtime.PublishState(new CoreSnapshot(1, "idle", "未连接"));
+        Assert.IsTrue(notificationStarted.Wait(TimeSpan.FromSeconds(1)));
+        Assert.IsFalse(dispose!.Wait(TimeSpan.FromMilliseconds(100)));
+        releaseNotification.Set();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(1));
+    }
+
+    [TestMethod]
+    public async Task Deferred_dispatcher_continues_after_a_faulted_action()
+    {
+        var dispatcher = new DeferredDispatcher();
+        var failed = dispatcher.EnqueueAsync(() => throw new InvalidOperationException("first"));
+        var completed = dispatcher.EnqueueAsync(() => { });
+
+        dispatcher.Drain();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await failed);
+        await completed;
+    }
+
+    [TestMethod]
     public void Reentrant_dispose_stops_remaining_state_property_updates()
     {
         var runtime = new FakeCoreRuntime();
@@ -284,28 +322,6 @@ public sealed class ShellViewModelTests
         }
 
         await Assert.ThrowsAsync<ObjectDisposedException>(async () => await startInvocation);
-    }
-
-    [TestMethod]
-    public async Task Property_changed_subscriber_can_wait_for_dispose_without_deadlock()
-    {
-        var runtime = new FakeCoreRuntime();
-        var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
-        Task? dispose = null;
-        var subscriberObservedCompletion = false;
-        viewModel.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
-            {
-                dispose = Task.Run(async () => await viewModel.DisposeAsync());
-                subscriberObservedCompletion = dispose.Wait(TimeSpan.FromSeconds(1));
-            }
-        };
-
-        runtime.PublishState(new CoreSnapshot(1, "idle", "未连接"));
-
-        Assert.IsTrue(subscriberObservedCompletion);
-        await dispose!.WaitAsync(TimeSpan.FromSeconds(1));
     }
 
     [TestMethod]

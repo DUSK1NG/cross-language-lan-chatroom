@@ -10,7 +10,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IUiDispatcher _dispatcher;
     private readonly object _lifecycleLock = new();
     private readonly SemaphoreSlim _setActiveGate = new(1, 1);
-    private readonly AsyncLocal<Task?> _executingUiTicket = new();
+    [ThreadStatic]
+    private static Task? s_executingUiTicket;
     private readonly List<Task> _pendingUiOperations = [];
     private string _connectionPhase = "starting";
     private string _statusText = "正在初始化…";
@@ -77,7 +78,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         TaskCompletionSource disposeCompletion;
         TaskCompletionSource? cancelledStart;
         Task[] pendingUiOperations;
-        var currentUiTicket = _executingUiTicket.Value;
+        var currentUiTicket = s_executingUiTicket;
         lock (_lifecycleLock)
         {
             if (_disposeTask is not null)
@@ -271,15 +272,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     private void ExecuteUiAction(Task ticket, Action<int> action, int generation)
     {
-        var previousTicket = _executingUiTicket.Value;
-        _executingUiTicket.Value = ticket;
+        var previousTicket = s_executingUiTicket;
+        s_executingUiTicket = ticket;
         try
         {
             action(generation);
         }
         finally
         {
-            _executingUiTicket.Value = previousTicket;
+            s_executingUiTicket = previousTicket;
         }
     }
 
