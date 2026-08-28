@@ -55,11 +55,12 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <ProgressRing Width="24"
+                            <ProgressRing x:Name="CoreProgressRing"
+                                          Width="24"
                                           Height="24"
-                                          AutomationProperties.Name="Core 正在初始化"
                                           Foreground="{ThemeResource LanChatAccentBrush}"
-                                          IsActive="True" />
+                                          IsActive="False"
+                                          Visibility="Collapsed" />
                             <TextBlock Grid.Column="1"
                                        VerticalAlignment="Center"
                                        Style="{StaticResource BodyStrongTextBlockStyle}"
