@@ -25,7 +25,6 @@
 ### Task 1: 固定工具链并创建解决方案骨架
 
 **Files:**
-- Modify: `.gitignore`
 - Create: `global.json`
 - Create: `winui_client/LANChat.WinUI.slnx`
 - Create: `winui_client/Directory.Build.props`
@@ -578,6 +577,8 @@ Expected: 单元测试全通过，WinUI Debug 构建零警告、零错误。
 ### Task 7: 真实 Core、Release 发布与缩放验收
 
 **Files:**
+- Modify: `.gitignore`
+- Modify: `docs/superpowers/plans/2026-08-28-winui3-phase1-core-shell.md`
 - Create: `winui_client/build/NativeRuntime.targets`
 - Modify: `winui_client/LANChat.WinUI.slnx`
 - Modify: `winui_client/src/LanChat.WinUI/LanChat.WinUI.csproj`
@@ -588,7 +589,7 @@ Expected: 单元测试全通过，WinUI Debug 构建零警告、零错误。
 - Generate: `winui_client/artifacts/publish/win-x64/`
 
 **Interfaces:**
-- Consumes: `LanChatCoreDll`、`LanChatQtPrefix`、`LanChatOpenSslRoot` MSBuild 属性。
+- Consumes: `LanChatNativeRuntimeEnabled`、`LanChatCoreDll`、`LanChatQtPrefix`、`LanChatOpenSslRoot` MSBuild 属性及 `LAN_CHAT_CORE_NATIVE_TEST` 测试开关。
 - Produces: 带 12 个目标 native DLL、可独立启动并显示真实初始状态的 WinUI Release 目录。
 
 - [ ] **Step 1: 写真实 Core 受控失败测试**
@@ -606,7 +607,7 @@ Expected: FAIL，诊断明确指出测试输出目录缺少 `lan_chat_core.dll`�
 
 - [ ] **Step 3: 实现严格 native 运行库复制**
 
-`NativeRuntime.targets` 要求三个非空属性，并复制以下 12 个文件到 app/test 输出目录；任一源文件不存在时 MSBuild 立即失败并显示绝对路径。后四个文件是 Qt 6.10.3 中 `Qt6Quick.dll` 的必要传递依赖闭包，必须与其他 Qt DLL 来自同一 MSVC Qt prefix，不得从 PATH 搜索或回退到 MinGW 版本：
+`NativeRuntime.targets` 在无任何 native 属性且未显式启用时不参与普通 App/solution 构建。传入任一 native 路径属性或 `LanChatNativeRuntimeEnabled=true` 时自动启用，并要求三个路径属性全部非空；Native test 项目还会在 `LAN_CHAT_CORE_NATIVE_TEST=1` 时启用。启用后复制以下 12 个文件到 app/test 输出目录；任一源不是现有文件时 MSBuild 立即失败并显示绝对路径（现有目录也视为失败）。后四个文件是 Qt 6.10.3 中 `Qt6Quick.dll` 的必要传递依赖闭包，必须与其他 Qt DLL 来自同一 MSVC Qt prefix，不得从 PATH 搜索或回退到 MinGW 版本：
 
 ```text
 lan_chat_core.dll
@@ -623,7 +624,7 @@ Qt6QmlWorkerScript.dll
 Qt6OpenGL.dll
 ```
 
-App 与独立的 Core native test 项目都导入该 targets。命令行属性必须显式传入，不在仓库写死本机路径。
+App 与独立的 Core native test 项目都导入该 targets。Release publish/真实 Core 命令显式传入三个路径属性，不在仓库写死本机路径；普通无属性 Debug 构建仍保持可用，未设置测试开关时 native smoke 为 Inconclusive。
 
 - [ ] **Step 4: 运行真实 Core GREEN 和全量测试**
 
@@ -736,7 +737,7 @@ Expected: WinUI 测试全部通过；既有 Core 2/2 通过；功能分支只包
 
 Commit:
 ```powershell
-git add winui_client
+git add .gitignore docs/superpowers/plans/2026-08-28-winui3-phase1-core-shell.md winui_client
 git commit -m "build: package WinUI core shell"
 ```
 

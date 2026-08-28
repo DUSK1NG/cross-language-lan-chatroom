@@ -1,5 +1,10 @@
 <Project>
-  <ItemGroup Condition="'$(LanChatCoreDll)' != '' and '$(LanChatQtPrefix)' != '' and '$(LanChatOpenSslRoot)' != ''">
+  <PropertyGroup>
+    <_LanChatNativeRuntimeEnabled>false</_LanChatNativeRuntimeEnabled>
+    <_LanChatNativeRuntimeEnabled Condition="'$(LanChatNativeRuntimeEnabled)' == 'true' or '$(LanChatCoreDll)' != '' or '$(LanChatQtPrefix)' != '' or '$(LanChatOpenSslRoot)' != ''">true</_LanChatNativeRuntimeEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_LanChatNativeRuntimeEnabled)' == 'true' and '$(LanChatCoreDll)' != '' and '$(LanChatQtPrefix)' != '' and '$(LanChatOpenSslRoot)' != ''">
     <LanChatNativeRuntimeFile Include="$([System.IO.Path]::GetFullPath('$(LanChatCoreDll)'))" />
     <LanChatNativeRuntimeFile Include="$([System.IO.Path]::GetFullPath('$(LanChatOpenSslRoot)\bin\libssl-3-x64.dll'))" />
     <LanChatNativeRuntimeFile Include="$([System.IO.Path]::GetFullPath('$(LanChatOpenSslRoot)\bin\libcrypto-3-x64.dll'))" />
@@ -19,14 +24,16 @@
           CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <Target Name="ValidateLanChatNativeRuntime" BeforeTargets="PrepareForBuild">
+  <Target Name="ValidateLanChatNativeRuntime"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(_LanChatNativeRuntimeEnabled)' == 'true'">
     <Error Condition="'$(LanChatCoreDll)' == ''"
            Text="缺少必需的 MSBuild 属性 LanChatCoreDll。请显式传入 lan_chat_core.dll 的绝对路径。" />
     <Error Condition="'$(LanChatQtPrefix)' == ''"
            Text="缺少必需的 MSBuild 属性 LanChatQtPrefix。请显式传入 Qt 安装前缀的绝对路径。" />
     <Error Condition="'$(LanChatOpenSslRoot)' == ''"
            Text="缺少必需的 MSBuild 属性 LanChatOpenSslRoot。请显式传入 OpenSSL 安装根目录的绝对路径。" />
-    <Error Condition="!Exists('%(LanChatNativeRuntimeFile.FullPath)')"
+    <Error Condition="!$([System.IO.File]::Exists('%(LanChatNativeRuntimeFile.FullPath)'))"
            Text="缺少必需的原生运行库：%(LanChatNativeRuntimeFile.FullPath)" />
   </Target>
 </Project>

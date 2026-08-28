@@ -5,6 +5,7 @@
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <LanChatNativeRuntimeEnabled Condition="'$(LAN_CHAT_CORE_NATIVE_TEST)' == '1'">true</LanChatNativeRuntimeEnabled>
   </PropertyGroup>
 
   <ItemGroup>
