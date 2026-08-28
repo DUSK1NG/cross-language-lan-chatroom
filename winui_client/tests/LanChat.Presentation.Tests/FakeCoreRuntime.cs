@@ -8,7 +8,8 @@ internal sealed class FakeCoreRuntime(
     Exception? disposeException = null,
     bool throwDuringDispose = false,
     bool throwDuringStart = false,
-    bool delayStart = false) : ICoreRuntime
+    bool delayStart = false,
+    bool blockStartSynchronously = false) : ICoreRuntime
 {
     private readonly Exception? _startException = startException;
     private readonly Exception? _disposeException = disposeException;
@@ -17,6 +18,9 @@ internal sealed class FakeCoreRuntime(
     private readonly TaskCompletionSource? _startCompletion = delayStart
         ? new(TaskCreationOptions.RunContinuationsAsynchronously)
         : null;
+    private readonly ManualResetEventSlim _startEntered = new();
+    private readonly ManualResetEventSlim? _blockedStartEntered = blockStartSynchronously ? new() : null;
+    private readonly ManualResetEventSlim? _blockedStartReleased = blockStartSynchronously ? new() : null;
     private EventHandler<CoreSnapshot>? _stateChanged;
     private EventHandler<Exception>? _runtimeError;
 
@@ -38,9 +42,22 @@ internal sealed class FakeCoreRuntime(
     public int StateChangedSubscriberCount => _stateChanged?.GetInvocationList().Length ?? 0;
     public int RuntimeErrorSubscriberCount => _runtimeError?.GetInvocationList().Length ?? 0;
 
+    public bool WaitForBlockedStart(TimeSpan timeout) => _blockedStartEntered?.Wait(timeout) ?? false;
+
+    public bool WaitForStart(TimeSpan timeout) => _startEntered.Wait(timeout);
+
+    public void ReleaseBlockedStart() => _blockedStartReleased?.Set();
+
     public Task StartAsync()
     {
         StartCount++;
+        _startEntered.Set();
+        if (_blockedStartEntered is not null && _blockedStartReleased is not null)
+        {
+            _blockedStartEntered.Set();
+            _blockedStartReleased.Wait();
+        }
+
         if (_startException is not null)
         {
             if (_throwDuringStart)
@@ -61,6 +78,7 @@ internal sealed class FakeCoreRuntime(
     public ValueTask DisposeAsync()
     {
         DisposeCount++;
+        ReleaseBlockedStart();
         _startCompletion?.TrySetException(new ObjectDisposedException(nameof(FakeCoreRuntime)));
         if (_disposeException is not null)
         {

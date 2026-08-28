@@ -97,6 +97,20 @@ public sealed class ShellViewModelTests
     }
 
     [TestMethod]
+    public async Task Dispose_prevents_deferred_runtime_error_from_running()
+    {
+        var runtime = new FakeCoreRuntime();
+        var dispatcher = new DeferredDispatcher();
+        var viewModel = new ShellViewModel(runtime, dispatcher);
+        runtime.PublishError(new InvalidOperationException("延迟错误"));
+
+        await viewModel.DisposeAsync();
+        dispatcher.Drain();
+
+        Assert.IsNull(viewModel.DiagnosticMessage);
+    }
+
+    [TestMethod]
     public void SetActive_passes_value_to_runtime()
     {
         var runtime = new FakeCoreRuntime();
@@ -184,6 +198,7 @@ public sealed class ShellViewModelTests
         var runtime = new FakeCoreRuntime(delayStart: true);
         var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
         var start = viewModel.StartAsync();
+        Assert.IsTrue(runtime.WaitForStart(TimeSpan.FromSeconds(1)));
 
         await viewModel.DisposeAsync();
 
@@ -200,11 +215,56 @@ public sealed class ShellViewModelTests
         var firstStart = viewModel.StartAsync();
         var secondStart = viewModel.StartAsync();
 
+        Assert.IsTrue(runtime.WaitForStart(TimeSpan.FromSeconds(1)));
         Assert.AreEqual(1, runtime.StartCount);
         await viewModel.DisposeAsync();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(async () => await firstStart);
         await Assert.ThrowsAsync<ObjectDisposedException>(async () => await secondStart);
+    }
+
+    [TestMethod]
+    public async Task Synchronously_blocking_start_does_not_block_dispose()
+    {
+        var runtime = new FakeCoreRuntime(blockStartSynchronously: true);
+        var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
+        var startInvocation = Task.Run(viewModel.StartAsync);
+        Assert.IsTrue(runtime.WaitForBlockedStart(TimeSpan.FromSeconds(1)));
+        var dispose = Task.Run(async () => await viewModel.DisposeAsync());
+
+        try
+        {
+            await dispose.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+        finally
+        {
+            runtime.ReleaseBlockedStart();
+            await dispose.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await startInvocation);
+    }
+
+    [TestMethod]
+    public async Task Property_changed_subscriber_can_wait_for_dispose_without_deadlock()
+    {
+        var runtime = new FakeCoreRuntime();
+        var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
+        Task? dispose = null;
+        var subscriberObservedCompletion = false;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
+            {
+                dispose = Task.Run(async () => await viewModel.DisposeAsync());
+                subscriberObservedCompletion = dispose.Wait(TimeSpan.FromSeconds(1));
+            }
+        };
+
+        runtime.PublishState(new CoreSnapshot(1, "idle", "未连接"));
+
+        Assert.IsTrue(subscriberObservedCompletion);
+        await dispose!.WaitAsync(TimeSpan.FromSeconds(1));
     }
 
     [TestMethod]

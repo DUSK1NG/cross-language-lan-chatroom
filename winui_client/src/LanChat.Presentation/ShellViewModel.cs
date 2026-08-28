@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using LanChat.Core.Models;
 using LanChat.Core.Runtime;
 
@@ -10,11 +9,14 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly ICoreRuntime _runtime;
     private readonly IUiDispatcher _dispatcher;
     private readonly object _lifecycleLock = new();
+    private readonly SemaphoreSlim _setActiveGate = new(1, 1);
     private string _connectionPhase = "starting";
     private string _statusText = "正在初始化…";
     private string? _diagnosticMessage;
     private bool _hasFatalError;
     private bool _isDisposed;
+    private int _generation;
+    private TaskCompletionSource? _startCompletion;
     private Task? _startTask;
     private Task? _disposeTask;
 
@@ -28,50 +30,50 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public string ConnectionPhase
-    {
-        get => _connectionPhase;
-        private set => SetProperty(ref _connectionPhase, value);
-    }
-
-    public string StatusText
-    {
-        get => _statusText;
-        private set => SetProperty(ref _statusText, value);
-    }
-
-    public string? DiagnosticMessage
-    {
-        get => _diagnosticMessage;
-        private set => SetProperty(ref _diagnosticMessage, value);
-    }
-
-    public bool HasFatalError
-    {
-        get => _hasFatalError;
-        private set => SetProperty(ref _hasFatalError, value);
-    }
+    public string ConnectionPhase => _connectionPhase;
+    public string StatusText => _statusText;
+    public string? DiagnosticMessage => _diagnosticMessage;
+    public bool HasFatalError => _hasFatalError;
 
     public Task StartAsync()
     {
+        TaskCompletionSource completion;
         lock (_lifecycleLock)
         {
-            ThrowIfDisposed();
-            return _startTask ??= StartRuntimeAsync();
+            ThrowIfDisposedLocked();
+            if (_startTask is not null)
+            {
+                return _startTask;
+            }
+
+            completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _startCompletion = completion;
+            _startTask = completion.Task;
         }
+
+        _ = Task.Run(() => StartRuntimeAsync(completion));
+        return completion.Task;
     }
 
     public void SetActive(bool active)
     {
-        lock (_lifecycleLock)
+        ThrowIfDisposed();
+        _setActiveGate.Wait();
+        try
         {
             ThrowIfDisposed();
             _runtime.SetActive(active);
+        }
+        finally
+        {
+            _setActiveGate.Release();
         }
     }
 
     public ValueTask DisposeAsync()
     {
+        TaskCompletionSource disposeCompletion;
+        TaskCompletionSource? cancelledStart;
         lock (_lifecycleLock)
         {
             if (_disposeTask is not null)
@@ -80,43 +82,94 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             }
 
             _isDisposed = true;
-            _runtime.StateChanged -= OnStateChanged;
-            _runtime.RuntimeError -= OnRuntimeError;
-            try
-            {
-                _disposeTask = _runtime.DisposeAsync().AsTask();
-            }
-            catch (Exception exception)
-            {
-                _disposeTask = Task.FromException(exception);
-            }
-
-            return new ValueTask(_disposeTask);
+            _generation++;
+            disposeCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _disposeTask = disposeCompletion.Task;
+            cancelledStart = _startCompletion;
         }
+
+        cancelledStart?.TrySetException(new ObjectDisposedException(nameof(ShellViewModel)));
+        _ = DisposeRuntimeAsync(disposeCompletion);
+        return new ValueTask(disposeCompletion.Task);
     }
 
-    private async Task StartRuntimeAsync()
+    private async Task StartRuntimeAsync(TaskCompletionSource completion)
     {
+        lock (_lifecycleLock)
+        {
+            if (_isDisposed || completion.Task.IsCompleted)
+            {
+                return;
+            }
+        }
+
+        Exception? startupException = null;
         try
         {
             await _runtime.StartAsync().ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            EnqueueIfActive(() => ApplyStartupFailure(exception));
+            startupException = exception;
         }
 
-        ThrowIfDisposed();
+        var disposed = IsDisposed();
+        if (!disposed && startupException is not null)
+        {
+            EnqueueIfActive(generation => ApplyStartupFailure(startupException, generation));
+            disposed = IsDisposed();
+        }
+
+        if (disposed)
+        {
+            completion.TrySetException(new ObjectDisposedException(nameof(ShellViewModel)));
+            return;
+        }
+
+        completion.TrySetResult();
+    }
+
+    private async Task DisposeRuntimeAsync(TaskCompletionSource completion)
+    {
+        Exception? failure = null;
+        try
+        {
+            _runtime.StateChanged -= OnStateChanged;
+            _runtime.RuntimeError -= OnRuntimeError;
+            await _setActiveGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _runtime.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _setActiveGate.Release();
+            }
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+
+        if (failure is null)
+        {
+            completion.TrySetResult();
+        }
+        else
+        {
+            completion.TrySetException(failure);
+        }
     }
 
     private void OnStateChanged(object? sender, CoreSnapshot snapshot) =>
-        EnqueueIfActive(() => ApplySnapshot(snapshot));
+        EnqueueIfActive(generation => ApplySnapshot(snapshot, generation));
 
     private void OnRuntimeError(object? sender, Exception exception) =>
-        EnqueueIfActive(() => DiagnosticMessage = FormatDiagnostic(exception));
+        EnqueueIfActive(generation => ApplyRuntimeError(exception, generation));
 
-    private void EnqueueIfActive(Action action)
+    private void EnqueueIfActive(Action<int> action)
     {
+        int generation;
         lock (_lifecycleLock)
         {
             if (_isDisposed)
@@ -124,64 +177,67 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
                 return;
             }
 
-            _dispatcher.Enqueue(() =>
+            generation = _generation;
+        }
+
+        _dispatcher.Enqueue(() => action(generation));
+    }
+
+    private void ApplySnapshot(CoreSnapshot snapshot, int generation)
+    {
+        TrySetProperty(ref _connectionPhase, snapshot.ConnectionPhase, nameof(ConnectionPhase), generation);
+        TrySetProperty(ref _statusText, snapshot.StatusText, nameof(StatusText), generation);
+    }
+
+    private void ApplyStartupFailure(Exception exception, int generation)
+    {
+        TrySetProperty(ref _hasFatalError, true, nameof(HasFatalError), generation);
+        TrySetProperty(ref _diagnosticMessage, FormatDiagnostic(exception), nameof(DiagnosticMessage), generation);
+    }
+
+    private void ApplyRuntimeError(Exception exception, int generation) =>
+        TrySetProperty(ref _diagnosticMessage, FormatDiagnostic(exception), nameof(DiagnosticMessage), generation);
+
+    private bool TrySetProperty<T>(ref T field, T value, string propertyName, int generation)
+    {
+        PropertyChangedEventHandler? handler;
+        lock (_lifecycleLock)
+        {
+            if (_isDisposed || _generation != generation || EqualityComparer<T>.Default.Equals(field, value))
             {
-                lock (_lifecycleLock)
-                {
-                    if (_isDisposed)
-                    {
-                        return;
-                    }
+                return false;
+            }
 
-                    action();
-                }
-            });
+            field = value;
+            handler = PropertyChanged;
         }
+
+        handler?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
     }
 
-    private void ApplySnapshot(CoreSnapshot snapshot)
+    private bool IsDisposed()
     {
-        ConnectionPhase = snapshot.ConnectionPhase;
-        if (_isDisposed)
+        lock (_lifecycleLock)
         {
-            return;
+            return _isDisposed;
         }
-
-        StatusText = snapshot.StatusText;
-    }
-
-    private void ApplyStartupFailure(Exception exception)
-    {
-        HasFatalError = true;
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        DiagnosticMessage = FormatDiagnostic(exception);
     }
 
     private void ThrowIfDisposed()
     {
         lock (_lifecycleLock)
         {
-            if (_isDisposed)
-            {
-                throw new ObjectDisposedException(nameof(ShellViewModel));
-            }
+            ThrowIfDisposedLocked();
         }
     }
 
-    private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    private void ThrowIfDisposedLocked()
     {
-        if (EqualityComparer<T>.Default.Equals(field, value))
+        if (_isDisposed)
         {
-            return false;
+            throw new ObjectDisposedException(nameof(ShellViewModel));
         }
-
-        field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        return true;
     }
 
     private static string FormatDiagnostic(Exception exception)
