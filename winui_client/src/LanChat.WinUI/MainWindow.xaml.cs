@@ -11,6 +11,7 @@ namespace LanChat_WinUI;
 
 public sealed partial class MainWindow : Window
 {
+    private static readonly TimeSpan DisposeTimeout = TimeSpan.FromSeconds(5);
     private readonly WindowMinimumSizeController _minimumSizeController;
     private bool _startRequested;
     private bool _started;
@@ -125,7 +126,11 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            await ViewModel.DisposeAsync();
+            var disposed = await AsyncCleanupWaiter.WaitAsync(ViewModel.DisposeAsync(), DisposeTimeout);
+            if (!disposed)
+            {
+                Debug.WriteLine($"WinUI 关闭清理超时（{DisposeTimeout.TotalSeconds:0} 秒）");
+            }
         }
         catch (Exception exception)
         {
