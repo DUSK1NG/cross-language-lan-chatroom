@@ -10,6 +10,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private readonly IUiDispatcher _dispatcher;
     private readonly object _lifecycleLock = new();
     private readonly SemaphoreSlim _setActiveGate = new(1, 1);
+    private readonly AsyncLocal<Task?> _executingUiTicket = new();
+    private readonly List<Task> _pendingUiOperations = [];
     private string _connectionPhase = "starting";
     private string _statusText = "正在初始化…";
     private string? _diagnosticMessage;
@@ -74,6 +76,8 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     {
         TaskCompletionSource disposeCompletion;
         TaskCompletionSource? cancelledStart;
+        Task[] pendingUiOperations;
+        var currentUiTicket = _executingUiTicket.Value;
         lock (_lifecycleLock)
         {
             if (_disposeTask is not null)
@@ -86,10 +90,11 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             disposeCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _disposeTask = disposeCompletion.Task;
             cancelledStart = _startCompletion;
+            pendingUiOperations = [.. _pendingUiOperations.Where(ticket => ticket != currentUiTicket)];
         }
 
         cancelledStart?.TrySetException(new ObjectDisposedException(nameof(ShellViewModel)));
-        _ = DisposeRuntimeAsync(disposeCompletion);
+        _ = DisposeRuntimeAsync(disposeCompletion, Task.WhenAll(pendingUiOperations));
         return new ValueTask(disposeCompletion.Task);
     }
 
@@ -113,14 +118,21 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             startupException = exception;
         }
 
-        var disposed = IsDisposed();
-        if (!disposed && startupException is not null)
+        if (!IsDisposed() && startupException is not null)
         {
-            EnqueueIfActive(generation => ApplyStartupFailure(startupException, generation));
-            disposed = IsDisposed();
+            try
+            {
+                await EnqueueIfActive(generation => ApplyStartupFailure(startupException, generation))
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+                return;
+            }
         }
 
-        if (disposed)
+        if (IsDisposed())
         {
             completion.TrySetException(new ObjectDisposedException(nameof(ShellViewModel)));
             return;
@@ -129,7 +141,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         completion.TrySetResult();
     }
 
-    private async Task DisposeRuntimeAsync(TaskCompletionSource completion)
+    private async Task DisposeRuntimeAsync(TaskCompletionSource completion, Task uiBarrier)
     {
         Exception? failure = null;
         try
@@ -151,6 +163,15 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             failure = exception;
         }
 
+        try
+        {
+            await uiBarrier.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure ??= exception;
+        }
+
         if (failure is null)
         {
             completion.TrySetResult();
@@ -162,25 +183,104 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     }
 
     private void OnStateChanged(object? sender, CoreSnapshot snapshot) =>
-        EnqueueIfActive(generation => ApplySnapshot(snapshot, generation));
+        ObserveUiOperation(EnqueueIfActive(generation => ApplySnapshot(snapshot, generation)));
 
     private void OnRuntimeError(object? sender, Exception exception) =>
-        EnqueueIfActive(generation => ApplyRuntimeError(exception, generation));
+        ObserveUiOperation(EnqueueIfActive(generation => ApplyRuntimeError(exception, generation)));
 
-    private void EnqueueIfActive(Action<int> action)
+    private Task EnqueueIfActive(Action<int> action)
     {
+        TaskCompletionSource ticket;
         int generation;
         lock (_lifecycleLock)
         {
             if (_isDisposed)
             {
-                return;
+                return Task.CompletedTask;
             }
 
             generation = _generation;
+            ticket = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingUiOperations.Add(ticket.Task);
         }
 
-        _dispatcher.Enqueue(() => action(generation));
+        try
+        {
+            var dispatchTask = _dispatcher.EnqueueAsync(() => ExecuteUiAction(ticket.Task, action, generation));
+            ArgumentNullException.ThrowIfNull(dispatchTask);
+            _ = CompleteUiTicketAsync(ticket, dispatchTask);
+        }
+        catch (Exception exception)
+        {
+            ticket.TrySetException(exception);
+            RemoveUiTicket(ticket.Task);
+        }
+
+        return ticket.Task;
+    }
+
+    private async Task CompleteUiTicketAsync(TaskCompletionSource ticket, Task dispatchTask)
+    {
+        try
+        {
+            await dispatchTask.ConfigureAwait(false);
+            ticket.TrySetResult();
+        }
+        catch (Exception exception)
+        {
+            ticket.TrySetException(exception);
+        }
+        finally
+        {
+            RemoveUiTicket(ticket.Task);
+        }
+    }
+
+    private void ObserveUiOperation(Task operation) => _ = ObserveUiOperationAsync(operation);
+
+    private async Task ObserveUiOperationAsync(Task operation)
+    {
+        try
+        {
+            await operation.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            FailStart(exception);
+        }
+    }
+
+    private void FailStart(Exception exception)
+    {
+        TaskCompletionSource? completion;
+        lock (_lifecycleLock)
+        {
+            completion = _startCompletion;
+        }
+
+        completion?.TrySetException(exception);
+    }
+
+    private void RemoveUiTicket(Task ticket)
+    {
+        lock (_lifecycleLock)
+        {
+            _pendingUiOperations.Remove(ticket);
+        }
+    }
+
+    private void ExecuteUiAction(Task ticket, Action<int> action, int generation)
+    {
+        var previousTicket = _executingUiTicket.Value;
+        _executingUiTicket.Value = ticket;
+        try
+        {
+            action(generation);
+        }
+        finally
+        {
+            _executingUiTicket.Value = previousTicket;
+        }
     }
 
     private void ApplySnapshot(CoreSnapshot snapshot, int generation)

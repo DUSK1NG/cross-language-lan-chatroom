@@ -62,6 +62,17 @@ public sealed class ShellViewModelTests
     }
 
     [TestMethod]
+    public async Task Startup_dispatcher_failure_faults_shared_start_task()
+    {
+        var viewModel = new ShellViewModel(
+            new FakeCoreRuntime(startException: new InvalidOperationException("启动失败")),
+            new ThrowingDispatcher());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await viewModel.StartAsync().WaitAsync(TimeSpan.FromSeconds(1)));
+    }
+
+    [TestMethod]
     public void State_updates_are_dispatched_and_only_raise_changed_properties()
     {
         var runtime = new FakeCoreRuntime();
@@ -104,8 +115,10 @@ public sealed class ShellViewModelTests
         var viewModel = new ShellViewModel(runtime, dispatcher);
         runtime.PublishError(new InvalidOperationException("延迟错误"));
 
-        await viewModel.DisposeAsync();
+        var dispose = viewModel.DisposeAsync().AsTask();
+        Assert.IsFalse(dispose.Wait(TimeSpan.FromMilliseconds(100)));
         dispatcher.Drain();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(1));
 
         Assert.IsNull(viewModel.DiagnosticMessage);
     }
@@ -157,11 +170,39 @@ public sealed class ShellViewModelTests
         runtime.PublishState(new CoreSnapshot(1, "idle", "未连接"));
 
         Assert.AreEqual(1, dispatcher.PendingCount);
-        await viewModel.DisposeAsync();
+        var dispose = viewModel.DisposeAsync().AsTask();
+        Assert.IsFalse(dispose.Wait(TimeSpan.FromMilliseconds(100)));
         dispatcher.Drain();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(1));
 
         Assert.AreEqual("starting", viewModel.ConnectionPhase);
         Assert.AreEqual("正在初始化…", viewModel.StatusText);
+    }
+
+    [TestMethod]
+    public async Task Dispose_waits_for_started_property_notification()
+    {
+        var runtime = new FakeCoreRuntime();
+        var viewModel = new ShellViewModel(runtime, new BackgroundDispatcher());
+        using var notificationStarted = new ManualResetEventSlim();
+        using var releaseNotification = new ManualResetEventSlim();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
+            {
+                notificationStarted.Set();
+                releaseNotification.Wait();
+            }
+        };
+
+        runtime.PublishState(new CoreSnapshot(1, "idle", "未连接"));
+        Assert.IsTrue(notificationStarted.Wait(TimeSpan.FromSeconds(1)));
+        Assert.AreEqual("idle", viewModel.ConnectionPhase);
+        var dispose = viewModel.DisposeAsync().AsTask();
+
+        Assert.IsFalse(dispose.Wait(TimeSpan.FromMilliseconds(100)));
+        releaseNotification.Set();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(1));
     }
 
     [TestMethod]
@@ -173,7 +214,7 @@ public sealed class ShellViewModelTests
         {
             if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
             {
-                viewModel.DisposeAsync().GetAwaiter().GetResult();
+                _ = viewModel.DisposeAsync();
             }
         };
 

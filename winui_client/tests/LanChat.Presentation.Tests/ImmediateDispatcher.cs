@@ -6,9 +6,17 @@ internal sealed class ImmediateDispatcher : IUiDispatcher
 {
     public int EnqueueCount { get; private set; }
 
-    public void Enqueue(Action action)
+    public Task EnqueueAsync(Action action)
     {
         EnqueueCount++;
-        action();
+        try
+        {
+            action();
+            return Task.CompletedTask;
+        }
+        catch (Exception exception)
+        {
+            return Task.FromException(exception);
+        }
     }
 }
