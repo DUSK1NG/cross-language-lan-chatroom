@@ -47,6 +47,21 @@ public sealed class ShellViewModelTests
     }
 
     [TestMethod]
+    public async Task Synchronous_start_failure_is_captured_as_fatal_diagnostic()
+    {
+        var viewModel = new ShellViewModel(
+            new FakeCoreRuntime(
+                startException: new FileNotFoundException("同步缺失", @"C:\\app\\lan_chat_core.dll"),
+                throwDuringStart: true),
+            new ImmediateDispatcher());
+
+        await viewModel.StartAsync();
+
+        Assert.IsTrue(viewModel.HasFatalError);
+        StringAssert.Contains(viewModel.DiagnosticMessage, "同步缺失");
+    }
+
+    [TestMethod]
     public void State_updates_are_dispatched_and_only_raise_changed_properties()
     {
         var runtime = new FakeCoreRuntime();
@@ -93,6 +108,15 @@ public sealed class ShellViewModelTests
     }
 
     [TestMethod]
+    public async Task SetActive_after_dispose_throws_object_disposed()
+    {
+        var viewModel = new ShellViewModel(new FakeCoreRuntime(), new ImmediateDispatcher());
+        await viewModel.DisposeAsync();
+
+        Assert.Throws<ObjectDisposedException>(() => viewModel.SetActive(true));
+    }
+
+    [TestMethod]
     public async Task Dispose_unsubscribes_and_disposes_runtime_once()
     {
         var runtime = new FakeCoreRuntime();
@@ -104,8 +128,83 @@ public sealed class ShellViewModelTests
         runtime.PublishError(new InvalidOperationException("ignored"));
 
         Assert.AreEqual(1, runtime.DisposeCount);
+        Assert.AreEqual(0, runtime.StateChangedSubscriberCount);
+        Assert.AreEqual(0, runtime.RuntimeErrorSubscriberCount);
         Assert.AreEqual("starting", viewModel.ConnectionPhase);
         Assert.IsNull(viewModel.DiagnosticMessage);
+    }
+
+    [TestMethod]
+    public async Task Dispose_prevents_deferred_state_update_from_running()
+    {
+        var runtime = new FakeCoreRuntime();
+        var dispatcher = new DeferredDispatcher();
+        var viewModel = new ShellViewModel(runtime, dispatcher);
+        runtime.PublishState(new CoreSnapshot(1, "idle", "未连接"));
+
+        Assert.AreEqual(1, dispatcher.PendingCount);
+        await viewModel.DisposeAsync();
+        dispatcher.Drain();
+
+        Assert.AreEqual("starting", viewModel.ConnectionPhase);
+        Assert.AreEqual("正在初始化…", viewModel.StatusText);
+    }
+
+    [TestMethod]
+    public void Reentrant_dispose_stops_remaining_state_property_updates()
+    {
+        var runtime = new FakeCoreRuntime();
+        var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ShellViewModel.ConnectionPhase))
+            {
+                viewModel.DisposeAsync().GetAwaiter().GetResult();
+            }
+        };
+
+        runtime.PublishState(new CoreSnapshot(1, "idle", "未连接"));
+
+        Assert.AreEqual("idle", viewModel.ConnectionPhase);
+        Assert.AreEqual("正在初始化…", viewModel.StatusText);
+    }
+
+    [TestMethod]
+    public async Task Start_after_dispose_throws_object_disposed()
+    {
+        var viewModel = new ShellViewModel(new FakeCoreRuntime(), new ImmediateDispatcher());
+        await viewModel.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await viewModel.StartAsync());
+    }
+
+    [TestMethod]
+    public async Task Concurrent_dispose_makes_delayed_start_fail_as_disposed()
+    {
+        var runtime = new FakeCoreRuntime(delayStart: true);
+        var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
+        var start = viewModel.StartAsync();
+
+        await viewModel.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await start);
+        Assert.AreEqual(1, runtime.StartCount);
+        Assert.AreEqual(1, runtime.DisposeCount);
+    }
+
+    [TestMethod]
+    public async Task Concurrent_start_calls_share_one_runtime_start()
+    {
+        var runtime = new FakeCoreRuntime(delayStart: true);
+        var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
+        var firstStart = viewModel.StartAsync();
+        var secondStart = viewModel.StartAsync();
+
+        Assert.AreEqual(1, runtime.StartCount);
+        await viewModel.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await firstStart);
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await secondStart);
     }
 
     [TestMethod]
@@ -114,6 +213,18 @@ public sealed class ShellViewModelTests
         var runtime = new FakeCoreRuntime(
             disposeException: new InvalidOperationException("释放失败"),
             throwDuringDispose: true);
+        var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await viewModel.DisposeAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await viewModel.DisposeAsync());
+
+        Assert.AreEqual(1, runtime.DisposeCount);
+    }
+
+    [TestMethod]
+    public async Task Asynchronous_dispose_failure_is_not_retried()
+    {
+        var runtime = new FakeCoreRuntime(disposeException: new InvalidOperationException("异步释放失败"));
         var viewModel = new ShellViewModel(runtime, new ImmediateDispatcher());
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await viewModel.DisposeAsync());

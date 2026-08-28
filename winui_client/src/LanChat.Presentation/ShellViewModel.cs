@@ -15,6 +15,7 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
     private string? _diagnosticMessage;
     private bool _hasFatalError;
     private bool _isDisposed;
+    private Task? _startTask;
     private Task? _disposeTask;
 
     public ShellViewModel(ICoreRuntime runtime, IUiDispatcher dispatcher)
@@ -51,23 +52,23 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         private set => SetProperty(ref _hasFatalError, value);
     }
 
-    public async Task StartAsync()
+    public Task StartAsync()
     {
-        try
+        lock (_lifecycleLock)
         {
-            await _runtime.StartAsync().ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            EnqueueIfActive(() =>
-            {
-                HasFatalError = true;
-                DiagnosticMessage = FormatDiagnostic(exception);
-            });
+            ThrowIfDisposed();
+            return _startTask ??= StartRuntimeAsync();
         }
     }
 
-    public void SetActive(bool active) => _runtime.SetActive(active);
+    public void SetActive(bool active)
+    {
+        lock (_lifecycleLock)
+        {
+            ThrowIfDisposed();
+            _runtime.SetActive(active);
+        }
+    }
 
     public ValueTask DisposeAsync()
     {
@@ -94,12 +95,22 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
         }
     }
 
-    private void OnStateChanged(object? sender, CoreSnapshot snapshot) =>
-        EnqueueIfActive(() =>
+    private async Task StartRuntimeAsync()
+    {
+        try
         {
-            ConnectionPhase = snapshot.ConnectionPhase;
-            StatusText = snapshot.StatusText;
-        });
+            await _runtime.StartAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            EnqueueIfActive(() => ApplyStartupFailure(exception));
+        }
+
+        ThrowIfDisposed();
+    }
+
+    private void OnStateChanged(object? sender, CoreSnapshot snapshot) =>
+        EnqueueIfActive(() => ApplySnapshot(snapshot));
 
     private void OnRuntimeError(object? sender, Exception exception) =>
         EnqueueIfActive(() => DiagnosticMessage = FormatDiagnostic(exception));
@@ -112,20 +123,53 @@ public sealed class ShellViewModel : INotifyPropertyChanged, IAsyncDisposable
             {
                 return;
             }
+
+            _dispatcher.Enqueue(() =>
+            {
+                lock (_lifecycleLock)
+                {
+                    if (_isDisposed)
+                    {
+                        return;
+                    }
+
+                    action();
+                }
+            });
+        }
+    }
+
+    private void ApplySnapshot(CoreSnapshot snapshot)
+    {
+        ConnectionPhase = snapshot.ConnectionPhase;
+        if (_isDisposed)
+        {
+            return;
         }
 
-        _dispatcher.Enqueue(() =>
-        {
-            lock (_lifecycleLock)
-            {
-                if (_isDisposed)
-                {
-                    return;
-                }
-            }
+        StatusText = snapshot.StatusText;
+    }
 
-            action();
-        });
+    private void ApplyStartupFailure(Exception exception)
+    {
+        HasFatalError = true;
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        DiagnosticMessage = FormatDiagnostic(exception);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        lock (_lifecycleLock)
+        {
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(ShellViewModel));
+            }
+        }
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
