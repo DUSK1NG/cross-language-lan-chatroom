@@ -624,7 +624,7 @@ Qt6QmlWorkerScript.dll
 Qt6OpenGL.dll
 ```
 
-App 与独立的 Core native test 项目都导入该 targets。Release publish/真实 Core 命令显式传入三个路径属性，不在仓库写死本机路径；普通无属性 Debug 构建仍保持可用，未设置测试开关时 native smoke 为 Inconclusive。
+App 与独立的 Core native test 项目都导入该 targets。App 的 `PrepareForPublish` 另设发布契约：任何 publish 都必须显式传入三个路径属性，缺项立即失败；该门禁不影响普通无属性 Debug/solution build/test。Release publish/真实 Core 命令显式传入三个路径属性，不在仓库写死本机路径；未设置测试开关时 native smoke 为 Inconclusive。
 
 - [ ] **Step 4: 运行真实 Core GREEN 和全量测试**
 
@@ -640,6 +640,14 @@ dotnet test winui_client/LANChat.WinUI.slnx -c Release @common
 Expected: 单元测试与真实 Core 测试全部通过，状态为 schema 1 / idle / 未连接。
 
 - [ ] **Step 5: 发布非打包自包含 Release**
+
+先确认无属性 publish 被拒绝，且 fresh 输出目录不留下可被误认为可运行的 EXE：
+
+```powershell
+dotnet publish winui_client/src/LanChat.WinUI/LanChat.WinUI.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o winui_client/artifacts/publish/no-native
+```
+
+Expected: FAIL，明确指出缺少 `LanChatCoreDll`；输出目录不存在 `LanChat.WinUI.exe`。
 
 Run:
 ```powershell

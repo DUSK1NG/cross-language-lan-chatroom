@@ -33,6 +33,15 @@
 
   <Import Project="..\..\build\NativeRuntime.targets" />
 
+  <Target Name="RequireLanChatNativeRuntimeForPublish" BeforeTargets="PrepareForPublish">
+    <Error Condition="'$(LanChatCoreDll)' == ''"
+           Text="发布 LanChat.WinUI 必须显式传入 MSBuild 属性 LanChatCoreDll（lan_chat_core.dll 的绝对文件路径）。" />
+    <Error Condition="'$(LanChatQtPrefix)' == ''"
+           Text="发布 LanChat.WinUI 必须显式传入 MSBuild 属性 LanChatQtPrefix（Qt 安装前缀的绝对目录路径）。" />
+    <Error Condition="'$(LanChatOpenSslRoot)' == ''"
+           Text="发布 LanChat.WinUI 必须显式传入 MSBuild 属性 LanChatOpenSslRoot（OpenSSL 安装根目录的绝对目录路径）。" />
+  </Target>
+
   <Target Name="PublishWinUiApplicationResources" AfterTargets="Publish">
     <ItemGroup>
       <_LanChatWinUiPublishResource Include="@(ApplicationDefinition->'$(TargetDir)%(RelativeDir)%(Filename).xbf')">
