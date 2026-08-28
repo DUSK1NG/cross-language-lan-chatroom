@@ -4,9 +4,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:local="using:LanChat_WinUI"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    Title="LanChat.WinUI"
+    Title="LAN Chat"
     mc:Ignorable="d">
     <Window.SystemBackdrop>
         <MicaBackdrop />
@@ -18,17 +17,76 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TitleBar x:Name="AppTitleBar" Title="LanChat.WinUI">
+        <TitleBar x:Name="AppTitleBar"
+                  Background="{ThemeResource LanChatTitleBarBackgroundBrush}"
+                  Foreground="White"
+                  Title="LAN Chat">
             <TitleBar.IconSource>
                 <ImageIconSource ImageSource="Assets/AppIcon.ico" />
             </TitleBar.IconSource>
         </TitleBar>
 
-        <!--
-            The Frame hosts pages for your application content. Add your UI to
-            MainPage.xaml rather than here so you can use Page features such as
-            navigation events and the Loaded lifecycle.
-        -->
-        <Frame x:Name="RootFrame" Grid.Row="1" />
+        <ScrollViewer Grid.Row="1"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <Grid Padding="40">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border MaxWidth="720"
+                        Padding="32"
+                        HorizontalAlignment="Center"
+                        Background="{ThemeResource LanChatCardBackgroundBrush}"
+                        CornerRadius="{StaticResource LanChatCornerRadius12}">
+                    <Grid RowSpacing="16">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Style="{StaticResource TitleTextBlockStyle}"
+                                   Text="LAN Chat" />
+
+                        <Grid Grid.Row="1" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ProgressRing Width="24"
+                                          Height="24"
+                                          AutomationProperties.Name="Core 正在初始化"
+                                          Foreground="{ThemeResource LanChatAccentBrush}"
+                                          IsActive="True" />
+                            <TextBlock Grid.Column="1"
+                                       VerticalAlignment="Center"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" />
+                        </Grid>
+
+                        <TextBlock Grid.Row="2"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Text="WinUI 3 前端阶段 1" />
+                    </Grid>
+                </Border>
+
+                <InfoBar Grid.Row="1"
+                         MaxWidth="900"
+                         Margin="0,24,0,0"
+                         HorizontalAlignment="Stretch"
+                         IsClosable="False"
+                         IsOpen="{x:Bind ViewModel.HasFatalError, Mode=OneWay}"
+                         Severity="Error"
+                         Title="Core 无法启动">
+                    <InfoBar.Content>
+                        <TextBlock IsTextSelectionEnabled="True"
+                                   Text="{x:Bind ViewModel.DiagnosticMessage, Mode=OneWay}"
+                                   TextWrapping="Wrap" />
+                    </InfoBar.Content>
+                </InfoBar>
+            </Grid>
+        </ScrollViewer>
     </Grid>
 </Window>

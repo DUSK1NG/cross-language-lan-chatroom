@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Color x:Key="LanChatAccentColor">#625ACB</Color>
+    <Color x:Key="LanChatTitleBarBackgroundColor">#29263A</Color>
+
+    <SolidColorBrush x:Key="LanChatAccentBrush"
+                     Color="{StaticResource LanChatAccentColor}" />
+    <SolidColorBrush x:Key="LanChatTitleBarBackgroundBrush"
+                     Color="{StaticResource LanChatTitleBarBackgroundColor}" />
+    <StaticResource x:Key="LanChatCardBackgroundBrush"
+                    ResourceKey="CardBackgroundFillColorDefaultBrush" />
+
+    <CornerRadius x:Key="LanChatCornerRadius8">8</CornerRadius>
+    <CornerRadius x:Key="LanChatCornerRadius12">12</CornerRadius>
+</ResourceDictionary>
