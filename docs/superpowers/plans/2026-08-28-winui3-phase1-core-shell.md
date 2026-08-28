@@ -38,7 +38,7 @@
 - Consumes: .NET SDK 10.0.400、WinApp CLI 0.6.1、Windows SDK 10.0.22621.0。
 - Produces: 可还原、可构建、启用包锁定的四项目解决方案。
 
-- [ ] **Step 1: 检查磁盘和现有工具链**
+- [x] **Step 1: 检查磁盘和现有工具链**
 
 Run:
 ```powershell
@@ -51,7 +51,7 @@ winapp --version
 ```
 Expected: C 盘不少于 10GB；当前基线应显示没有 .NET SDK，WinApp CLI 可能尚未安装。
 
-- [ ] **Step 2: 安装固定版本工具链**
+- [x] **Step 2: 安装固定版本工具链**
 
 Run:
 ```powershell
@@ -60,7 +60,7 @@ winget install --id Microsoft.WinAppCli --exact --version 0.6.1 --accept-package
 ```
 Expected: 两项安装成功；如果 winget 报告已安装相同版本，视为成功。安装不会触发磁盘清理。
 
-- [ ] **Step 3: 验证版本并固定 SDK**
+- [x] **Step 3: 验证版本并固定 SDK**
 
 Run:
 ```powershell
@@ -79,7 +79,7 @@ Expected: 输出 `10.0.400` 和 `0.6.1`；根目录生成：
 }
 ```
 
-- [ ] **Step 4: 使用官方模板创建应用并创建可测试项目**
+- [x] **Step 4: 使用官方模板创建应用并创建可测试项目**
 
 Run:
 ```powershell
@@ -95,7 +95,7 @@ Expected: 官方 WinUI 空白模板位于 `src/LanChat.WinUI`，其余项目和 
 
 说明：`0.0.6-alpha` 是独立的官方模板包版本，仅在本命令中用作一次性生成器；应用项目的 `Microsoft.WindowsAppSDK` 运行时包仍必须固定为稳定 `2.4.0`，且不得引用该 alpha 模板包。
 
-- [ ] **Step 5: 固定共同构建设置和项目依赖**
+- [x] **Step 5: 固定共同构建设置和项目依赖**
 
 创建 `winui_client/Directory.Build.props`：
 
@@ -140,7 +140,7 @@ dotnet add winui_client/tests/LanChat.Core.Tests/LanChat.Core.Tests.csproj refer
 dotnet add winui_client/tests/LanChat.Presentation.Tests/LanChat.Presentation.Tests.csproj reference winui_client/src/LanChat.Presentation/LanChat.Presentation.csproj
 ```
 
-- [ ] **Step 6: 还原、构建并提交骨架**
+- [x] **Step 6: 还原、构建并提交骨架**
 
 Run:
 ```powershell
@@ -169,7 +169,7 @@ Expected: 解决方案零警告、零错误；`packages.lock.json` 被提交；�
 - Consumes: 六个现有 C ABI 导出和 UTF-8 所有权约定。
 - Produces: `ILanChatCore`：`ReadStateJson()`、`Dispatch(string)`、`DrainEvents()`、`Dispose()`。
 
-- [ ] **Step 1: 写 Native 生命周期失败测试**
+- [x] **Step 1: 写 Native 生命周期失败测试**
 
 测试必须覆盖：创建返回空句柄时报错；状态字符串在成功解码后释放；事件读到空指针停止；`Dispose()` 两次只销毁一次；命令保持 UTF-8 中文。
 
@@ -199,7 +199,7 @@ public void ReadStateJson_decodes_utf8_and_frees_native_string()
 }
 ```
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run:
 ```powershell
@@ -207,7 +207,7 @@ dotnet test winui_client/tests/LanChat.Core.Tests/LanChat.Core.Tests.csproj --fi
 ```
 Expected: 编译失败，提示 `LanChatCoreClient` 和 `FakeLanChatCoreNative` 不存在。
 
-- [ ] **Step 3: 实现接口、P/Invoke 和 SafeHandle**
+- [x] **Step 3: 实现接口、P/Invoke 和 SafeHandle**
 
 `ILanChatCoreNative` 精确接口：
 
@@ -272,7 +272,7 @@ internal sealed partial class PInvokeLanChatCoreNative : ILanChatCoreNative
 
 `LanChatCoreHandle` 保存 native 实例，并在 `ReleaseHandle()` 中只调用一次 `Destroy(handle)`。`LanChatCoreClient` 构造时创建句柄；所有返回字符串以 `Marshal.PtrToStringUTF8` 解码，并在 `finally` 中调用 `FreeString`；状态空指针抛出 `InvalidOperationException("原生核心未返回状态快照。")`。`Properties/AssemblyInfo.cs` 只向 `LanChat.Core.Tests` 开放 internals。
 
-- [ ] **Step 4: 固定 DLL 解析路径**
+- [x] **Step 4: 固定 DLL 解析路径**
 
 `CoreLibraryResolver.Install(string appDirectory)` 只允许从 `appDirectory\lan_chat_core.dll` 加载：文件不存在时抛出含绝对路径的 `FileNotFoundException`，存在时调用 `NativeLibrary.Load`。只为 `LanChat.Core` 程序集的 `lan_chat_core.dll` 名称返回句柄，其他库返回 `nint.Zero`；重复安装同一路径无操作，尝试更换路径时抛出异常。
 
@@ -286,7 +286,7 @@ public static ILanChatCore Open(string appDirectory)
 }
 ```
 
-- [ ] **Step 5: 运行全部 Native 边界测试并提交**
+- [x] **Step 5: 运行全部 Native 边界测试并提交**
 
 Run:
 ```powershell
@@ -309,7 +309,7 @@ Expected: Native 边界测试全部通过，测试输出无警告。
 - Consumes: schema version 1 的 Core 状态和 `state`/`result`/`error` 事件。
 - Produces: `CoreSnapshot.Parse(string)`、`CoreEvent.Parse(string)`、`CoreEvent.RequiresSnapshotRefresh`。
 
-- [ ] **Step 1: 写 JSON 契约失败测试**
+- [x] **Step 1: 写 JSON 契约失败测试**
 
 ```csharp
 [TestMethod]
@@ -336,7 +336,7 @@ public void Parse_rejects_unsupported_schema()
 
 事件测试断言 `{"kind":"state"}` 的 `RequiresSnapshotRefresh` 为 true，未知事件为 false，非 JSON 对象抛出 `FormatException`。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run:
 ```powershell
@@ -344,7 +344,7 @@ dotnet test winui_client/tests/LanChat.Core.Tests/LanChat.Core.Tests.csproj --fi
 ```
 Expected: 编译失败，提示 `CoreSnapshot` 和 `CoreEvent` 不存在。
 
-- [ ] **Step 3: 实现最小强类型解析器**
+- [x] **Step 3: 实现最小强类型解析器**
 
 `CoreSnapshot` 必须要求根对象、`schemaVersion == 1` 和 `connection` 对象；`phase` 缺失时使用 `idle`，`statusText` 缺失时使用 `未连接`，未知字段忽略：
 
@@ -377,7 +377,7 @@ public sealed record CoreSnapshot(int SchemaVersion, string ConnectionPhase, str
 
 `CoreEvent.Parse` 读取根对象的 `kind`，缺失时兼容 `type`；`RequiresSnapshotRefresh` 仅在 kind 为 `state` 时为 true。
 
-- [ ] **Step 4: 运行契约测试和全量 Core 测试并提交**
+- [x] **Step 4: 运行契约测试和全量 Core 测试并提交**
 
 Run:
 ```powershell
@@ -400,7 +400,7 @@ Expected: 全部 Core 测试通过。
 - Consumes: `Func<ILanChatCore>` 和 100ms 事件轮询。
 - Produces: `StartAsync()`、`DispatchAsync(string)`、`SetActive(bool)`、`StateChanged`、`RuntimeError`、`DisposeAsync()`。
 
-- [ ] **Step 1: 写线程、轮询和生命周期失败测试**
+- [x] **Step 1: 写线程、轮询和生命周期失败测试**
 
 测试必须断言：创建/状态/事件/命令/销毁使用同一个非测试线程；启动发布初始状态；非激活时 350ms 内不读取事件；恢复后立即读取；只有 state 事件触发新快照；销毁一次。
 
@@ -420,7 +420,7 @@ public async Task All_core_calls_use_one_dedicated_thread()
 }
 ```
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run:
 ```powershell
@@ -428,7 +428,7 @@ dotnet test winui_client/tests/LanChat.Core.Tests/LanChat.Core.Tests.csproj --fi
 ```
 Expected: 编译失败，提示 `CoreRuntime` 不存在。
 
-- [ ] **Step 3: 实现专用线程消息循环**
+- [x] **Step 3: 实现专用线程消息循环**
 
 `CoreRuntime` 使用一个命名为 `LAN Chat Core` 的 `Thread`、`BlockingCollection<Action<ILanChatCore>>` 和 `CancellationTokenSource`。线程内部顺序固定：创建 Core、发布初始快照、循环处理命令、激活时按轮询间隔 DrainEvents、退出时 Dispose。所有 `TaskCompletionSource` 使用 `RunContinuationsAsynchronously`。
 
@@ -447,7 +447,7 @@ public interface ICoreRuntime : IAsyncDisposable
 
 `DrainEvents` 对每个 JSON 调用 `CoreEvent.Parse`；至少一个 state 事件才读取一次新快照。解析或 native 异常通过 `RuntimeError` 发布，循环继续保留最后有效状态；创建失败使 `StartAsync` 失败并结束线程。
 
-- [ ] **Step 4: 运行 CoreRuntime 测试并提交**
+- [x] **Step 4: 运行 CoreRuntime 测试并提交**
 
 Run:
 ```powershell
@@ -471,7 +471,7 @@ Expected: 全部 Core 测试通过，无线程泄漏或测试超时。
 - Consumes: `ICoreRuntime` 状态与错误事件。
 - Produces: `ShellViewModel.StatusText`、`ConnectionPhase`、`DiagnosticMessage`、`HasFatalError`、`StartAsync()`、`SetActive(bool)`。
 
-- [ ] **Step 1: 写 ViewModel 失败测试**
+- [x] **Step 1: 写 ViewModel 失败测试**
 
 ```csharp
 [TestMethod]
@@ -502,7 +502,7 @@ public async Task Startup_failure_exposes_actionable_diagnostic()
 }
 ```
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run:
 ```powershell
@@ -510,11 +510,11 @@ dotnet test winui_client/tests/LanChat.Presentation.Tests/LanChat.Presentation.T
 ```
 Expected: 编译失败，提示 `ShellViewModel` 不存在。
 
-- [ ] **Step 3: 实现最小 MVVM 状态**
+- [x] **Step 3: 实现最小 MVVM 状态**
 
 `ShellViewModel` 实现 `INotifyPropertyChanged`。构造时订阅 runtime 事件；所有属性修改通过 `IUiDispatcher.Enqueue(Action)` 执行。初始 `StatusText` 为 `正在初始化…`、`ConnectionPhase` 为 `starting`；启动异常设置 `HasFatalError=true` 和异常完整消息，但不伪造 Core 状态。`DisposeAsync` 取消订阅并释放 runtime。
 
-- [ ] **Step 4: 运行 Presentation 测试并提交**
+- [x] **Step 4: 运行 Presentation 测试并提交**
 
 Run:
 ```powershell
@@ -539,7 +539,7 @@ Expected: Presentation 测试全部通过。
 - Consumes: `LanChatCoreClient.Open(AppContext.BaseDirectory)`、`CoreRuntime`、`ShellViewModel`。
 - Produces: 显示 Core 初始状态或阻断式诊断的原生 WinUI 窗口。
 
-- [ ] **Step 1: 写应用壳构建 RED**
+- [x] **Step 1: 写应用壳构建 RED**
 
 先把 `MainWindow.xaml` 的 `x:Bind` 指向尚不存在的 `ViewModel.StatusText`、`ViewModel.HasFatalError` 和 `ViewModel.DiagnosticMessage`，并运行：
 
@@ -548,21 +548,21 @@ dotnet build winui_client/src/LanChat.WinUI/LanChat.WinUI.csproj -c Debug
 ```
 Expected: XAML/C# 编译失败，提示 `ViewModel` 或适配器尚未在窗口中定义。
 
-- [ ] **Step 2: 实现主题资源**
+- [x] **Step 2: 实现主题资源**
 
 `Styles/Theme.xaml` 定义石板紫强调色 `#625ACB`、深色标题栏 `#29263A`、卡片背景和 8px/12px 圆角资源；不得覆盖系统高对比度资源。`App.xaml` 合并 `XamlControlsResources` 和该主题字典。
 
-- [ ] **Step 3: 实现窗口和诊断视图**
+- [x] **Step 3: 实现窗口和诊断视图**
 
 `MainWindow.xaml` 使用原生 `Grid`、`InfoBar` 和 `ProgressRing`：正常状态显示 LAN Chat 标题、`StatusText` 与“WinUI 3 前端阶段 1”说明；`HasFatalError` 时显示不可关闭的错误 `InfoBar`，正文绑定 `DiagnosticMessage`。窗口初始大小 1100×720，最小大小 900×620。
 
 `DispatcherQueueAdapter.Enqueue` 调用窗口 `DispatcherQueue.TryEnqueue`，失败时抛出 `InvalidOperationException("无法调度 WinUI 状态更新。")`。
 
-- [ ] **Step 4: 连接应用生命周期**
+- [x] **Step 4: 连接应用生命周期**
 
 `App.OnLaunched` 创建 `MainWindow`。窗口构造时用 `() => LanChatCoreClient.Open(AppContext.BaseDirectory)` 创建 `CoreRuntime` 和 `ShellViewModel`。首次 `Activated` 调用一次 `StartAsync` 并 `SetActive(true)`；窗口失活时 `SetActive(false)`；`Closed` 中等待 `DisposeAsync`，不调用 `Environment.Exit`。
 
-- [ ] **Step 5: 构建、运行单元测试并提交**
+- [x] **Step 5: 构建、运行单元测试并提交**
 
 Run:
 ```powershell
@@ -592,20 +592,20 @@ Expected: 单元测试全通过，WinUI Debug 构建零警告、零错误。
 - Consumes: `LanChatNativeRuntimeEnabled`、`LanChatCoreDll`、`LanChatQtPrefix`、`LanChatOpenSslRoot` MSBuild 属性及 `LAN_CHAT_CORE_NATIVE_TEST` 测试开关。
 - Produces: 带 12 个目标 native DLL、可独立启动并显示真实初始状态的 WinUI Release 目录。
 
-- [ ] **Step 1: 写真实 Core 受控失败测试**
+- [x] **Step 1: 写真实 Core 受控失败测试**
 
 `RealCoreSmokeTests` 位于独立的 `LanChat.Core.Native.Tests` MSTest 项目，仅在 `LAN_CHAT_CORE_NATIVE_TEST=1` 时运行；独立 testhost 避免与 `LanChat.Core.Tests` 中会安装测试 resolver 的单元测试共享进程状态。测试调用 resolver 和真实 client，断言快照 `schemaVersion == 1`、phase 为 `idle`，然后正常释放。未设置开关时使用 `Assert.Inconclusive`，不自动搜索其他目录的 DLL。
 
-- [ ] **Step 2: 运行受控测试并确认 RED**
+- [x] **Step 2: 运行受控测试并确认 RED**
 
 Run without copying runtime files:
 ```powershell
 $env:LAN_CHAT_CORE_NATIVE_TEST = '1'
 dotnet test winui_client/tests/LanChat.Core.Native.Tests/LanChat.Core.Native.Tests.csproj --filter "FullyQualifiedName~RealCoreSmokeTests"
 ```
-Expected: FAIL，诊断明确指出测试输出目录缺少 `lan_chat_core.dll`。
+Expected: FAIL，测试在构建阶段被严格门禁拒绝，并明确指出缺少 `LanChatCoreDll`、`LanChatQtPrefix` 和 `LanChatOpenSslRoot`；由于运行库尚未复制，不能声称已进入缺 DLL 运行测试。补齐三个绝对路径属性后，才可执行后续 GREEN 验证。
 
-- [ ] **Step 3: 实现严格 native 运行库复制**
+- [x] **Step 3: 实现严格 native 运行库复制**
 
 `NativeRuntime.targets` 在无任何 native 属性且未显式启用时不参与普通 App/solution 构建。传入任一 native 路径属性或 `LanChatNativeRuntimeEnabled=true` 时自动启用，并要求三个路径属性全部非空；Native test 项目还会在 `LAN_CHAT_CORE_NATIVE_TEST=1` 时启用。启用后复制以下 12 个文件到 app/test 输出目录；任一源不是现有文件时 MSBuild 立即失败并显示绝对路径（现有目录也视为失败）。后四个文件是 Qt 6.10.3 中 `Qt6Quick.dll` 的必要传递依赖闭包，必须与其他 Qt DLL 来自同一 MSVC Qt prefix，不得从 PATH 搜索或回退到 MinGW 版本：
 
@@ -626,7 +626,7 @@ Qt6OpenGL.dll
 
 App 与独立的 Core native test 项目都导入该 targets。App 的 `PrepareForPublish` 另设发布契约：任何 publish 都必须显式传入三个路径属性，缺项立即失败；该门禁不影响普通无属性 Debug/solution build/test。Release publish/真实 Core 命令显式传入三个路径属性，不在仓库写死本机路径；未设置测试开关时 native smoke 为 Inconclusive。
 
-- [ ] **Step 4: 运行真实 Core GREEN 和全量测试**
+- [x] **Step 4: 运行真实 Core GREEN 和全量测试**
 
 Run:
 ```powershell
@@ -639,7 +639,7 @@ dotnet test winui_client/LANChat.WinUI.slnx -c Release @common
 ```
 Expected: 单元测试与真实 Core 测试全部通过，状态为 schema 1 / idle / 未连接。
 
-- [ ] **Step 5: 发布非打包自包含 Release**
+- [x] **Step 5: 发布非打包自包含 Release**
 
 先确认无属性 publish 被拒绝，且 fresh 输出目录不留下可被误认为可运行的 EXE：
 
@@ -655,7 +655,7 @@ dotnet publish winui_client/src/LanChat.WinUI/LanChat.WinUI.csproj -c Release -r
 ```
 Expected: 输出目录包含 `LanChat.WinUI.exe`、Windows App SDK/.NET 自包含文件、项目 PRI、所有生成的 XBF、Assets 和 12 个目标 native DLL；发布门禁对缺失资源显示绝对路径并立即失败，不生成或安装 MSIX。
 
-- [ ] **Step 6: 验证独立启动和运行库来源**
+- [x] **Step 6: 验证独立启动和运行库来源**
 
 Run:
 
@@ -684,7 +684,7 @@ try {
 
 Expected: `已加载目标运行库: 12/12`；主窗口通过 UI Automation 可读取 `未连接`，没有 Core 诊断错误。
 
-- [ ] **Step 7: 自动缩放性能检查**
+- [x] **Step 7: 自动缩放性能检查**
 
 先再次启动 Release，然后运行：
 
@@ -732,7 +732,7 @@ try {
 
 Expected: 总耗时不超过 8 秒，单次调用 P95 不超过 33ms；若失败，停止阶段验收并按系统化调试处理，不修改 UI 来掩盖问题。
 
-- [ ] **Step 8: 全量回归、提交与交付**
+- [x] **Step 8: 全量回归、提交与交付**
 
 Run:
 ```powershell
@@ -756,6 +756,16 @@ C:/Users/Q1573/Desktop/MY_project/lan-chat/.worktrees/winui3-phase1-core-shell/w
 ```
 
 请用户手动确认窗口打开、显示“未连接”、四边与四角缩放流畅。该确认完成后阶段 1 才算验收，通过后另写阶段 2 连接流程计划。
+
+## 阶段 1 验收记录
+
+- Debug：62 项通过，1 项按设计跳过。
+- Release：63/63 通过（含真实 Core smoke test）。
+- 既有 Core CTest：2/2 通过。
+- 独立发布目录加载 native 运行库：12/12，全部来自同一目录。
+- UI Automation：窗口显示“未连接”，无 Core 诊断错误。
+- 自动缩放：120 次，总耗时 7.32 秒，MoveWindow P95 16.11 毫秒。
+- 审计结束时工作树 clean；Flutter、Qt、React、Go 服务端、通信协议与数据库未修改。
 
 ## Authoritative References
 
