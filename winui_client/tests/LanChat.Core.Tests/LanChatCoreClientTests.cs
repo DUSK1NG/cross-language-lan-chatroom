@@ -1,3 +1,8 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using LanChat.Core.Interop;
+
 namespace LanChat.Core.Tests;
 
 [TestClass]
@@ -74,5 +79,23 @@ public sealed class LanChatCoreClientTests
         CollectionAssert.AreEqual(
             System.Text.Encoding.UTF8.GetBytes("{\"action\":\"发送\",\"text\":\"你好，世界\"}"),
             native.LastDispatchUtf8);
+    }
+
+    [TestMethod]
+    public void DispatchNative_declares_utf8_cdecl_c_abi_contract()
+    {
+        var method = typeof(PInvokeLanChatCoreNative).GetMethod(
+            "DispatchNative",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.IsNotNull(method);
+
+        var libraryImport = method.GetCustomAttribute<LibraryImportAttribute>();
+        Assert.IsNotNull(libraryImport);
+        Assert.AreEqual("lan_chat_core_dispatch_json", libraryImport.EntryPoint);
+        Assert.AreEqual(StringMarshalling.Utf8, libraryImport.StringMarshalling);
+
+        var callConvention = method.GetCustomAttribute<UnmanagedCallConvAttribute>();
+        Assert.IsNotNull(callConvention);
+        CollectionAssert.Contains(callConvention.CallConvs, typeof(CallConvCdecl));
     }
 }
