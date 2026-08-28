@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "LanChat.WinUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "LanChat.WinUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

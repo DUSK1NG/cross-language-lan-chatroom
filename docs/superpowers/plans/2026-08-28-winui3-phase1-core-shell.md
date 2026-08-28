@@ -6,14 +6,14 @@
 
 **Architecture:** 新建 `winui_client` 解决方案，分为无 UI 依赖的 `LanChat.Core`、可测试的 `LanChat.Presentation` 和仅承载 XAML/Windows 生命周期的 `LanChat.WinUI`。`CoreRuntime` 在专用线程串行拥有 Core，通过事件把不可变状态交给 ViewModel，WinUI 使用 `DispatcherQueue` 应用更新。
 
-**Tech Stack:** .NET SDK 10.0.400、C# 14、WinUI 3、Windows App SDK 2.4.0、WinApp CLI 0.6.1、MSTest、现有 C ABI Core、Qt 6.10.3、OpenSSL 3.6.3。
+**Tech Stack:** .NET SDK 10.0.400、C# 14、WinUI 3、Windows App SDK 2.4.0、WinApp CLI 0.6.1、MSTest、现有 C ABI Core、Qt 6.10.3、OpenSSL 3.6.3。官方模板生成器单次使用 `Microsoft.WindowsAppSDK.WinUI.CSharp.Templates 0.0.6-alpha`，不进入应用运行时依赖图。
 
 ## Global Constraints
 
 - 新代码仅位于 `winui_client/`、根目录 `global.json` 和本阶段必要的构建文档；不修改 Flutter、Qt、React、Go 服务端、通信协议或数据库。
 - 目标系统为 Windows 10 1809（build 17763）及以上和 Windows 11；构建目标为 x64。
 - 应用必须非打包运行，设置 `WindowsPackageType=None` 和 `WindowsAppSDKSelfContained=true`；不得要求 MSIX 安装。
-- Windows App SDK 固定为 `2.4.0`，.NET SDK 固定为 `10.0.400`，WinApp CLI 固定为 `0.6.1`；不得使用 preview 或 experimental 包。
+- 应用运行时的 Windows App SDK 固定为稳定版 `2.4.0`，.NET SDK 固定为 `10.0.400`，WinApp CLI 固定为 `0.6.1`；不得使用 preview 或 experimental 运行时包。仅允许官方脚手架生成器临时使用 `Microsoft.WindowsAppSDK.WinUI.CSharp.Templates 0.0.6-alpha`，生成后不得将其保留为应用依赖。
 - C# 只调用现有六个 `lan_chat_core_*` C ABI 接口；同一 Core 句柄的所有调用必须在一个专用后台线程串行执行。
 - UI 不读取、复制、输出、哈希或上传私钥、证书内容、数据库、聊天记录或日志内容。
 - `lan_chat_core.dll` 或依赖加载失败必须显示实际路径和系统错误，不得静默返回虚假空状态。
@@ -83,7 +83,7 @@ Expected: 输出 `10.0.400` 和 `0.6.1`；根目录生成：
 
 Run:
 ```powershell
-winapp new --template winui --name LanChat.WinUI --output winui_client/src/LanChat.WinUI --template-version 2.4.0 --no-prompt --json
+winapp new --template winui --name LanChat.WinUI --output winui_client/src/LanChat.WinUI --template-version 0.0.6-alpha --no-prompt --json
 dotnet new classlib -n LanChat.Core -o winui_client/src/LanChat.Core --framework net10.0
 dotnet new classlib -n LanChat.Presentation -o winui_client/src/LanChat.Presentation --framework net10.0
 dotnet new mstest -n LanChat.Core.Tests -o winui_client/tests/LanChat.Core.Tests --framework net10.0
@@ -92,6 +92,8 @@ dotnet new sln -n LANChat.WinUI --format slnx -o winui_client
 dotnet sln winui_client/LANChat.WinUI.slnx add winui_client/src/LanChat.Core/LanChat.Core.csproj winui_client/src/LanChat.Presentation/LanChat.Presentation.csproj winui_client/src/LanChat.WinUI/LanChat.WinUI.csproj winui_client/tests/LanChat.Core.Tests/LanChat.Core.Tests.csproj winui_client/tests/LanChat.Presentation.Tests/LanChat.Presentation.Tests.csproj
 ```
 Expected: 官方 WinUI 空白模板位于 `src/LanChat.WinUI`，其余项目和 `.slnx` 均存在。
+
+说明：`0.0.6-alpha` 是独立的官方模板包版本，仅在本命令中用作一次性生成器；应用项目的 `Microsoft.WindowsAppSDK` 运行时包仍必须固定为稳定 `2.4.0`，且不得引用该 alpha 模板包。
 
 - [ ] **Step 5: 固定共同构建设置和项目依赖**
 
