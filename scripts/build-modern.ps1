@@ -85,11 +85,20 @@ function Test-QtPrefix([string]$Prefix) {
 }
 
 function Find-QtPrefix([string]$RequestedPrefix) {
+    $repositoryQt = Join-Path $Root '.tools\qt'
+    $installedQt = 'C:\Qt'
+    $discoveredPrefixes = @(
+        $repositoryQt,
+        $installedQt
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | ForEach-Object {
+        Get-ChildItem -LiteralPath $_ -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'msvc2022_64' }
+    }
     $candidates = @(
         $RequestedPrefix,
         $env:LAN_CHAT_QT_PREFIX,
-        (Join-Path $Root '.tools\qt\6.11.2\msvc2022_64'),
-        'C:\Qt\6.11.2\msvc2022_64'
+        $discoveredPrefixes
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
     foreach ($candidate in $candidates) {
         if (Test-QtPrefix $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
@@ -153,7 +162,7 @@ function Get-ShowIncludesPrefix([string]$VsDevCmd) {
 
 function Invoke-VsCmake([string]$VsDevCmd, [string]$Cmake, [string[]]$Arguments, [string]$ShowIncludesPrefix = '') {
     $quotedArguments = ($Arguments | ForEach-Object { Quote-CmdArgument $_ }) -join ' '
-    $commandLine = ('set VSLANG=1033 && call {0} -arch=x64 -host_arch=x64 && {1} {2}' -f (Quote-CmdArgument $VsDevCmd), (Quote-CmdArgument $Cmake), $quotedArguments)
+    $commandLine = ('set VSLANG=1033 && set "CMAKE_PREFIX_PATH=" && call {0} -arch=x64 -host_arch=x64 && {1} {2}' -f (Quote-CmdArgument $VsDevCmd), (Quote-CmdArgument $Cmake), $quotedArguments)
     if (-not [string]::IsNullOrWhiteSpace($ShowIncludesPrefix)) {
         $prefix = $ShowIncludesPrefix.TrimEnd()
         & cmd.exe /d /s /c $commandLine 2>&1 | ForEach-Object {
@@ -196,7 +205,7 @@ $requirements = [ordered]@{
     'CMake (cmake.exe)' = $cmake
     'Ninja (ninja.exe)' = $ninja
     'MSVC Build Tools x64' = $vsDevCmd
-    'Qt 6.11.2 MSVC + WebEngine + WebChannel' = $resolvedQtPrefix
+    'Qt MSVC + WebEngine + WebChannel' = $resolvedQtPrefix
     'OpenSSL x64 (vcpkg)' = $resolvedOpenSslRoot
 }
 $missing = @($requirements.GetEnumerator() | Where-Object { [string]::IsNullOrWhiteSpace($_.Value) } | ForEach-Object { $_.Key })
@@ -251,6 +260,7 @@ $guiSource = Join-Path $Root 'client-cpp\gui'
 $configureArguments = @(
     '-S', $guiSource,
     '-B', $BuildDirectory,
+    '--fresh',
     '-G', 'Ninja',
     "-DCMAKE_MAKE_PROGRAM=$ninja",
     '-DCMAKE_BUILD_TYPE=Release',
