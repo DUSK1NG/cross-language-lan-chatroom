@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.20)
+project(mlspp_supply_chain_smoke LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(NOT DEFINED MLSPP_SOURCE_DIR OR NOT EXISTS "${MLSPP_SOURCE_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "MLSPP_SOURCE_DIR must point to the verified MLS++ source")
+endif()
+find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
+add_subdirectory("${MLSPP_SOURCE_DIR}" mlspp EXCLUDE_FROM_ALL)
+add_executable(mlspp-supply-chain-smoke main.cpp)
+target_link_libraries(mlspp-supply-chain-smoke PRIVATE mlspp)

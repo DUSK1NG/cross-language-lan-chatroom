@@ -1,0 +1,15 @@
+{
+  "mlspp": {
+    "repository": "https://github.com/cisco/mlspp",
+    "commit": "92aaa4134fa45ec39957a7c81a342401fba7feb2",
+    "archiveSha256": "251A1D19510A31C27CF8E61123EFEDA10EA179A6E52557378A7CA2D6A7F59A0B",
+    "license": "BSD-2-Clause",
+    "rfcStatus": "non-official proposed MLS implementation; review required for RFC 9420 use"
+  },
+  "nlohmannJson": {
+    "repository": "https://github.com/nlohmann/json",
+    "commit": "9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03",
+    "archiveSha256": "0DBC5E40A01FF142E7E68C03E85247A4DCEDE2F592D12D3677DEE3664D17975A",
+    "license": "MIT"
+  }
+}
