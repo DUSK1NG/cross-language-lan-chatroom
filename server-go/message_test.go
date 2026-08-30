@@ -2,11 +2,35 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestValidateMLSControlMessages(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("opaque"))
+	for _, message := range []Message{
+		{Type: "mls.key_package.publish", KeyPackage: encoded},
+		{Type: "mls.key_package.fetch", TargetUserCode: "Bob01", Room: "lobby"},
+		{Type: "mls.group.commit", GroupID: "room-group", Room: "lobby", Commit: encoded},
+		{Type: "mls.group.welcome", GroupID: "room-group", Room: "lobby", TargetUserCode: "Bob01", Welcome: encoded},
+	} {
+		if err := validateMessage(message); err != nil {
+			t.Fatalf("valid MLS message %+v rejected: %v", message, err)
+		}
+	}
+}
+
+func TestValidateMLSControlRejectsMalformedOpaqueData(t *testing.T) {
+	if err := validateMessage(Message{Type: "mls.key_package.publish", KeyPackage: "not-base64"}); err == nil {
+		t.Fatal("malformed key package was accepted")
+	}
+	if err := validateMessage(Message{Type: "mls.group.commit", GroupID: "g", Commit: ""}); err == nil {
+		t.Fatal("empty commit was accepted")
+	}
+}
 
 func TestValidateUserCode(t *testing.T) {
 	tests := []struct {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,6 +57,13 @@ type Message struct {
 	ProtocolVersion string          `json:"protocol_version,omitempty"`
 	Capabilities    []string        `json:"capabilities,omitempty"`
 	Crypto          json.RawMessage `json:"crypto,omitempty"`
+	// MLS control payloads remain opaque to the server. They are base64 text on
+	// the wire so legacy JSON framing and the 64 KiB payload limit still apply.
+	GroupID    string `json:"group_id,omitempty"`
+	Epoch      uint64 `json:"epoch,omitempty"`
+	KeyPackage string `json:"key_package,omitempty"`
+	Commit     string `json:"commit,omitempty"`
+	Welcome    string `json:"welcome,omitempty"`
 	// Password is retained only so old database/test fixtures still compile;
 	// password authentication is removed and this field never crosses the wire.
 	Password string `json:"-"`
@@ -72,6 +80,29 @@ func validateOpaqueCrypto(value json.RawMessage) error {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(value, &envelope); err != nil || len(envelope) == 0 {
 		return fmt.Errorf("crypto envelope must be a JSON object")
+	}
+	return nil
+}
+
+func validateOpaqueMLS(label, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s must not be empty", label)
+	}
+	if len(value) > maxMessageSize {
+		return fmt.Errorf("%s is too large", label)
+	}
+	if _, err := base64.StdEncoding.DecodeString(value); err != nil {
+		return fmt.Errorf("%s must be base64: %w", label, err)
+	}
+	return nil
+}
+
+func validateMLSGroupID(groupID string) error {
+	if groupID == "" {
+		return fmt.Errorf("MLS group id must not be empty")
+	}
+	if !utf8.ValidString(groupID) || len([]byte(groupID)) > maxMessageSize {
+		return fmt.Errorf("MLS group id must be valid UTF-8 and no longer than %d bytes", maxMessageSize)
 	}
 	return nil
 }
@@ -213,6 +244,39 @@ func validateMessage(message Message) error {
 		return nil
 	case "room_leave", "rooms_request":
 		return nil
+	case "mls.key_package.publish":
+		return validateOpaqueMLS("key package", message.KeyPackage)
+	case "mls.key_package.fetch":
+		if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+			return fmt.Errorf("invalid key package target user code: %w", err)
+		}
+		if message.Room != "" {
+			return validateRoomName(message.Room)
+		}
+		return nil
+	case "mls.group.commit":
+		if err := validateMLSGroupID(message.GroupID); err != nil {
+			return err
+		}
+		if message.Room != "" {
+			if err := validateRoomName(message.Room); err != nil {
+				return err
+			}
+		}
+		return validateOpaqueMLS("MLS group commit", message.Commit)
+	case "mls.group.welcome":
+		if err := validateMLSGroupID(message.GroupID); err != nil {
+			return err
+		}
+		if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+			return fmt.Errorf("invalid welcome target user code: %w", err)
+		}
+		if message.Room != "" {
+			if err := validateRoomName(message.Room); err != nil {
+				return err
+			}
+		}
+		return validateOpaqueMLS("MLS group welcome", message.Welcome)
 	case "users_request", "quit":
 		return nil
 	case "admin_action":

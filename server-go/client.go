@@ -267,6 +267,46 @@ func (c *Client) readPump(hub *Hub) {
 				MessageID:  message.MessageID,
 			}
 
+		case "mls.key_package.publish":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid MLS key package"}) {
+					return
+				}
+				continue
+			}
+			hub.MLSKeyPackagePublish <- MLSKeyPackagePublishRequest{Sender: c, KeyPackage: message.KeyPackage, CommandID: message.CommandID}
+
+		case "mls.key_package.fetch":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid MLS key package target"}) {
+					return
+				}
+				continue
+			}
+			targetCode, _ := normalizeUserCode(message.TargetUserCode)
+			hub.MLSKeyPackageFetch <- MLSKeyPackageFetchRequest{Sender: c, TargetCode: targetCode, Room: message.Room, CommandID: message.CommandID}
+
+		case "mls.group.commit":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid MLS group commit"}) {
+					return
+				}
+				continue
+			}
+			hub.MLSGroupCommit <- MLSGroupCommitRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
+				Epoch: message.Epoch, Commit: message.Commit, CommandID: message.CommandID}
+
+		case "mls.group.welcome":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid MLS group welcome"}) {
+					return
+				}
+				continue
+			}
+			targetCode, _ := normalizeUserCode(message.TargetUserCode)
+			hub.MLSGroupWelcome <- MLSGroupWelcomeRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
+				Epoch: message.Epoch, TargetCode: targetCode, Welcome: message.Welcome, CommandID: message.CommandID}
+
 		case "users_request":
 			hub.RequestUsers <- c
 

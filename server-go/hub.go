@@ -49,6 +49,38 @@ type PrivateMessageRequest struct {
 	MessageID  string
 }
 
+type MLSKeyPackagePublishRequest struct {
+	Sender     *Client
+	KeyPackage string
+	CommandID  string
+}
+
+type MLSKeyPackageFetchRequest struct {
+	Sender     *Client
+	TargetCode string
+	Room       string
+	CommandID  string
+}
+
+type MLSGroupCommitRequest struct {
+	Sender    *Client
+	GroupID   string
+	Room      string
+	Epoch     uint64
+	Commit    string
+	CommandID string
+}
+
+type MLSGroupWelcomeRequest struct {
+	Sender     *Client
+	GroupID    string
+	Room       string
+	Epoch      uint64
+	TargetCode string
+	Welcome    string
+	CommandID  string
+}
+
 type RoomRequest struct {
 	Client *Client
 	Room   string
@@ -213,6 +245,10 @@ type Hub struct {
 	Outbound                   chan OutboundMessage
 	RequestUsers               chan *Client
 	Private                    chan PrivateMessageRequest
+	MLSKeyPackagePublish       chan MLSKeyPackagePublishRequest
+	MLSKeyPackageFetch         chan MLSKeyPackageFetchRequest
+	MLSGroupCommit             chan MLSGroupCommitRequest
+	MLSGroupWelcome            chan MLSGroupWelcomeRequest
 	RoomJoin                   chan RoomRequest
 	RoomCreate                 chan RoomCreateRequest
 	RoomAction                 chan RoomActionRequest
@@ -246,6 +282,10 @@ func NewHub() *Hub {
 		Outbound:                 make(chan OutboundMessage),
 		RequestUsers:             make(chan *Client),
 		Private:                  make(chan PrivateMessageRequest),
+		MLSKeyPackagePublish:     make(chan MLSKeyPackagePublishRequest),
+		MLSKeyPackageFetch:       make(chan MLSKeyPackageFetchRequest),
+		MLSGroupCommit:           make(chan MLSGroupCommitRequest),
+		MLSGroupWelcome:          make(chan MLSGroupWelcomeRequest),
 		RoomJoin:                 make(chan RoomRequest),
 		RoomCreate:               make(chan RoomCreateRequest),
 		RoomAction:               make(chan RoomActionRequest),
@@ -302,6 +342,18 @@ func (h *Hub) Run() {
 
 		case request := <-h.Private:
 			h.handlePrivateMessage(request)
+
+		case request := <-h.MLSKeyPackagePublish:
+			h.handleMLSKeyPackagePublish(request)
+
+		case request := <-h.MLSKeyPackageFetch:
+			h.handleMLSKeyPackageFetch(request)
+
+		case request := <-h.MLSGroupCommit:
+			h.handleMLSGroupCommit(request)
+
+		case request := <-h.MLSGroupWelcome:
+			h.handleMLSGroupWelcome(request)
 
 		case request := <-h.RoomJoin:
 			h.handleRoomJoin(request)
@@ -1158,6 +1210,150 @@ func (h *Hub) recordMessage(message Message, recipients map[string]bool, offline
 		authorCode = normalized
 	}
 	h.MessageRecords[message.MessageID] = MessageRecord{AuthorCode: authorCode, Recipients: recipients, OfflineMessageID: offlineMessageID}
+}
+
+func (h *Hub) canAccessMLSRoom(sender *Client, targetCode, room string) bool {
+	if sender == nil || !h.Clients[sender] {
+		return false
+	}
+	if targetCode == sender.NormalizedCode {
+		return true
+	}
+	if room == "" {
+		return false
+	}
+	definition, exists := h.RoomDefinitions[room]
+	if !exists || !h.Rooms[room][sender] {
+		return false
+	}
+	if definition.Allowed[targetCode] {
+		return true
+	}
+	target, online := h.ActiveCodes[targetCode]
+	return online && target.Room == room && h.Rooms[room][target]
+}
+
+func (h *Hub) handleMLSKeyPackagePublish(request MLSKeyPackagePublishRequest) {
+	sender := request.Sender
+	if sender == nil || !h.Clients[sender] || h.OfflineStore == nil {
+		if sender != nil {
+			h.deliverError(sender, "MLS key package service unavailable", "", request.CommandID)
+		}
+		return
+	}
+	if err := h.OfflineStore.PublishMLSKeyPackage(sender.NormalizedCode, request.KeyPackage); err != nil {
+		h.deliverError(sender, "Invalid MLS key package", "", request.CommandID)
+		return
+	}
+	h.deliver(sender, Message{Type: "mls.key_package.publish", UserCode: sender.UserCode,
+		Content: "stored", CommandID: request.CommandID})
+}
+
+func (h *Hub) handleMLSKeyPackageFetch(request MLSKeyPackageFetchRequest) {
+	sender := request.Sender
+	if sender == nil || !h.Clients[sender] || h.OfflineStore == nil {
+		if sender != nil {
+			h.deliverError(sender, "MLS key package service unavailable", "", request.CommandID)
+		}
+		return
+	}
+	targetCode, err := normalizeUserCode(request.TargetCode)
+	if err != nil {
+		h.deliverError(sender, "Invalid MLS key package target", "", request.CommandID)
+		return
+	}
+	room := request.Room
+	if room == "" && targetCode != sender.NormalizedCode {
+		room = sender.Room
+	}
+	if !h.canAccessMLSRoom(sender, targetCode, room) {
+		h.deliverError(sender, "MLS key package access denied", "", request.CommandID)
+		return
+	}
+	keyPackage, err := h.OfflineStore.FetchMLSKeyPackage(targetCode)
+	if err != nil {
+		h.deliverError(sender, "MLS key package not found", "", request.CommandID)
+		return
+	}
+	h.deliver(sender, Message{Type: "mls.key_package.fetch", TargetUserCode: targetCode,
+		KeyPackage: keyPackage, Room: room, CommandID: request.CommandID})
+}
+
+func (h *Hub) handleMLSGroupCommit(request MLSGroupCommitRequest) {
+	sender := request.Sender
+	if sender == nil || !h.Clients[sender] || h.OfflineStore == nil {
+		if sender != nil {
+			h.deliverError(sender, "MLS group service unavailable", "", request.CommandID)
+		}
+		return
+	}
+	room := request.Room
+	if room == "" {
+		room = sender.Room
+	}
+	if !h.canAccessMLSRoom(sender, sender.NormalizedCode, room) || !h.Rooms[room][sender] {
+		h.deliverError(sender, "MLS group commit access denied", "", request.CommandID)
+		return
+	}
+	inserted, err := h.OfflineStore.SaveMLSCommit(request.GroupID, room, request.Epoch, request.Commit)
+	if err != nil {
+		content := "Invalid MLS group commit"
+		if errors.Is(err, ErrMLSEpochRollback) {
+			content = "MLS group epoch rollback"
+		} else if errors.Is(err, ErrMLSCommitConflict) {
+			content = "MLS group commit conflict"
+		}
+		h.deliverError(sender, content, "", request.CommandID)
+		return
+	}
+	content := "stored"
+	if !inserted {
+		content = "duplicate"
+	}
+	h.deliver(sender, Message{Type: "mls.group.commit", GroupID: request.GroupID,
+		Room: room, Epoch: request.Epoch, Content: content, CommandID: request.CommandID})
+}
+
+func (h *Hub) handleMLSGroupWelcome(request MLSGroupWelcomeRequest) {
+	sender := request.Sender
+	if sender == nil || !h.Clients[sender] || h.OfflineStore == nil {
+		if sender != nil {
+			h.deliverError(sender, "MLS group service unavailable", "", request.CommandID)
+		}
+		return
+	}
+	targetCode, err := normalizeUserCode(request.TargetCode)
+	if err != nil {
+		h.deliverError(sender, "Invalid MLS welcome target", "", request.CommandID)
+		return
+	}
+	room := request.Room
+	if room == "" {
+		room = sender.Room
+	}
+	if !h.canAccessMLSRoom(sender, targetCode, room) || !h.Rooms[room][sender] {
+		h.deliverError(sender, "MLS group welcome access denied", "", request.CommandID)
+		return
+	}
+	inserted, err := h.OfflineStore.SaveMLSWelcome(request.GroupID, room, request.Epoch, targetCode, request.Welcome)
+	if err != nil {
+		content := "Invalid MLS group welcome"
+		if errors.Is(err, ErrMLSWelcomeConflict) {
+			content = "MLS group welcome conflict"
+		}
+		h.deliverError(sender, content, "", request.CommandID)
+		return
+	}
+	if target := h.ActiveCodes[targetCode]; target != nil {
+		h.deliver(target, Message{Type: "mls.group.welcome", GroupID: request.GroupID,
+			Room: room, Epoch: request.Epoch, TargetUserCode: targetCode, Welcome: request.Welcome})
+	}
+	content := "stored"
+	if !inserted {
+		content = "duplicate"
+	}
+	h.deliver(sender, Message{Type: "mls.group.welcome", GroupID: request.GroupID,
+		Room: room, Epoch: request.Epoch, TargetUserCode: targetCode, Content: content, CommandID: request.CommandID})
 }
 
 func (h *Hub) deliverRecall(record MessageRecord, message Message) {

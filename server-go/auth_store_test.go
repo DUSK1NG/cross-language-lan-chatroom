@@ -12,6 +12,52 @@ import (
 	"time"
 )
 
+func TestAuthStorePersistsMLSKeyPackagesAndCommitIdempotency(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if err := store.PublishMLSKeyPackage("alice01", "a2V5"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.FetchMLSKeyPackage("alice01"); err != nil || got != "a2V5" {
+		t.Fatalf("key package = %q, err = %v", got, err)
+	}
+	if err := store.PublishMLSKeyPackage("alice01", "bmV3"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.FetchMLSKeyPackage("alice01"); got != "bmV3" {
+		t.Fatalf("updated key package = %q", got)
+	}
+	inserted, err := store.SaveMLSCommit("group-1", "lobby", 3, "Y29tbWl0")
+	if err != nil || !inserted {
+		t.Fatalf("first commit inserted=%t err=%v", inserted, err)
+	}
+	inserted, err = store.SaveMLSCommit("group-1", "lobby", 3, "Y29tbWl0")
+	if err != nil || inserted {
+		t.Fatalf("duplicate commit inserted=%t err=%v", inserted, err)
+	}
+	if _, err := store.SaveMLSCommit("group-1", "lobby", 3, "b3RoZXI="); !errors.Is(err, ErrMLSCommitConflict) {
+		t.Fatalf("conflicting commit error = %v", err)
+	}
+	if _, err := store.SaveMLSCommit("group-1", "lobby", 2, "b2xk"); !errors.Is(err, ErrMLSEpochRollback) {
+		t.Fatalf("rollback commit error = %v", err)
+	}
+}
+
+func TestAuthStoreMLSWelcomeIsOpaqueAndIdempotent(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if inserted, err := store.SaveMLSWelcome("group-1", "lobby", 2, "bob01", "d2VsY29tZQ=="); err != nil || !inserted {
+		t.Fatalf("welcome inserted=%t err=%v", inserted, err)
+	}
+	if got, err := store.FetchMLSWelcome("group-1", 2, "bob01"); err != nil || got != "d2VsY29tZQ==" {
+		t.Fatalf("welcome = %q, err = %v", got, err)
+	}
+	if inserted, err := store.SaveMLSWelcome("group-1", "lobby", 2, "bob01", "d2VsY29tZQ=="); err != nil || inserted {
+		t.Fatalf("duplicate welcome inserted=%t err=%v", inserted, err)
+	}
+	if _, err := store.SaveMLSWelcome("group-1", "lobby", 2, "bob01", "b3RoZXI="); !errors.Is(err, ErrMLSWelcomeConflict) {
+		t.Fatalf("conflicting welcome error = %v", err)
+	}
+}
+
 func TestAuthStorePersistsOpaqueCryptoEnvelope(t *testing.T) {
 	store, _ := newTestAuthStore(t)
 	want := json.RawMessage(`{"v":1,"alg":"xchacha20poly1305","ct":"opaque"}`)

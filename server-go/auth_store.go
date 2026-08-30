@@ -20,6 +20,9 @@ const (
 )
 
 var ErrAccountAlreadyExists = errors.New("account already exists")
+var ErrMLSCommitConflict = errors.New("MLS commit conflicts with existing epoch")
+var ErrMLSEpochRollback = errors.New("MLS commit epoch rolls back current group epoch")
+var ErrMLSWelcomeConflict = errors.New("MLS welcome conflicts with existing target")
 
 func nullableCrypto(value json.RawMessage) any {
 	if len(value) == 0 {
@@ -128,6 +131,31 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation
     ON chat_messages(kind, conversation_key, id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_search_scope
     ON chat_messages(kind, conversation_key, content, id);
+CREATE TABLE IF NOT EXISTS mls_key_packages (
+    user_code TEXT PRIMARY KEY,
+    key_package TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mls_groups (
+    group_id TEXT PRIMARY KEY,
+    room TEXT NOT NULL,
+    current_epoch INTEGER NOT NULL DEFAULT -1
+);
+CREATE TABLE IF NOT EXISTS mls_group_epochs (
+    group_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL,
+    commit_data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(group_id, epoch)
+);
+CREATE TABLE IF NOT EXISTS mls_group_welcomes (
+    group_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL,
+    target_code TEXT NOT NULL,
+    welcome TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(group_id, epoch, target_code)
+);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("initialize auth database: %w", err)
@@ -148,6 +176,197 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_search_scope
 		return fmt.Errorf("index offline message id: %w", err)
 	}
 	return nil
+}
+
+func (s *AuthStore) PublishMLSKeyPackage(userCode, keyPackage string) error {
+	if s == nil || s.db == nil {
+		return errors.New("auth store is not initialized")
+	}
+	code, err := normalizeUserCode(userCode)
+	if err != nil {
+		return err
+	}
+	if err := validateOpaqueMLS("key package", keyPackage); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO mls_key_packages(user_code, key_package, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(user_code) DO UPDATE SET key_package = excluded.key_package, updated_at = excluded.updated_at`,
+		code, keyPackage, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("save MLS key package: %w", err)
+	}
+	return nil
+}
+
+func (s *AuthStore) FetchMLSKeyPackage(userCode string) (string, error) {
+	if s == nil || s.db == nil {
+		return "", errors.New("auth store is not initialized")
+	}
+	code, err := normalizeUserCode(userCode)
+	if err != nil {
+		return "", err
+	}
+	var keyPackage string
+	if err := s.db.QueryRow(`SELECT key_package FROM mls_key_packages WHERE user_code = ?`, code).Scan(&keyPackage); err != nil {
+		return "", fmt.Errorf("fetch MLS key package: %w", err)
+	}
+	return keyPackage, nil
+}
+
+func mlsEpochValue(epoch uint64) (int64, error) {
+	if epoch > uint64(^uint64(0)>>1) {
+		return 0, errors.New("MLS epoch is too large")
+	}
+	return int64(epoch), nil
+}
+
+func (s *AuthStore) SaveMLSCommit(groupID, room string, epoch uint64, commit string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("auth store is not initialized")
+	}
+	if err := validateMLSGroupID(groupID); err != nil {
+		return false, err
+	}
+	if room != "" {
+		if err := validateRoomName(room); err != nil {
+			return false, err
+		}
+	}
+	if err := validateOpaqueMLS("MLS group commit", commit); err != nil {
+		return false, err
+	}
+	epochValue, err := mlsEpochValue(epoch)
+	if err != nil {
+		return false, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin MLS commit: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existingCommit string
+	err = tx.QueryRow(`SELECT commit_data FROM mls_group_epochs WHERE group_id = ? AND epoch = ?`, groupID, epochValue).Scan(&existingCommit)
+	if err == nil {
+		if existingCommit != commit {
+			return false, ErrMLSCommitConflict
+		}
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("query MLS commit: %w", err)
+	}
+	var currentEpoch int64
+	var existingRoom string
+	err = tx.QueryRow(`SELECT room, current_epoch FROM mls_groups WHERE group_id = ?`, groupID).Scan(&existingRoom, &currentEpoch)
+	groupExists := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("query MLS group: %w", err)
+	}
+	if groupExists {
+		if room != "" && existingRoom != "" && room != existingRoom {
+			return false, ErrMLSCommitConflict
+		}
+		if epochValue < currentEpoch {
+			return false, ErrMLSEpochRollback
+		}
+	} else {
+		if _, err := tx.Exec(`INSERT INTO mls_groups(group_id, room, current_epoch) VALUES (?, ?, -1)`, groupID, room); err != nil {
+			return false, fmt.Errorf("create MLS group: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO mls_group_epochs(group_id, epoch, commit_data, created_at) VALUES (?, ?, ?, ?)`,
+		groupID, epochValue, commit, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return false, fmt.Errorf("save MLS commit: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE mls_groups SET room = CASE WHEN room = '' THEN ? ELSE room END, current_epoch = CASE WHEN current_epoch < ? THEN ? ELSE current_epoch END WHERE group_id = ?`, room, epochValue, epochValue, groupID); err != nil {
+		return false, fmt.Errorf("update MLS group: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit MLS commit: %w", err)
+	}
+	return true, nil
+}
+
+func (s *AuthStore) SaveMLSWelcome(groupID, room string, epoch uint64, targetCode, welcome string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("auth store is not initialized")
+	}
+	if err := validateMLSGroupID(groupID); err != nil {
+		return false, err
+	}
+	if room != "" {
+		if err := validateRoomName(room); err != nil {
+			return false, err
+		}
+	}
+	target, err := normalizeUserCode(targetCode)
+	if err != nil {
+		return false, err
+	}
+	if err := validateOpaqueMLS("MLS group welcome", welcome); err != nil {
+		return false, err
+	}
+	epochValue, err := mlsEpochValue(epoch)
+	if err != nil {
+		return false, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin MLS welcome: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existingWelcome string
+	err = tx.QueryRow(`SELECT welcome FROM mls_group_welcomes WHERE group_id = ? AND epoch = ? AND target_code = ?`, groupID, epochValue, target).Scan(&existingWelcome)
+	if err == nil {
+		if existingWelcome != welcome {
+			return false, ErrMLSWelcomeConflict
+		}
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("query MLS welcome: %w", err)
+	}
+	var existingRoom string
+	if err := tx.QueryRow(`SELECT room FROM mls_groups WHERE group_id = ?`, groupID).Scan(&existingRoom); errors.Is(err, sql.ErrNoRows) {
+		if _, err := tx.Exec(`INSERT INTO mls_groups(group_id, room, current_epoch) VALUES (?, ?, -1)`, groupID, room); err != nil {
+			return false, fmt.Errorf("create MLS group for welcome: %w", err)
+		}
+	} else if err != nil {
+		return false, fmt.Errorf("query MLS group for welcome: %w", err)
+	} else if room != "" && existingRoom != "" && room != existingRoom {
+		return false, ErrMLSWelcomeConflict
+	}
+	if _, err := tx.Exec(`INSERT INTO mls_group_welcomes(group_id, epoch, target_code, welcome, created_at) VALUES (?, ?, ?, ?, ?)`,
+		groupID, epochValue, target, welcome, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return false, fmt.Errorf("save MLS welcome: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit MLS welcome: %w", err)
+	}
+	return true, nil
+}
+
+func (s *AuthStore) FetchMLSWelcome(groupID string, epoch uint64, targetCode string) (string, error) {
+	if s == nil || s.db == nil {
+		return "", errors.New("auth store is not initialized")
+	}
+	if err := validateMLSGroupID(groupID); err != nil {
+		return "", err
+	}
+	epochValue, err := mlsEpochValue(epoch)
+	if err != nil {
+		return "", err
+	}
+	target, err := normalizeUserCode(targetCode)
+	if err != nil {
+		return "", err
+	}
+	var welcome string
+	if err := s.db.QueryRow(`SELECT welcome FROM mls_group_welcomes WHERE group_id = ? AND epoch = ? AND target_code = ?`, groupID, epochValue, target).Scan(&welcome); err != nil {
+		return "", fmt.Errorf("fetch MLS welcome: %w", err)
+	}
+	return welcome, nil
 }
 
 func (s *AuthStore) migrateChatMessageIdentitySchema() error {
