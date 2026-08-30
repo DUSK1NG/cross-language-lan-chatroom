@@ -37,14 +37,43 @@ function Expand-Verified($archive, [string]$name) {
     }
     if ($null -eq $root -or -not (Test-Path (Join-Path $root.FullName 'CMakeLists.txt'))) { throw "Extracted $name source is incomplete." }
     if ($name -eq 'mlspp') {
+        $sourceDigest = Get-SourceDigest $root.FullName
+        if ($sourceDigest -ne $manifest.mlspp.sourceDigest.sha256.ToUpperInvariant()) {
+            throw "mlspp source digest mismatch: expected $($manifest.mlspp.sourceDigest.sha256), got $sourceDigest"
+        }
         $proof = [ordered]@{
             repository = $manifest.mlspp.repository
             commit = $manifest.mlspp.commit
             archiveSha256 = $manifest.mlspp.archiveSha256.ToUpperInvariant()
+            sourceDigest = $sourceDigest
         }
         $proof | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $root.FullName '.lan-chat-mlspp-source-proof.json')
     }
     return $root.FullName
+}
+
+function Get-SourceDigest([string]$sourceRoot) {
+    $recordLines = [System.Collections.Generic.List[string]]::new()
+    $excluded = @('.git', '.vs', 'build', 'out')
+    foreach ($file in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse) {
+        $relative = $file.FullName.Substring($sourceRoot.Length).TrimStart('\', '/') -replace '\\', '/'
+        $parts = $relative.Split('/')
+        if ($relative -eq '.lan-chat-mlspp-source-proof.json' -or
+            ($parts | Where-Object { $_ -in $excluded -or $_ -like 'cmake-build-*' }).Count -gt 0) {
+            continue
+        }
+        $fileHash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $recordLines.Add("$relative`t$fileHash`n")
+    }
+    $records = $recordLines.ToArray()
+    [Array]::Sort($records, [System.StringComparer]::Ordinal)
+    $canonical = [string]::Concat($records)
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical))) -replace '-', '').ToUpperInvariant()
+    } finally {
+        $hasher.Dispose()
+    }
 }
 
 $mlsArchive = Get-VerifiedArchive $manifest.mlspp 'mlspp'

@@ -4,7 +4,12 @@
     "commit": "92aaa4134fa45ec39957a7c81a342401fba7feb2",
     "archiveSha256": "251A1D19510A31C27CF8E61123EFEDA10EA179A6E52557378A7CA2D6A7F59A0B",
     "license": "BSD-2-Clause",
-    "rfcStatus": "non-official proposed MLS implementation; review required for RFC 9420 use"
+    "rfcStatus": "non-official proposed MLS implementation; review required for RFC 9420 use",
+    "sourceDigest": {
+      "algorithm": "SHA-256",
+      "canonicalization": "UTF-8 records sorted by ordinal normalized relative path; each record is path + TAB + lowercase per-file SHA-256 + LF; exclude .git, .vs, build, out, cmake-build-* directories and .lan-chat-mlspp-source-proof.json",
+      "sha256": "B768A7B906A7A06C26101336103F25D4FF4B7975AB83AB73BB84ABE4A1636765"
+    }
   },
   "nlohmannJson": {
     "repository": "https://github.com/nlohmann/json",
