@@ -19,6 +19,50 @@ if(LAN_CHAT_ENABLE_MLSPP)
     if(NOT DEFINED MLSPP_SOURCE_DIR OR NOT EXISTS "${MLSPP_SOURCE_DIR}/CMakeLists.txt")
         message(FATAL_ERROR "LAN_CHAT_ENABLE_MLSPP requires MLSPP_SOURCE_DIR pointing to the verified source")
     endif()
+
+    get_filename_component(MLSPP_SOURCE_DIR "${MLSPP_SOURCE_DIR}" ABSOLUTE)
+    set(LAN_CHAT_MLSPP_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/mls/manifest.json")
+    if(NOT EXISTS "${LAN_CHAT_MLSPP_MANIFEST}")
+        message(FATAL_ERROR "MLS++ lock manifest is missing: ${LAN_CHAT_MLSPP_MANIFEST}")
+    endif()
+    file(READ "${LAN_CHAT_MLSPP_MANIFEST}" LAN_CHAT_MLSPP_MANIFEST_JSON)
+    string(JSON LAN_CHAT_MLSPP_COMMIT ERROR_VARIABLE LAN_CHAT_MLSPP_JSON_ERROR
+        GET "${LAN_CHAT_MLSPP_MANIFEST_JSON}" mlspp commit)
+    if(LAN_CHAT_MLSPP_JSON_ERROR OR NOT LAN_CHAT_MLSPP_COMMIT)
+        message(FATAL_ERROR "MLS++ lock manifest has no valid commit")
+    endif()
+
+    execute_process(
+        COMMAND git -C "${MLSPP_SOURCE_DIR}" rev-parse --verify HEAD
+        RESULT_VARIABLE LAN_CHAT_MLSPP_GIT_RESULT
+        OUTPUT_VARIABLE LAN_CHAT_MLSPP_GIT_HEAD
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(LAN_CHAT_MLSPP_GIT_RESULT EQUAL 0)
+        if(NOT LAN_CHAT_MLSPP_GIT_HEAD STREQUAL LAN_CHAT_MLSPP_COMMIT)
+            message(FATAL_ERROR
+                "MLS++ source git HEAD is not locked: expected ${LAN_CHAT_MLSPP_COMMIT}, got ${LAN_CHAT_MLSPP_GIT_HEAD}")
+        endif()
+    else()
+        set(LAN_CHAT_MLSPP_PROOF "${MLSPP_SOURCE_DIR}/.lan-chat-mlspp-source-proof.json")
+        if(NOT EXISTS "${LAN_CHAT_MLSPP_PROOF}")
+            message(FATAL_ERROR "MLS++ source is not a git checkout and has no supply-chain proof: ${LAN_CHAT_MLSPP_PROOF}")
+        endif()
+        file(READ "${LAN_CHAT_MLSPP_PROOF}" LAN_CHAT_MLSPP_PROOF_JSON)
+        string(JSON LAN_CHAT_MLSPP_PROOF_COMMIT ERROR_VARIABLE LAN_CHAT_MLSPP_PROOF_ERROR
+            GET "${LAN_CHAT_MLSPP_PROOF_JSON}" commit)
+        string(JSON LAN_CHAT_MLSPP_PROOF_SHA ERROR_VARIABLE LAN_CHAT_MLSPP_PROOF_SHA_ERROR
+            GET "${LAN_CHAT_MLSPP_PROOF_JSON}" archiveSha256)
+        string(JSON LAN_CHAT_MLSPP_LOCKED_SHA ERROR_VARIABLE LAN_CHAT_MLSPP_LOCKED_SHA_ERROR
+            GET "${LAN_CHAT_MLSPP_MANIFEST_JSON}" mlspp archiveSha256)
+        if(LAN_CHAT_MLSPP_PROOF_ERROR OR LAN_CHAT_MLSPP_PROOF_SHA_ERROR
+           OR LAN_CHAT_MLSPP_LOCKED_SHA_ERROR
+           OR NOT LAN_CHAT_MLSPP_PROOF_COMMIT STREQUAL LAN_CHAT_MLSPP_COMMIT
+           OR NOT LAN_CHAT_MLSPP_PROOF_SHA STREQUAL LAN_CHAT_MLSPP_LOCKED_SHA)
+            message(FATAL_ERROR "MLS++ archive source proof does not match vendor/mls/manifest.json")
+        endif()
+    endif()
     add_subdirectory("${MLSPP_SOURCE_DIR}" mlspp EXCLUDE_FROM_ALL)
 endif()
 

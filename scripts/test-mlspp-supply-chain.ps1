@@ -36,6 +36,14 @@ function Expand-Verified($archive, [string]$name) {
         $root = Get-ChildItem $destination -Directory | Where-Object Name -like ('*' + $manifest.$name.commit) | Select-Object -First 1
     }
     if ($null -eq $root -or -not (Test-Path (Join-Path $root.FullName 'CMakeLists.txt'))) { throw "Extracted $name source is incomplete." }
+    if ($name -eq 'mlspp') {
+        $proof = [ordered]@{
+            repository = $manifest.mlspp.repository
+            commit = $manifest.mlspp.commit
+            archiveSha256 = $manifest.mlspp.archiveSha256.ToUpperInvariant()
+        }
+        $proof | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $root.FullName '.lan-chat-mlspp-source-proof.json')
+    }
     return $root.FullName
 }
 
