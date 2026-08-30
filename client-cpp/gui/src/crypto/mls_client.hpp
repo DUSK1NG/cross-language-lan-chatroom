@@ -1,0 +1,28 @@
+#pragma once
+
+#include <mls/session.h>
+
+#include <optional>
+
+class MlsClient final {
+public:
+  struct Commit {
+    MLS_NAMESPACE::bytes_ns::bytes welcome;
+    MLS_NAMESPACE::bytes_ns::bytes handshake;
+  };
+
+  static MlsClient create(const MLS_NAMESPACE::bytes_ns::bytes& identity);
+  MLS_NAMESPACE::bytes_ns::bytes keyPackage() const;
+  void createGroup(const MLS_NAMESPACE::bytes_ns::bytes& groupId);
+  void addMember(const MLS_NAMESPACE::bytes_ns::bytes& keyPackage);
+  Commit commit();
+  void join(const MLS_NAMESPACE::bytes_ns::bytes& welcome);
+  MLS_NAMESPACE::bytes_ns::bytes protect(const MLS_NAMESPACE::bytes_ns::bytes& plaintext);
+  MLS_NAMESPACE::bytes_ns::bytes unprotect(const MLS_NAMESPACE::bytes_ns::bytes& ciphertext);
+
+private:
+  explicit MlsClient(const MLS_NAMESPACE::bytes_ns::bytes& identity);
+  MLS_NAMESPACE::Client client_;
+  std::optional<MLS_NAMESPACE::Session> session_;
+  std::optional<MLS_NAMESPACE::PendingJoin> pendingJoin_;
+};

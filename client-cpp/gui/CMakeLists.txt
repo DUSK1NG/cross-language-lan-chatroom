@@ -13,6 +13,14 @@ find_package(Threads REQUIRED)
 
 option(LAN_CHAT_ENABLE_WEB_UI "Build the React WebEngine UI" ON)
 option(LAN_CHAT_ENABLE_PERF_OVERLAY "Enable the debug-only frame performance overlay" OFF)
+option(LAN_CHAT_ENABLE_MLSPP "Build the MLS++ client adapter and tests" OFF)
+
+if(LAN_CHAT_ENABLE_MLSPP)
+    if(NOT DEFINED MLSPP_SOURCE_DIR OR NOT EXISTS "${MLSPP_SOURCE_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR "LAN_CHAT_ENABLE_MLSPP requires MLSPP_SOURCE_DIR pointing to the verified source")
+    endif()
+    add_subdirectory("${MLSPP_SOURCE_DIR}" mlspp EXCLUDE_FROM_ALL)
+endif()
 
 if(MSVC)
     add_compile_definitions(NOMINMAX)
@@ -170,6 +178,22 @@ target_include_directories(bridge-protocol-tests PRIVATE
 
 enable_testing()
 add_test(NAME bridge-protocol-tests COMMAND bridge-protocol-tests)
+
+if(LAN_CHAT_ENABLE_MLSPP)
+    qt_add_executable(mls-client-tests
+        tests/mls_client_tests.cpp
+        src/crypto/mls_client.cpp
+        src/crypto/mls_client.hpp
+    )
+    target_link_libraries(mls-client-tests PRIVATE
+        Qt6::Test
+        mlspp
+    )
+    target_include_directories(mls-client-tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME mls-client-tests COMMAND mls-client-tests)
+endif()
 
 qt_add_executable(connection-endpoint-tests
     tests/connection_endpoint_tests.cpp
@@ -564,6 +588,12 @@ set(LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR "${LAN_CHAT_OPENSSL_ROOT}/bin")
 set(LAN_CHAT_CORE_TEST_PATH
     "${LAN_CHAT_QT_TEST_PATH};${LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR}")
 string(REPLACE ";" "\\;" LAN_CHAT_CORE_TEST_PATH_ESCAPED "${LAN_CHAT_CORE_TEST_PATH}")
+if(LAN_CHAT_ENABLE_MLSPP)
+    set_tests_properties(
+        mls-client-tests
+        PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_CORE_TEST_PATH_ESCAPED}"
+    )
+endif()
 set_tests_properties(
     bridge-protocol-tests
     connection-endpoint-tests
