@@ -10,6 +10,8 @@
     "repository": "https://github.com/nlohmann/json",
     "commit": "9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03",
     "archiveSha256": "0DBC5E40A01FF142E7E68C03E85247A4DCEDE2F592D12D3677DEE3664D17975A",
-    "license": "MIT"
+    "license": "MIT",
+    "supplyChainRisk": "Pinned immutable archive; source retrieval and hash verification are mandatory because the dependency is fetched remotely.",
+    "securityRisk": "Header-only JSON parser has no cryptographic guarantees; review upstream advisories and validate all parsed input at protocol boundaries."
   }
 }

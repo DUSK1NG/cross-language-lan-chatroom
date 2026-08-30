@@ -9,6 +9,10 @@ $manifest = Get-Content -Raw $ManifestPath | ConvertFrom-Json
 if (-not (Get-Command cmake.exe -ErrorAction SilentlyContinue)) { throw 'cmake.exe is required.' }
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'MSVC cl.exe is required; run from an x64 VS Developer Command Prompt.' }
 if (-not (Test-Path (Join-Path $OpenSslRoot 'include\openssl\ssl.h'))) { throw "OpenSSL 3 headers are missing: $OpenSslRoot" }
+$CacheDirectory = [IO.Path]::GetFullPath($CacheDirectory)
+$OpenSslRoot = [IO.Path]::GetFullPath($OpenSslRoot)
+$ManifestPath = [IO.Path]::GetFullPath($ManifestPath)
+$smokeSource = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\vendor\mls\smoke'))
 New-Item -ItemType Directory -Force -Path $CacheDirectory | Out-Null
 
 function Get-VerifiedArchive($spec, [string]$name) {
@@ -42,13 +46,15 @@ $jsonSource = Expand-Verified $jsonArchive 'nlohmannJson'
 $jsonBuild = Join-Path $CacheDirectory 'nlohmann-build'
 $jsonInstall = Join-Path $CacheDirectory 'nlohmann-install'
 $smokeBuild = Join-Path $CacheDirectory 'smoke-build'
+$jsonInstall = [IO.Path]::GetFullPath($jsonInstall)
+$jsonPrefix = $jsonInstall
 cmake -S $jsonSource -B $jsonBuild -G Ninja -DJSON_BuildTests=OFF -DJSON_Install=ON "-DCMAKE_INSTALL_PREFIX=$jsonInstall"
 if ($LASTEXITCODE -ne 0) { throw 'nlohmann_json configure failed.' }
 cmake --build $jsonBuild --parallel 4
 if ($LASTEXITCODE -ne 0) { throw 'nlohmann_json build failed.' }
 cmake --install $jsonBuild
 if ($LASTEXITCODE -ne 0) { throw 'nlohmann_json install failed.' }
-cmake -S (Join-Path $PSScriptRoot '..\vendor\mls\smoke') -B $smokeBuild -G Ninja "-DMLSPP_SOURCE_DIR=$mlsSource" "-DOPENSSL_ROOT_DIR=$OpenSslRoot" "-DCMAKE_PREFIX_PATH=$jsonInstall" -DTESTING=OFF
+cmake -S $smokeSource -B $smokeBuild -G Ninja "-DMLSPP_SOURCE_DIR=$mlsSource" "-DOPENSSL_ROOT_DIR=$OpenSslRoot" "-DCMAKE_PREFIX_PATH=$jsonPrefix" -DTESTING=OFF
 if ($LASTEXITCODE -ne 0) { throw 'MLS++ smoke configure failed.' }
 cmake --build $smokeBuild --target mlspp-supply-chain-smoke --parallel 4
 if ($LASTEXITCODE -ne 0) { throw 'MLS++ smoke build failed.' }
