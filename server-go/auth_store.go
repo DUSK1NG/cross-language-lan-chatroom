@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	_ "modernc.org/sqlite"
@@ -19,6 +20,13 @@ const (
 )
 
 var ErrAccountAlreadyExists = errors.New("account already exists")
+
+func nullableCrypto(value json.RawMessage) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return string(value)
+}
 
 type Account struct {
 	Username  string
@@ -110,6 +118,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     sender_code TEXT NOT NULL,
     target_code TEXT,
     content TEXT NOT NULL,
+	crypto_json TEXT,
     delivery_state TEXT NOT NULL DEFAULT 'sent',
     created_at TEXT NOT NULL,
     recalled INTEGER NOT NULL DEFAULT 0,
@@ -128,6 +137,9 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_search_scope
 	}
 	if _, err := s.db.Exec(`ALTER TABLE chat_messages ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'sent'`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
 		return fmt.Errorf("migrate chat message delivery state: %w", err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE chat_messages ADD COLUMN crypto_json TEXT`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return fmt.Errorf("migrate chat message crypto envelope: %w", err)
 	}
 	if err := s.migrateChatMessageIdentitySchema(); err != nil {
 		return err
@@ -165,6 +177,7 @@ func (s *AuthStore) migrateChatMessageIdentitySchema() error {
         sender_code TEXT NOT NULL,
         target_code TEXT,
         content TEXT NOT NULL,
+		crypto_json TEXT,
         delivery_state TEXT NOT NULL DEFAULT 'sent',
         created_at TEXT NOT NULL,
         recalled INTEGER NOT NULL DEFAULT 0,
@@ -173,9 +186,9 @@ func (s *AuthStore) migrateChatMessageIdentitySchema() error {
 		return fmt.Errorf("create migrated chat messages: %w", err)
 	}
 	if _, err := tx.Exec(`INSERT INTO chat_messages
-        (id, message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content, delivery_state, created_at, recalled)
+        (id, message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content, crypto_json, delivery_state, created_at, recalled)
         SELECT id, message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content,
-            COALESCE(delivery_state, 'sent'), created_at, recalled
+            NULL, COALESCE(delivery_state, 'sent'), created_at, recalled
         FROM chat_messages_legacy`); err != nil {
 		return fmt.Errorf("copy legacy chat messages: %w", err)
 	}
@@ -288,7 +301,11 @@ func (s *AuthStore) SaveChatMessageIfNew(message Message) (bool, error) {
 	if message.Type != "chat" && message.Type != "private_chat" {
 		return false, fmt.Errorf("unsupported history message type: %s", message.Type)
 	}
-	if err := validateTextContent("chat message", message.Content); err != nil {
+	if len(message.Crypto) == 0 {
+		if err := validateTextContent("chat message", message.Content); err != nil {
+			return false, err
+		}
+	} else if err := validateOpaqueCrypto(message.Crypto); err != nil {
 		return false, err
 	}
 	if _, err := normalizeUserCode(message.UserCode); err != nil {
@@ -307,9 +324,9 @@ func (s *AuthStore) SaveChatMessageIfNew(message Message) (bool, error) {
 		deliveryState = "sent"
 	}
 	result, err := s.db.Exec(`INSERT OR IGNORE INTO chat_messages
-		(message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content, delivery_state, created_at, recalled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, message.MessageID, kind, conversationKey, message.Room,
-		message.Username, senderCode, targetCode, message.Content, deliveryState, createdAt)
+		(message_id, kind, conversation_key, room, sender_username, sender_code, target_code, content, crypto_json, delivery_state, created_at, recalled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, message.MessageID, kind, conversationKey, message.Room,
+		message.Username, senderCode, targetCode, message.Content, nullableCrypto(message.Crypto), deliveryState, createdAt)
 	if err != nil {
 		return false, fmt.Errorf("save chat message: %w", err)
 	}
@@ -429,7 +446,7 @@ func (s *AuthStore) LoadHistory(query HistoryQuery) (HistoryPage, error) {
 		}
 	}
 	statement := `SELECT message_id, room, sender_username, sender_code, target_code,
-        content, delivery_state, created_at, recalled FROM chat_messages
+		content, crypto_json, delivery_state, created_at, recalled FROM chat_messages
         WHERE kind = ? AND conversation_key = ? AND id < ?`
 	arguments := []any{kind, conversationKey, beforeID}
 	if searchQuery != "" {
@@ -446,10 +463,14 @@ func (s *AuthStore) LoadHistory(query HistoryQuery) (HistoryPage, error) {
 	messages := make([]Message, 0, limit)
 	for rows.Next() {
 		var message Message
+		var cryptoJSON sql.NullString
 		var recalled int
 		if err := rows.Scan(&message.MessageID, &message.Room, &message.Username, &message.UserCode,
-			&message.TargetUserCode, &message.Content, &message.DeliveryState, &message.CreatedAt, &recalled); err != nil {
+			&message.TargetUserCode, &message.Content, &cryptoJSON, &message.DeliveryState, &message.CreatedAt, &recalled); err != nil {
 			return HistoryPage{}, err
+		}
+		if cryptoJSON.Valid {
+			message.Crypto = json.RawMessage(cryptoJSON.String)
 		}
 		message.Type = "chat"
 		if kind == "private" {
@@ -501,12 +522,16 @@ func (s *AuthStore) getStoredMessage(where string, args ...any) (StoredMessage, 
 	var stored StoredMessage
 	var recalled int
 	query := `SELECT message_id, kind, conversation_key, room, sender_username, sender_code,
-		target_code, content, delivery_state, created_at, recalled FROM chat_messages ` + where
+		target_code, content, crypto_json, delivery_state, created_at, recalled FROM chat_messages ` + where
+	var cryptoJSON sql.NullString
 	err := s.db.QueryRow(query, args...).Scan(&stored.Message.MessageID, &stored.Kind, &stored.ConversationKey,
 		&stored.Message.Room, &stored.Message.Username, &stored.Message.UserCode, &stored.TargetCode,
-		&stored.Message.Content, &stored.Message.DeliveryState, &stored.Message.CreatedAt, &recalled)
+		&stored.Message.Content, &cryptoJSON, &stored.Message.DeliveryState, &stored.Message.CreatedAt, &recalled)
 	if err != nil {
 		return StoredMessage{}, err
+	}
+	if cryptoJSON.Valid {
+		stored.Message.Crypto = json.RawMessage(cryptoJSON.String)
 	}
 	stored.Message.Type = "chat"
 	if stored.Kind == "private" {

@@ -8,6 +8,7 @@ class BridgeProtocolTests final : public QObject {
 
 private slots:
     void acceptsRoomMessageCommand();
+    void acceptsOpaqueEncryptedRoomMessageCommand();
     void acceptsHistorySearchCommand();
     void acceptsPerformanceModeCommand();
     void acceptsConnectionLogPreferenceCommand();
@@ -26,6 +27,21 @@ void BridgeProtocolTests::acceptsRoomMessageCommand() {
         {"id", "cmd-42"},
         {"type", "chat.sendRoom"},
         {"payload", QJsonObject{{"content", "你好"}, {"room", "lobby"}}}
+    };
+
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::acceptsOpaqueEncryptedRoomMessageCommand() {
+    const QJsonObject command{
+        {"id", "cmd-e2ee"},
+        {"type", "chat.sendRoom"},
+        {"payload", QJsonObject{{"room", "lobby"},
+                                 {"protocol_version", "2"},
+                                 {"capabilities", QJsonArray{"e2ee-envelope-v1"}},
+                                 {"crypto", QJsonObject{{"v", 1}, {"alg", "xchacha20poly1305"}, {"ct", "opaque"}}}}}
     };
 
     QString error;

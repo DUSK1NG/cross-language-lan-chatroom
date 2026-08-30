@@ -54,6 +54,11 @@ bool hasRequiredStrings(const QJsonObject& payload, std::initializer_list<const 
     return true;
 }
 
+bool hasOpaqueCrypto(const QJsonObject& payload) {
+    const QJsonValue crypto = payload.value(QStringLiteral("crypto"));
+    return crypto.isObject() && !crypto.toObject().isEmpty();
+}
+
 QJsonValue withoutSecrets(const QJsonValue& value) {
     if (value.isArray()) {
         QJsonArray result;
@@ -105,10 +110,12 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
         return payload.isEmpty();
     }
     if (type == QStringLiteral("chat.sendRoom")) {
-        return hasRequiredStrings(payload, {"content", "room"});
+        return hasRequiredStrings(payload, {"room"}) &&
+               (nonEmptyString(payload, "content") || hasOpaqueCrypto(payload));
     }
     if (type == QStringLiteral("chat.sendPrivate")) {
-        return hasRequiredStrings(payload, {"content", "targetUserCode"});
+        return hasRequiredStrings(payload, {"targetUserCode"}) &&
+               (nonEmptyString(payload, "content") || hasOpaqueCrypto(payload));
     }
     if (type == QStringLiteral("history.search")) {
         return payload.value(QStringLiteral("query")).isString();

@@ -61,6 +61,28 @@ func TestMessageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncryptedMessageRoundTripPreservesOpaqueEnvelope(t *testing.T) {
+	want := Message{
+		Type: "chat", UserCode: "A001", Room: "lobby", MessageID: "m1",
+		ProtocolVersion: "2", Capabilities: []string{"e2ee-envelope-v1"},
+		Crypto: json.RawMessage(`{"v":1,"alg":"xchacha20poly1305","ct":"opaque"}`),
+	}
+	var stream bytes.Buffer
+	if err := sendMessage(&stream, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := receiveMessage(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("message = %+v, want %+v", got, want)
+	}
+	if err := validateMessage(got); err != nil {
+		t.Fatalf("opaque encrypted message rejected: %v", err)
+	}
+}
+
 func TestUsersMessageRoundTrip(t *testing.T) {
 	want := Message{
 		Type:  "users_response",

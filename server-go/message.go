@@ -51,10 +51,29 @@ type Message struct {
 	HasMore         bool         `json:"has_more,omitempty"`
 	Recalled        bool         `json:"recalled,omitempty"`
 	Messages        []Message    `json:"messages,omitempty"`
+	// Optional negotiation metadata is ignored by legacy peers. Crypto is kept
+	// as raw JSON so the server can route/store an envelope without decrypting it.
+	ProtocolVersion string          `json:"protocol_version,omitempty"`
+	Capabilities    []string        `json:"capabilities,omitempty"`
+	Crypto          json.RawMessage `json:"crypto,omitempty"`
 	// Password is retained only so old database/test fixtures still compile;
 	// password authentication is removed and this field never crosses the wire.
 	Password string `json:"-"`
 	IsAdmin  bool   `json:"is_admin,omitempty"`
+}
+
+func validateOpaqueCrypto(value json.RawMessage) error {
+	if len(value) == 0 {
+		return fmt.Errorf("crypto envelope must not be empty")
+	}
+	if len(value) > maxMessageSize {
+		return fmt.Errorf("crypto envelope is too large")
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(value, &envelope); err != nil || len(envelope) == 0 {
+		return fmt.Errorf("crypto envelope must be a JSON object")
+	}
+	return nil
 }
 
 func validateUserCode(code string) error {
@@ -139,10 +158,16 @@ func validateMessage(message Message) error {
 	case "login_auth":
 		return fmt.Errorf("password login has been removed")
 	case "chat":
+		if len(message.Crypto) > 0 {
+			return validateOpaqueCrypto(message.Crypto)
+		}
 		return validateTextContent("chat", message.Content)
 	case "private_chat":
 		if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
 			return fmt.Errorf("invalid target user code: %w", err)
+		}
+		if len(message.Crypto) > 0 {
+			return validateOpaqueCrypto(message.Crypto)
 		}
 		return validateTextContent("private chat", message.Content)
 	case "history_request":

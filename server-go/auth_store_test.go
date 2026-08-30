@@ -2,13 +2,27 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestAuthStorePersistsOpaqueCryptoEnvelope(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	want := json.RawMessage(`{"v":1,"alg":"xchacha20poly1305","ct":"opaque"}`)
+	if _, err := store.SaveChatMessageIfNew(Message{Type: "chat", MessageID: "encrypted-1", Username: "Alice", UserCode: "A001", Room: "lobby", Crypto: want}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.LoadHistory(HistoryQuery{UserCode: "A001", Room: "lobby", Limit: 10})
+	if err != nil || len(page.Messages) != 1 || !reflect.DeepEqual(page.Messages[0].Crypto, want) {
+		t.Fatalf("encrypted history = %+v err=%v", page.Messages, err)
+	}
+}
 
 func newTestAuthStore(t *testing.T) (*AuthStore, string) {
 	t.Helper()
