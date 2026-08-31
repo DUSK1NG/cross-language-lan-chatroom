@@ -54,8 +54,25 @@ function Find-VsTool([string]$VsDevCmd, [string]$RelativePath) {
 
 function Quote-Cmd([string]$Value) { return '"' + $Value.Replace('"', '\"') + '"' }
 
+function Resolve-PowerShellHost {
+    $processPath = ''
+    try { $processPath = (Get-Process -Id $PID -ErrorAction Stop).Path } catch { $processPath = '' }
+    if (-not [string]::IsNullOrWhiteSpace($processPath) -and (Test-Path -LiteralPath $processPath -PathType Leaf)) {
+        return [IO.Path]::GetFullPath($processPath)
+    }
+    foreach ($commandName in @('pwsh.exe', 'powershell.exe')) {
+        $command = Get-Command $commandName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source) -and
+            (Test-Path -LiteralPath $command.Source -PathType Leaf)) {
+            return [IO.Path]::GetFullPath($command.Source)
+        }
+    }
+    throw 'PowerShell host executable could not be resolved; refusing to skip the supply-chain gate.'
+}
+
 $inheritedPath = if ([string]::IsNullOrWhiteSpace($env:Path)) { '' } else { $env:Path }
 $cleanPath = (($inheritedPath -split ';') | Where-Object { $_ -and $_ -notmatch '(?i)(mingw|msys)' }) -join ';'
+$PowerShellHost = Resolve-PowerShellHost
 
 function Invoke-VsCommand([string]$VsDevCmd, [string]$Tool, [string[]]$Arguments, [string]$RuntimePath = '') {
     $quoted = ($Arguments | ForEach-Object { Quote-Cmd $_ }) -join ' '
@@ -126,7 +143,7 @@ if ([string]::IsNullOrWhiteSpace($vsDevCmd) -or [string]::IsNullOrWhiteSpace($cm
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $CacheDirectory -Force | Out-Null
 $supplyArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $SupplyScript, '-CacheDirectory', $CacheDirectory, '-OpenSslRoot', $OpenSslRoot, '-ManifestPath', $ManifestPath)
-$supplyOutput = Invoke-VsCommand $vsDevCmd (Join-Path $PSHOME 'powershell.exe') $supplyArgs (Join-Path $OpenSslRoot 'bin')
+$supplyOutput = Invoke-VsCommand $vsDevCmd $PowerShellHost $supplyArgs (Join-Path $OpenSslRoot 'bin')
 if ($script:LastVsExitCode -ne 0) { throw "MLS++ supply-chain verification failed (exit $script:LastVsExitCode): $($supplyOutput -join [Environment]::NewLine)" }
 
 $mlsArchive = Join-Path $CacheDirectory 'mlspp.tar.gz'
@@ -219,4 +236,4 @@ foreach ($file in Get-ChildItem -LiteralPath $OutputRoot -File -Recurse) {
         if ($entry.AccessControlType -eq 'Allow' -and $entry.IdentityReference -match '(?i)Everyone' -and $entry.FileSystemRights.ToString() -match '(?i)FullControl') { throw "Build output is too permissive: $($file.FullName) grants Everyone FullControl" }
     }
 }
-Write-Output "MLS_E2E_BUILD_PASS output=$OutputRoot mlspp_commit=$($mlsSpec.commit) qt=$QtPrefix openssl=$OpenSslRoot nlohmann=$jsonInstall chat_server=$serverExe ON=$($expected.ON)/$($expected.ON) OFF=$($expected.OFF)/$($expected.OFF) focused=9/0/0+9/0/0"
+Write-Output "MLS_E2E_BUILD_PASS output=$OutputRoot powershell=$PowerShellHost mlspp_commit=$($mlsSpec.commit) qt=$QtPrefix openssl=$OpenSslRoot nlohmann=$jsonInstall chat_server=$serverExe ON=$($expected.ON)/$($expected.ON) OFF=$($expected.OFF)/$($expected.OFF) focused=9/0/0+9/0/0"
