@@ -79,6 +79,8 @@ GuiChatController::GuiChatController(QObject* parent)
     connect(worker_, &GuiConnectionWorker::messageReceived, this, &GuiChatController::handleMessage);
     connect(worker_, &GuiConnectionWorker::historyReceived, this, &GuiChatController::handleHistory);
     connect(worker_, &GuiConnectionWorker::mlsCommandResult, this, &GuiChatController::mlsCommandResult);
+    connect(worker_, &GuiConnectionWorker::mlsKeyPackageAvailable, this, &GuiChatController::mlsKeyPackageAvailable);
+    connect(worker_, &GuiConnectionWorker::mlsWelcomeEvent, this, &GuiChatController::mlsWelcomeEvent);
     connect(worker_, &GuiConnectionWorker::mlsGroupState, this, &GuiChatController::mlsGroupState);
     connect(worker_, &GuiConnectionWorker::mlsDataResult, this, &GuiChatController::mlsDataResult);
     workerThread_.start();

@@ -149,6 +149,9 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
                 }
             }
             publishMlsKeyPackage();
+            if (preserveMlsState) {
+                resumePendingMlsOperations();
+            }
 #endif
             emit connected(loginResponse.is_admin);
             return true;
@@ -561,7 +564,7 @@ void GuiConnectionWorker::addMlsMember(const QString& room, const QString& group
         proposalMessage.command_id = pendingId.toStdString();
         pendingMlsOperations_.emplace(pendingId, PendingMlsOperation{PendingMlsOperation::Phase::Proposal,
                                                                        normalizedRoom, normalizedGroup, normalizedTarget,
-                                                                       epoch, commitEncoded, welcomeEncoded, true});
+                                                                       epoch, proposalEncoded, commitEncoded, welcomeEncoded, true});
         pendingMlsCommands_.insert(commandId);
         if (!connection_->send(proposalMessage)) {
             pendingMlsOperations_.erase(pendingId);
@@ -639,7 +642,7 @@ void GuiConnectionWorker::removeMlsMember(const QString& room, const QString& gr
         proposalMessage.command_id = pendingId.toStdString();
         pendingMlsOperations_.emplace(pendingId, PendingMlsOperation{PendingMlsOperation::Phase::Proposal,
                                                                        normalizedRoom, normalizedGroup, normalizedTarget,
-                                                                       epoch, commitEncoded, {}, false});
+                                                                       epoch, proposalEncoded, commitEncoded, {}, false});
         pendingMlsCommands_.insert(commandId);
         if (!connection_->send(proposalMessage)) {
             pendingMlsOperations_.erase(pendingId);
@@ -748,11 +751,54 @@ void GuiConnectionWorker::publishMlsKeyPackage() {
 #endif
 }
 
+void GuiConnectionWorker::resumePendingMlsOperations() {
+#ifdef LAN_CHAT_ENABLE_MLSPP
+    if (!connection_ || !connection_->is_ready()) return;
+    for (auto it = pendingMlsOperations_.begin(); it != pendingMlsOperations_.end();) {
+        const QString commandId = it->first;
+        const auto& operation = it->second;
+        // A welcome is durably stored before its acknowledgement is sent.
+        // Let the target's authenticated login path replay it rather than
+        // generating a second delivery from a reconnecting sender.
+        if (operation.phase == PendingMlsOperation::Phase::Welcome) {
+            pendingMlsCommands_.remove(commandId);
+            it = pendingMlsOperations_.erase(it);
+            continue;
+        }
+        message::Message resumed;
+        resumed.protocol_version = "mls-v1";
+        resumed.group_id = operation.group.toStdString();
+        resumed.room = operation.room.toStdString();
+        resumed.epoch = operation.epoch;
+        resumed.proposal_id = commandId.toStdString();
+        resumed.command_id = commandId.toStdString();
+        if (operation.phase == PendingMlsOperation::Phase::Proposal) {
+            resumed.type = "mls.group.proposal";
+            resumed.action = operation.add ? "add" : "remove";
+            resumed.target_user_code = operation.target.toStdString();
+            resumed.proposal = operation.proposal.toStdString();
+        } else {
+            resumed.type = "mls.group.commit";
+            resumed.commit = operation.commit.toStdString();
+        }
+        if (!connection_->send(resumed)) {
+            emit mlsCommandResult(commandId, false, QStringLiteral("send_failed"),
+                                  QString::fromStdString(connection_->last_error()));
+        }
+        ++it;
+    }
+#endif
+}
+
 void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
 #ifdef LAN_CHAT_ENABLE_MLSPP
     try {
         if (incoming.type == "mls.key_package.fetch" && !incoming.key_package.empty()) {
-            mlsKeyPackages_[QString::fromStdString(incoming.target_user_code).toLower()] = QByteArray::fromStdString(incoming.key_package);
+            const QByteArray encoded = QByteArray::fromStdString(incoming.key_package);
+            mlsKeyPackages_[QString::fromStdString(incoming.target_user_code).toLower()] = encoded;
+            const QByteArray decoded = QByteArray::fromBase64(encoded);
+            emit mlsKeyPackageAvailable(QString::fromStdString(incoming.target_user_code),
+                                        QCryptographicHash::hash(decoded, QCryptographicHash::Sha256).toHex());
             const QString commandId = QString::fromStdString(incoming.command_id);
             if (pendingMlsCommands_.remove(commandId)) {
                 emit mlsCommandResult(commandId, true, {}, {});
@@ -789,6 +835,11 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
             commitMessage.commit = operation.commit.toStdString();
             commitMessage.command_id = commandId.toStdString();
             operation.phase = PendingMlsOperation::Phase::Commit;
+            if (!testDroppedMlsCommit_ && qEnvironmentVariableIntValue("LAN_CHAT_TEST_DROP_MLS_COMMIT_ONCE") != 0) {
+                testDroppedMlsCommit_ = true;
+                connection_->close_current();
+                return;
+            }
             if (!connection_->send(commitMessage)) {
                 pendingMlsOperations_.erase(operationIt);
                 pendingMlsCommands_.remove(commandId);
@@ -828,7 +879,10 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
                 }
                 const auto old = groupIt->second.welcomes.find(incoming.epoch);
                 if (old != groupIt->second.welcomes.end() && old->second == welcome) {
-                    sendWelcomeAccept();
+                    emit mlsWelcomeEvent(groupId, incoming.epoch, QStringLiteral("received"));
+                    if (sendWelcomeAccept()) {
+                        emit mlsWelcomeEvent(groupId, incoming.epoch, QStringLiteral("accept_sent"));
+                    }
                     return;
                 }
                 if (incoming.epoch <= groupIt->second.epoch) {
@@ -854,10 +908,12 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
                 state.epoch = incoming.epoch;
                 state.welcomes.emplace(incoming.epoch, welcome);
                 mlsGroups_.emplace(groupId, std::move(state));
+                emit mlsWelcomeEvent(groupId, incoming.epoch, QStringLiteral("received"));
                 if (!sendWelcomeAccept()) {
                     emit mlsCommandResult({}, false, QStringLiteral("send_failed"), QString::fromStdString(connection_->last_error()));
                     return;
                 }
+                emit mlsWelcomeEvent(groupId, incoming.epoch, QStringLiteral("accept_sent"));
                 // Key packages are single-use. Rotate the pending client so
                 // a later group invitation has a fresh package without
                 // disturbing the newly-created group's session.

@@ -809,8 +809,12 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
     QVERIFY2(member.connected(), qPrintable(member.statusText()));
 
     QSignalSpy hostMlsSpy(&host, &GuiChatController::mlsCommandResult);
+    QSignalSpy hostKeyPackageSpy(&host, &GuiChatController::mlsKeyPackageAvailable);
     host.fetchMlsKeyPackage(QStringLiteral("lobby"), QStringLiteral("B001"), QStringLiteral("fetch-bob"));
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 0, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(hostKeyPackageSpy.count() > 0, 5000);
+    const QString bobKeyPackageDigest = hostKeyPackageSpy.back().at(1).toString();
+    QVERIFY(!bobKeyPackageDigest.isEmpty());
     QCOMPARE(hostMlsSpy.at(0).at(0).toString(), QStringLiteral("fetch-bob"));
     QVERIFY(hostMlsSpy.at(0).at(1).toBool());
     host.addMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
@@ -858,6 +862,7 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
     QSignalSpy newMemberGroupSpy(&newMember, &GuiChatController::mlsGroupState);
     QSignalSpy newMemberDataSpy(&newMember, &GuiChatController::mlsDataResult);
     QSignalSpy newMemberMlsSpy(&newMember, &GuiChatController::mlsCommandResult);
+    QSignalSpy newMemberWelcomeSpy(&newMember, &GuiChatController::mlsWelcomeEvent);
     QSignalSpy newMemberConnectedSpy(&newMember, &GuiChatController::connectedChanged);
     QSignalSpy newMemberFailedSpy(&newMember, &GuiChatController::connectionFailed);
     newMember.connectToServerWithTlsName("127.0.0.1", 8888, "Carol", "C001", hostPaths.certFile, "localhost");
@@ -880,8 +885,15 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
                                       Q_ARG(QString, QStringLiteral("test transient disconnect"))));
     QTRY_VERIFY_WITH_TIMEOUT(newMember.reconnecting(), 1000);
 
+    // Drop the real host connection after the proposal acknowledgement and
+    // before its commit send. Reconnect must resume the retained operation.
+    qputenv("LAN_CHAT_TEST_DROP_MLS_COMMIT_ONCE", "1");
+
     host.addMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
                       QStringLiteral("C001"), QStringLiteral("add-carol"));
+    QTRY_VERIFY_WITH_TIMEOUT(host.reconnecting(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(host.connected(), 12000);
+    qunsetenv("LAN_CHAT_TEST_DROP_MLS_COMMIT_ONCE");
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 3, 8000);
     QCOMPARE(hostMlsSpy.at(3).at(0).toString(), QStringLiteral("add-carol"));
     QVERIFY(hostMlsSpy.at(3).at(1).toBool());
@@ -893,6 +905,9 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
     host.sendAdminAction("approve_connection", reconnectRequest.value("userCode").toString(),
                          reconnectRequest.value("id").toString());
     QTRY_VERIFY_WITH_TIMEOUT(newMember.connected(), 12000);
+    QTRY_COMPARE_WITH_TIMEOUT(newMemberWelcomeSpy.count(), 2, 5000);
+    QCOMPARE(newMemberWelcomeSpy.at(0).at(2).toString(), QStringLiteral("received"));
+    QCOMPARE(newMemberWelcomeSpy.at(1).at(2).toString(), QStringLiteral("accept_sent"));
     for (int index = 0; index < newMemberMlsSpy.count(); ++index) {
         const auto result = newMemberMlsSpy.at(index);
         QVERIFY2(result.at(1).toBool(), "offline welcome replay was rejected by the joining client");
@@ -971,6 +986,7 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
                          secondReconnectRequest.value("id").toString());
     QTRY_VERIFY_WITH_TIMEOUT(newMember.connected(), 12000);
     QTest::qWait(500);
+    QCOMPARE(newMemberWelcomeSpy.count(), 2);
     QCOMPARE(newMemberMlsSpy.count(), mlsResultsBeforeReconnect);
     newMember.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-carol-reconnect"));
     QTRY_VERIFY_WITH_TIMEOUT(newMemberGroupSpy.count() > groupStatesBeforeReconnect, 5000);
@@ -1008,10 +1024,15 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
     QTRY_VERIFY_WITH_TIMEOUT(newMemberGroupSpy.count() > groupStatesBeforeIdentitySwitch, 5000);
     QVERIFY(!newMemberGroupSpy.back().at(1).toBool());
     const int fetchD001Before = hostMlsSpy.count();
+    const int keyPackageD001Before = hostKeyPackageSpy.count();
     host.fetchMlsKeyPackage(QStringLiteral("lobby"), QStringLiteral("D001"), QStringLiteral("fetch-dave"));
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > fetchD001Before, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(hostKeyPackageSpy.count() > keyPackageD001Before, 5000);
     QVERIFY2(hostMlsSpy.at(fetchD001Before).at(1).toBool(),
              qPrintable(QStringLiteral("fetch-dave failed: %1").arg(hostMlsSpy.at(fetchD001Before).at(3).toString())));
+    const QString daveKeyPackageDigest = hostKeyPackageSpy.back().at(1).toString();
+    QVERIFY(!daveKeyPackageDigest.isEmpty());
+    QVERIFY(daveKeyPackageDigest != bobKeyPackageDigest);
 
     member.disconnectFromServer();
     newMember.disconnectFromServer();

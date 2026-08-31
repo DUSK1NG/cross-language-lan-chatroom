@@ -125,6 +125,8 @@ signals:
     void recallFailed(const QString& commandId, const QString& reason);
     void mlsCommandResult(const QString& commandId, bool ok,
                           const QString& code, const QString& message);
+    void mlsKeyPackageAvailable(const QString& targetUserCode, const QString& digest);
+    void mlsWelcomeEvent(const QString& groupId, quint64 epoch, const QString& phase);
     void mlsGroupState(const QString& commandId, bool ok, const QString& groupId,
                        quint64 epoch, const QString& message);
     void mlsDataResult(const QString& commandId, bool ok, const QByteArray& data,

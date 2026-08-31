@@ -90,6 +90,10 @@ signals:
                          const QString& searchQuery);
     void mlsCommandResult(const QString& commandId, bool ok,
                           const QString& code, const QString& message);
+    // Metadata-only observations; never carry key package, welcome, commit,
+    // or application plaintext bytes.
+    void mlsKeyPackageAvailable(const QString& targetUserCode, const QString& digest);
+    void mlsWelcomeEvent(const QString& groupId, quint64 epoch, const QString& phase);
     void mlsGroupState(const QString& commandId, bool ok, const QString& groupId,
                        quint64 epoch, const QString& message);
     void mlsDataResult(const QString& commandId, bool ok, const QByteArray& data,
@@ -112,6 +116,7 @@ private:
     void stopReceiveLoop();
     void resetMlsState();
     void publishMlsKeyPackage();
+    void resumePendingMlsOperations();
     void processMlsMessage(const message::Message& incoming);
 
     std::unique_ptr<connection::ConnectionState> connection_;
@@ -146,6 +151,7 @@ private:
         QString group;
         QString target;
         quint64 epoch = 0;
+        QByteArray proposal;
         QByteArray commit;
         QByteArray welcome;
         bool add = false;
@@ -155,5 +161,6 @@ private:
     std::map<QString, MlsGroupState> mlsGroups_;
     std::map<QString, PendingMlsOperation> pendingMlsOperations_;
     QSet<QString> pendingMlsCommands_;
+    bool testDroppedMlsCommit_ = false;
 #endif
 };
