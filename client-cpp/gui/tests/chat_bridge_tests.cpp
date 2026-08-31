@@ -453,16 +453,46 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
                       QStringLiteral("B001"), QStringLiteral("add-bob"));
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 1, 8000);
     QCOMPARE(hostMlsSpy.at(1).at(0).toString(), QStringLiteral("add-bob"));
-    QVERIFY(hostMlsSpy.at(1).at(1).toBool());
-    // The pre-commit snapshot includes Bob, so he may receive the add-bob
-    // commit before his welcome. That expected group_unavailable result is
-    // asynchronous; discard it before asserting the next member's chain.
-    // The welcome acknowledgement is the host-side completion signal, but it
-    // does not emit a success signal on the joining client.
-    QTest::qWait(3000);
-    memberMlsSpy.clear();
+    QVERIFY2(hostMlsSpy.at(1).at(1).toBool(), qPrintable(QStringLiteral("add-bob failed: code=%1 detail=%2").arg(hostMlsSpy.at(1).at(2).toString(), hostMlsSpy.at(1).at(3).toString())));
+    // The first proposal/commit snapshot contains only Alice. Bob is
+    // activated only after this operation's welcome, so no group-unavailable
+    // error is expected on the joining client.
+    QTest::qWait(500);
+    QCOMPARE(memberMlsSpy.count(), 0);
+
+    QSignalSpy hostGroupSpy(&host, &GuiChatController::mlsGroupState);
+    QSignalSpy memberGroupSpy(&member, &GuiChatController::mlsGroupState);
+    host.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-alice"));
+    member.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-bob"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostGroupSpy.count() > 0 && memberGroupSpy.count() > 0, 5000);
+    QVERIFY(hostGroupSpy.at(0).at(1).toBool());
+    QVERIFY(memberGroupSpy.at(0).at(1).toBool());
+    QCOMPARE(hostGroupSpy.at(0).at(2).toString(), QStringLiteral("group-e2e"));
+    QCOMPARE(memberGroupSpy.at(0).at(2).toString(), QStringLiteral("group-e2e"));
+    QCOMPARE(hostGroupSpy.at(0).at(3).toULongLong(), memberGroupSpy.at(0).at(3).toULongLong());
+    QSignalSpy hostDataSpy(&host, &GuiChatController::mlsDataResult);
+    QSignalSpy memberDataSpy(&member, &GuiChatController::mlsDataResult);
+    host.protectMls(QStringLiteral("group-e2e"), QByteArrayLiteral("alice-to-bob"), QStringLiteral("protect-ab"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostDataSpy.count() > 0, 5000);
+    QVERIFY(hostDataSpy.at(0).at(1).toBool());
+    const QByteArray aliceCiphertext = hostDataSpy.at(0).at(2).toByteArray();
+    QVERIFY(!aliceCiphertext.isEmpty());
+    member.unprotectMls(QStringLiteral("group-e2e"), aliceCiphertext, QStringLiteral("unprotect-ab"));
+    QTRY_VERIFY_WITH_TIMEOUT(memberDataSpy.count() > 0, 5000);
+    QVERIFY(memberDataSpy.at(0).at(1).toBool());
+    QCOMPARE(memberDataSpy.at(0).at(2).toByteArray(), QByteArrayLiteral("alice-to-bob"));
+    memberDataSpy.clear();
+    member.protectMls(QStringLiteral("group-e2e"), QByteArrayLiteral("bob-to-alice"), QStringLiteral("protect-ba"));
+    QTRY_VERIFY_WITH_TIMEOUT(memberDataSpy.count() > 0, 5000);
+    QVERIFY(memberDataSpy.at(0).at(1).toBool());
+    host.unprotectMls(QStringLiteral("group-e2e"), memberDataSpy.at(0).at(2).toByteArray(), QStringLiteral("unprotect-ba"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostDataSpy.count() > 1, 5000);
+    QVERIFY(hostDataSpy.at(1).at(1).toBool());
+    QCOMPARE(hostDataSpy.at(1).at(2).toByteArray(), QByteArrayLiteral("bob-to-alice"));
 
     GuiChatController newMember;
+    QSignalSpy newMemberGroupSpy(&newMember, &GuiChatController::mlsGroupState);
+    QSignalSpy newMemberDataSpy(&newMember, &GuiChatController::mlsDataResult);
     QSignalSpy newMemberConnectedSpy(&newMember, &GuiChatController::connectedChanged);
     QSignalSpy newMemberFailedSpy(&newMember, &GuiChatController::connectionFailed);
     newMember.connectToServerWithTlsName("127.0.0.1", 8888, "Carol", "C001", hostPaths.certFile, "localhost");
@@ -485,12 +515,53 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
         const auto result = memberMlsSpy.at(index);
         QVERIFY2(result.at(1).toBool(), "existing member rejected the proposal/commit chain");
     }
+    QCOMPARE(memberMlsSpy.count(), 0);
+    host.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-alice-2"));
+    member.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-bob-2"));
+    newMember.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-carol"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostGroupSpy.count() > 1 && memberGroupSpy.count() > 1 && newMemberGroupSpy.count() > 0, 5000);
+    QCOMPARE(hostGroupSpy.at(1).at(2).toString(), QStringLiteral("group-e2e"));
+    QCOMPARE(memberGroupSpy.at(1).at(2).toString(), QStringLiteral("group-e2e"));
+    QCOMPARE(newMemberGroupSpy.at(0).at(2).toString(), QStringLiteral("group-e2e"));
+    QCOMPARE(hostGroupSpy.at(1).at(3).toULongLong(), memberGroupSpy.at(1).at(3).toULongLong());
+    QCOMPARE(hostGroupSpy.at(1).at(3).toULongLong(), newMemberGroupSpy.at(0).at(3).toULongLong());
+    hostDataSpy.clear();
+    host.protectMls(QStringLiteral("group-e2e"), QByteArrayLiteral("alice-to-carol"), QStringLiteral("protect-ac"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostDataSpy.count() > 0, 5000);
+    QVERIFY(hostDataSpy.at(0).at(1).toBool());
+    newMember.unprotectMls(QStringLiteral("group-e2e"), hostDataSpy.at(0).at(2).toByteArray(), QStringLiteral("unprotect-ac"));
+    QTRY_VERIFY_WITH_TIMEOUT(newMemberDataSpy.count() > 0, 5000);
+    QVERIFY(newMemberDataSpy.at(0).at(1).toBool());
+    QCOMPARE(newMemberDataSpy.at(0).at(2).toByteArray(), QByteArrayLiteral("alice-to-carol"));
 
     host.removeMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
                          QStringLiteral("B001"), QStringLiteral("remove-bob"));
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 4, 8000);
     QCOMPARE(hostMlsSpy.at(4).at(0).toString(), QStringLiteral("remove-bob"));
     QVERIFY(hostMlsSpy.at(4).at(1).toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(memberMlsSpy.count() > 0, 5000);
+    QVERIFY(!memberMlsSpy.at(memberMlsSpy.count() - 1).at(1).toBool());
+    QVERIFY(!memberMlsSpy.at(memberMlsSpy.count() - 1).at(3).toString().isEmpty());
+    host.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-alice-3"));
+    newMember.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-carol-2"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostGroupSpy.count() > 2 && newMemberGroupSpy.count() > 1, 5000);
+    QVERIFY(hostGroupSpy.at(2).at(1).toBool());
+    QVERIFY(newMemberGroupSpy.at(1).at(1).toBool());
+    QCOMPARE(hostGroupSpy.at(2).at(3).toULongLong(), newMemberGroupSpy.at(1).at(3).toULongLong());
+    hostDataSpy.clear();
+    newMemberDataSpy.clear();
+    memberDataSpy.clear();
+    host.protectMls(QStringLiteral("group-e2e"), QByteArrayLiteral("after-remove"), QStringLiteral("protect-after-remove"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostDataSpy.count() > 0, 5000);
+    QVERIFY(hostDataSpy.at(0).at(1).toBool());
+    const QByteArray postRemovalCiphertext = hostDataSpy.at(0).at(2).toByteArray();
+    newMember.unprotectMls(QStringLiteral("group-e2e"), postRemovalCiphertext, QStringLiteral("carol-after-remove"));
+    QTRY_VERIFY_WITH_TIMEOUT(newMemberDataSpy.count() > 0, 5000);
+    QVERIFY(newMemberDataSpy.at(0).at(1).toBool());
+    QCOMPARE(newMemberDataSpy.at(0).at(2).toByteArray(), QByteArrayLiteral("after-remove"));
+    member.unprotectMls(QStringLiteral("group-e2e"), postRemovalCiphertext, QStringLiteral("bob-after-remove"));
+    QTRY_VERIFY_WITH_TIMEOUT(memberDataSpy.count() > 0, 5000);
+    QVERIFY(!memberDataSpy.at(0).at(1).toBool());
     member.disconnectFromServer();
     newMember.disconnectFromServer();
     host.disconnectFromServer();

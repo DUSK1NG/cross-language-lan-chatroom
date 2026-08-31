@@ -294,7 +294,7 @@ func (c *Client) readPump(hub *Hub) {
 				continue
 			}
 			hub.MLSGroupCommit <- MLSGroupCommitRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
-				Epoch: message.Epoch, Commit: message.Commit, CommandID: message.CommandID}
+				Epoch: message.Epoch, Commit: message.Commit, ProposalID: message.ProposalID, CommandID: message.CommandID}
 
 		case "mls.group.proposal":
 			if err := validateMessage(message); err != nil {
@@ -304,7 +304,7 @@ func (c *Client) readPump(hub *Hub) {
 				continue
 			}
 			hub.MLSGroupProposal <- MLSGroupProposalRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
-				Epoch: message.Epoch, ProposalID: message.ProposalID, Proposal: message.Proposal, CommandID: message.CommandID}
+				Epoch: message.Epoch, ProposalID: message.ProposalID, Action: message.Action, TargetCode: message.TargetUserCode, Proposal: message.Proposal, CommandID: message.CommandID}
 
 		case "mls.group.welcome":
 			if err := validateMessage(message); err != nil {

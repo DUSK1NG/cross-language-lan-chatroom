@@ -28,6 +28,8 @@ var ErrMLSEpochRollback = errors.New("MLS commit epoch rolls back current group 
 var ErrMLSProposalMissing = errors.New("MLS commit has no accepted proposal")
 var ErrMLSWelcomeConflict = errors.New("MLS welcome conflicts with existing target")
 var ErrMLSProposalConflict = errors.New("MLS proposal conflicts with existing proposal")
+var ErrMLSGroupMemberRequired = errors.New("MLS group member authorization required")
+var ErrMLSMemberConflict = errors.New("MLS group member state conflicts")
 
 func nullableCrypto(value json.RawMessage) any {
 	if len(value) == 0 {
@@ -171,6 +173,14 @@ CREATE TABLE IF NOT EXISTS mls_group_welcomes (
     created_at TEXT NOT NULL,
     PRIMARY KEY(group_id, epoch, target_code)
 );
+CREATE TABLE IF NOT EXISTS mls_group_members (
+    group_id TEXT NOT NULL,
+    user_code TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    joined_epoch INTEGER NOT NULL DEFAULT 0,
+    removed_epoch INTEGER,
+    PRIMARY KEY(group_id, user_code)
+);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("initialize auth database: %w", err)
@@ -187,10 +197,72 @@ CREATE TABLE IF NOT EXISTS mls_group_welcomes (
 	if err := s.migrateChatMessageIdentitySchema(); err != nil {
 		return err
 	}
+	for _, migration := range []string{
+		`ALTER TABLE mls_group_proposals ADD COLUMN action TEXT NOT NULL DEFAULT 'add'`,
+		`ALTER TABLE mls_group_proposals ADD COLUMN target_code TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mls_group_proposals ADD COLUMN member_snapshot TEXT NOT NULL DEFAULT '[]'`,
+	} {
+		if _, err := s.db.Exec(migration); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return fmt.Errorf("migrate MLS proposal metadata: %w", err)
+		}
+	}
 	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_offline_messages_message_id ON offline_messages(message_id)`); err != nil {
 		return fmt.Errorf("index offline message id: %w", err)
 	}
 	return nil
+}
+
+// MLSGroupMembership is the server's authoritative membership snapshot. Room
+// invitations are deliberately not consulted by MLS proposal/commit paths.
+type MLSGroupMembership struct {
+	Action  string
+	Target  string
+	Members []string
+}
+
+func (s *AuthStore) MLSGroupMembers(groupID string) ([]string, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("auth store is not initialized")
+	}
+	if err := validateMLSGroupID(groupID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`SELECT user_code FROM mls_group_members WHERE group_id = ? AND active = 1 ORDER BY user_code`, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("query MLS group members: %w", err)
+	}
+	defer rows.Close()
+	var members []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
+		}
+		members = append(members, code)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+func encodeMLSMemberSnapshot(members []string) (string, error) {
+	value, err := json.Marshal(members)
+	if err != nil {
+		return "", err
+	}
+	return string(value), nil
+}
+
+func decodeMLSMemberSnapshot(value string) ([]string, error) {
+	var members []string
+	if value == "" {
+		return members, nil
+	}
+	if err := json.Unmarshal([]byte(value), &members); err != nil {
+		return nil, err
+	}
+	return members, nil
 }
 
 func (s *AuthStore) PublishMLSKeyPackage(userCode, keyPackage string) error {
@@ -314,6 +386,117 @@ func (s *AuthStore) SaveMLSCommit(groupID, room string, epoch uint64, commit str
 	return true, nil
 }
 
+// SaveMLSCommitForMember is the strict authenticated commit path. The
+// proposal's persisted snapshot determines recipients and the remove action
+// is applied atomically with the epoch advance.
+func (s *AuthStore) SaveMLSCommitForMember(groupID, room, senderCode, proposalID string,
+	epoch uint64, commit string) (bool, MLSGroupMembership, error) {
+	var result MLSGroupMembership
+	if s == nil || s.db == nil {
+		return false, result, errors.New("auth store is not initialized")
+	}
+	if err := validateMLSGroupID(groupID); err != nil {
+		return false, result, err
+	}
+	if err := validateRoomName(room); err != nil {
+		return false, result, err
+	}
+	sender, err := normalizeUserCode(senderCode)
+	if err != nil {
+		return false, result, err
+	}
+	if err := validateOpaqueMLS("MLS group commit", commit); err != nil {
+		return false, result, err
+	}
+	epochValue, err := mlsEpochValue(epoch)
+	if err != nil {
+		return false, result, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, result, fmt.Errorf("begin MLS member commit: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existingCommit string
+	err = tx.QueryRow(`SELECT commit_data FROM mls_group_epochs WHERE group_id=? AND epoch=?`, groupID, epochValue).Scan(&existingCommit)
+	if err == nil {
+		var active int
+		if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_members WHERE group_id=? AND user_code=? AND active=1`, groupID, sender).Scan(&active); err != nil || active == 0 {
+			return false, result, ErrMLSGroupMemberRequired
+		}
+		if existingCommit != commit {
+			return false, result, ErrMLSCommitConflict
+		}
+		return false, result, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, result, fmt.Errorf("query MLS commit: %w", err)
+	}
+	var existingRoom string
+	var currentEpoch int64
+	if err := tx.QueryRow(`SELECT room,current_epoch FROM mls_groups WHERE group_id=?`, groupID).Scan(&existingRoom, &currentEpoch); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, result, ErrMLSGroupMemberRequired
+		}
+		return false, result, err
+	}
+	if existingRoom != room {
+		return false, result, ErrMLSCommitConflict
+	}
+	if currentEpoch >= 0 && epochValue != currentEpoch+1 {
+		if epochValue < currentEpoch {
+			return false, result, ErrMLSEpochRollback
+		}
+		return false, result, ErrMLSCommitConflict
+	}
+	var senderActive int
+	if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_members WHERE group_id=? AND user_code=? AND active=1`, groupID, sender).Scan(&senderActive); err != nil {
+		return false, result, err
+	}
+	if senderActive == 0 {
+		return false, result, ErrMLSGroupMemberRequired
+	}
+	var action, target, snapshot string
+	proposalQuery := `SELECT action,target_code,member_snapshot FROM mls_group_proposals WHERE group_id=? AND epoch=?`
+	args := []any{groupID, epochValue}
+	if proposalID != "" {
+		proposalQuery += ` AND proposal_id=?`
+		args = append(args, proposalID)
+	}
+	proposalQuery += ` ORDER BY proposal_id LIMIT 1`
+	if err := tx.QueryRow(proposalQuery, args...).Scan(&action, &target, &snapshot); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, result, ErrMLSProposalMissing
+		}
+		return false, result, err
+	}
+	members, err := decodeMLSMemberSnapshot(snapshot)
+	if err != nil {
+		return false, result, fmt.Errorf("decode MLS member snapshot: %w", err)
+	}
+	for _, member := range members {
+		if member == "" {
+			return false, result, ErrMLSMemberConflict
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO mls_group_epochs(group_id,epoch,commit_data,created_at) VALUES (?,?,?,?)`, groupID, epochValue, commit, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return false, result, fmt.Errorf("save MLS member commit: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE mls_groups SET current_epoch=? WHERE group_id=?`, epochValue, groupID); err != nil {
+		return false, result, err
+	}
+	if action == "remove" {
+		if _, err := tx.Exec(`UPDATE mls_group_members SET active=0,removed_epoch=? WHERE group_id=? AND user_code=? AND active=1`, epochValue, groupID, target); err != nil {
+			return false, result, err
+		}
+	}
+	result = MLSGroupMembership{Action: action, Target: target, Members: members}
+	if err := tx.Commit(); err != nil {
+		return false, result, fmt.Errorf("commit MLS member commit: %w", err)
+	}
+	return true, result, nil
+}
+
 // SaveMLSProposal stores an opaque proposal and enforces idempotency by both
 // caller proposal id and payload digest. It deliberately does not advance the
 // group's epoch; only a committed handshake advances group state.
@@ -395,6 +578,159 @@ func (s *AuthStore) SaveMLSProposal(groupID, room string, epoch uint64, proposal
 	return true, nil
 }
 
+// SaveMLSProposalForMember is the authenticated MLS path. It persists the
+// action and an immutable pre-commit member snapshot while authorizing only an
+// active MLS member. The legacy SaveMLSProposal above remains available for
+// old storage fixtures, but Hub control traffic uses this method exclusively.
+func (s *AuthStore) SaveMLSProposalForMember(groupID, room, senderCode, action, targetCode string,
+	epoch uint64, proposalID, proposal string) (bool, MLSGroupMembership, error) {
+	var result MLSGroupMembership
+	if s == nil || s.db == nil {
+		return false, result, errors.New("auth store is not initialized")
+	}
+	if err := validateMLSGroupID(groupID); err != nil {
+		return false, result, err
+	}
+	if err := validateRoomName(room); err != nil {
+		return false, result, err
+	}
+	sender, err := normalizeUserCode(senderCode)
+	if err != nil {
+		return false, result, err
+	}
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action != "add" && action != "remove" {
+		return false, result, errors.New("MLS proposal action must be add or remove")
+	}
+	target, err := normalizeUserCode(targetCode)
+	if err != nil {
+		return false, result, err
+	}
+	if proposalID == "" || !utf8.ValidString(proposalID) || len([]byte(proposalID)) > maxMessageSize {
+		return false, result, errors.New("MLS proposal id must be valid and no longer than message limit")
+	}
+	if err := validateOpaqueMLS("MLS group proposal", proposal); err != nil {
+		return false, result, err
+	}
+	epochValue, err := mlsEpochValue(epoch)
+	if err != nil {
+		return false, result, err
+	}
+	digestBytes := sha256.Sum256([]byte(proposal))
+	digest := hex.EncodeToString(digestBytes[:])
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, result, fmt.Errorf("begin MLS member proposal: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existingData, existingAction, existingTarget, existingSnapshot string
+	err = tx.QueryRow(`SELECT proposal_data, action, target_code, member_snapshot FROM mls_group_proposals WHERE group_id=? AND epoch=? AND proposal_id=?`, groupID, epochValue, proposalID).Scan(&existingData, &existingAction, &existingTarget, &existingSnapshot)
+	if err == nil {
+		var active int
+		if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_members WHERE group_id=? AND user_code=? AND active=1`, groupID, sender).Scan(&active); err != nil || active == 0 {
+			return false, result, ErrMLSGroupMemberRequired
+		}
+		if existingData != proposal || existingAction != action || existingTarget != target {
+			return false, result, ErrMLSProposalConflict
+		}
+		members, decodeErr := decodeMLSMemberSnapshot(existingSnapshot)
+		if decodeErr != nil {
+			return false, result, fmt.Errorf("decode MLS member snapshot: %w", decodeErr)
+		}
+		result = MLSGroupMembership{Action: existingAction, Target: existingTarget, Members: members}
+		return false, result, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, result, fmt.Errorf("query MLS proposal: %w", err)
+	}
+	var existingDigest string
+	err = tx.QueryRow(`SELECT proposal_digest FROM mls_group_proposals WHERE group_id=? AND epoch=? AND proposal_digest=?`, groupID, epochValue, digest).Scan(&existingDigest)
+	if err == nil {
+		return false, result, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, result, fmt.Errorf("query MLS proposal digest: %w", err)
+	}
+	var currentEpoch int64
+	var existingRoom string
+	err = tx.QueryRow(`SELECT room,current_epoch FROM mls_groups WHERE group_id=?`, groupID).Scan(&existingRoom, &currentEpoch)
+	groupExists := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, result, fmt.Errorf("query MLS group: %w", err)
+	}
+	if groupExists {
+		if existingRoom != "" && existingRoom != room {
+			return false, result, ErrMLSProposalConflict
+		}
+		if epochValue < currentEpoch {
+			return false, result, ErrMLSEpochRollback
+		}
+	} else if _, err := tx.Exec(`INSERT INTO mls_groups(group_id,room,current_epoch) VALUES (?,?, -1)`, groupID, room); err != nil {
+		return false, result, fmt.Errorf("create MLS group: %w", err)
+	}
+	// A newly-created group has exactly its creator as a member. This is done
+	// in the same transaction as the first proposal, preventing room invites
+	// from being mistaken for MLS membership.
+	var memberCount int
+	if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_members WHERE group_id=? AND active=1`, groupID).Scan(&memberCount); err != nil {
+		return false, result, err
+	}
+	if memberCount == 0 && (!groupExists || currentEpoch < 0) {
+		if _, err := tx.Exec(`INSERT INTO mls_group_members(group_id,user_code,active,joined_epoch) VALUES (?,?,1,0) ON CONFLICT(group_id,user_code) DO UPDATE SET active=1, removed_epoch=NULL`, groupID, sender); err != nil {
+			return false, result, fmt.Errorf("initialize MLS creator: %w", err)
+		}
+	}
+	var senderActive int
+	if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_members WHERE group_id=? AND user_code=? AND active=1`, groupID, sender).Scan(&senderActive); err != nil {
+		return false, result, err
+	}
+	if senderActive == 0 {
+		return false, result, ErrMLSGroupMemberRequired
+	}
+	rows, err := tx.Query(`SELECT user_code FROM mls_group_members WHERE group_id=? AND active=1 ORDER BY user_code`, groupID)
+	if err != nil {
+		return false, result, err
+	}
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			rows.Close()
+			return false, result, err
+		}
+		result.Members = append(result.Members, code)
+	}
+	rows.Close()
+	if action == "add" {
+		var active int
+		if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_members WHERE group_id=? AND user_code=? AND active=1`, groupID, target).Scan(&active); err != nil {
+			return false, result, err
+		}
+		if active != 0 {
+			return false, result, ErrMLSMemberConflict
+		}
+	} else {
+		var active int
+		if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_members WHERE group_id=? AND user_code=? AND active=1`, groupID, target).Scan(&active); err != nil {
+			return false, result, err
+		}
+		if active == 0 {
+			return false, result, ErrMLSGroupMemberRequired
+		}
+	}
+	result.Action, result.Target = action, target
+	snapshot, err := encodeMLSMemberSnapshot(result.Members)
+	if err != nil {
+		return false, result, err
+	}
+	if _, err := tx.Exec(`INSERT INTO mls_group_proposals(group_id,epoch,proposal_id,proposal_data,proposal_digest,action,target_code,member_snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, groupID, epochValue, proposalID, proposal, digest, action, target, snapshot, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return false, result, fmt.Errorf("save MLS member proposal: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, result, fmt.Errorf("commit MLS member proposal: %w", err)
+	}
+	return true, result, nil
+}
+
 func (s *AuthStore) SaveMLSWelcome(groupID, room string, epoch uint64, targetCode, welcome string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, errors.New("auth store is not initialized")
@@ -450,6 +786,87 @@ func (s *AuthStore) SaveMLSWelcome(groupID, room string, epoch uint64, targetCod
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit MLS welcome: %w", err)
+	}
+	return true, nil
+}
+
+// SaveMLSWelcomeForMember activates an add target only after the matching
+// commit and opaque welcome are durably accepted.
+func (s *AuthStore) SaveMLSWelcomeForMember(groupID, room, senderCode string, epoch uint64,
+	targetCode, welcome string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("auth store is not initialized")
+	}
+	if err := validateMLSGroupID(groupID); err != nil {
+		return false, err
+	}
+	if err := validateRoomName(room); err != nil {
+		return false, err
+	}
+	sender, err := normalizeUserCode(senderCode)
+	if err != nil {
+		return false, err
+	}
+	target, err := normalizeUserCode(targetCode)
+	if err != nil {
+		return false, err
+	}
+	if err := validateOpaqueMLS("MLS group welcome", welcome); err != nil {
+		return false, err
+	}
+	epochValue, err := mlsEpochValue(epoch)
+	if err != nil {
+		return false, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin MLS member welcome: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existingRoom string
+	if err := tx.QueryRow(`SELECT room FROM mls_groups WHERE group_id=?`, groupID).Scan(&existingRoom); err != nil {
+		return false, ErrMLSGroupMemberRequired
+	}
+	if existingRoom != room {
+		return false, ErrMLSWelcomeConflict
+	}
+	var active int
+	if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_members WHERE group_id=? AND user_code=? AND active=1`, groupID, sender).Scan(&active); err != nil {
+		return false, err
+	}
+	if active == 0 {
+		return false, ErrMLSGroupMemberRequired
+	}
+	var action, proposalTarget string
+	if err := tx.QueryRow(`SELECT action,target_code FROM mls_group_proposals WHERE group_id=? AND epoch=? ORDER BY proposal_id LIMIT 1`, groupID, epochValue).Scan(&action, &proposalTarget); err != nil {
+		return false, ErrMLSProposalMissing
+	}
+	if action != "add" || proposalTarget != target {
+		return false, ErrMLSMemberConflict
+	}
+	var commit string
+	if err := tx.QueryRow(`SELECT commit_data FROM mls_group_epochs WHERE group_id=? AND epoch=?`, groupID, epochValue).Scan(&commit); err != nil {
+		return false, ErrMLSProposalMissing
+	}
+	var existing string
+	err = tx.QueryRow(`SELECT welcome FROM mls_group_welcomes WHERE group_id=? AND epoch=? AND target_code=?`, groupID, epochValue, target).Scan(&existing)
+	if err == nil {
+		if existing != welcome {
+			return false, ErrMLSWelcomeConflict
+		}
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if _, err := tx.Exec(`INSERT INTO mls_group_welcomes(group_id,epoch,target_code,welcome,created_at) VALUES (?,?,?,?,?)`, groupID, epochValue, target, welcome, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`INSERT INTO mls_group_members(group_id,user_code,active,joined_epoch,removed_epoch) VALUES (?,?,1,?,NULL) ON CONFLICT(group_id,user_code) DO UPDATE SET active=1,joined_epoch=excluded.joined_epoch,removed_epoch=NULL`, groupID, target, epochValue); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit MLS member welcome: %w", err)
 	}
 	return true, nil
 }

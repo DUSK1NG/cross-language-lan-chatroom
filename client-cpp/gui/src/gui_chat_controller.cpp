@@ -79,6 +79,8 @@ GuiChatController::GuiChatController(QObject* parent)
     connect(worker_, &GuiConnectionWorker::messageReceived, this, &GuiChatController::handleMessage);
     connect(worker_, &GuiConnectionWorker::historyReceived, this, &GuiChatController::handleHistory);
     connect(worker_, &GuiConnectionWorker::mlsCommandResult, this, &GuiChatController::mlsCommandResult);
+    connect(worker_, &GuiConnectionWorker::mlsGroupState, this, &GuiChatController::mlsGroupState);
+    connect(worker_, &GuiConnectionWorker::mlsDataResult, this, &GuiChatController::mlsDataResult);
     workerThread_.start();
 }
 
@@ -785,10 +787,27 @@ void GuiChatController::addMlsMember(const QString& room, const QString& groupId
 }
 
 void GuiChatController::removeMlsMember(const QString& room, const QString& groupId,
-                                        const QString& targetUserCode, const QString& commandId) {
+                                         const QString& targetUserCode, const QString& commandId) {
     QMetaObject::invokeMethod(worker_, "removeMlsMember", Qt::QueuedConnection,
                               Q_ARG(QString, room), Q_ARG(QString, groupId),
                               Q_ARG(QString, targetUserCode), Q_ARG(QString, commandId));
+}
+
+void GuiChatController::inspectMlsGroup(const QString& groupId, const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "inspectMlsGroup", Qt::QueuedConnection,
+                              Q_ARG(QString, groupId), Q_ARG(QString, commandId));
+}
+
+void GuiChatController::protectMls(const QString& groupId, const QByteArray& plaintext,
+                                   const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "protectMls", Qt::QueuedConnection,
+                              Q_ARG(QString, groupId), Q_ARG(QByteArray, plaintext), Q_ARG(QString, commandId));
+}
+
+void GuiChatController::unprotectMls(const QString& groupId, const QByteArray& ciphertext,
+                                     const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "unprotectMls", Qt::QueuedConnection,
+                              Q_ARG(QString, groupId), Q_ARG(QByteArray, ciphertext), Q_ARG(QString, commandId));
 }
 
 void GuiChatController::incrementUnreadForConversation(const QString& key,

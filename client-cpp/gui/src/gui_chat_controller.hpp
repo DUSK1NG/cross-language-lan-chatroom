@@ -4,6 +4,7 @@
 #include "conversation_filter_model.hpp"
 
 #include <QAbstractItemModel>
+#include <QByteArray>
 #include <QHash>
 #include <QObject>
 #include <QThread>
@@ -103,6 +104,9 @@ public:
                                   const QString& targetUserCode, const QString& commandId = {});
     Q_INVOKABLE void removeMlsMember(const QString& room, const QString& groupId,
                                      const QString& targetUserCode, const QString& commandId = {});
+    Q_INVOKABLE void inspectMlsGroup(const QString& groupId, const QString& commandId = {});
+    Q_INVOKABLE void protectMls(const QString& groupId, const QByteArray& plaintext, const QString& commandId = {});
+    Q_INVOKABLE void unprotectMls(const QString& groupId, const QByteArray& ciphertext, const QString& commandId = {});
 
 signals:
     void connectedChanged();
@@ -121,6 +125,10 @@ signals:
     void recallFailed(const QString& commandId, const QString& reason);
     void mlsCommandResult(const QString& commandId, bool ok,
                           const QString& code, const QString& message);
+    void mlsGroupState(const QString& commandId, bool ok, const QString& groupId,
+                       quint64 epoch, const QString& message);
+    void mlsDataResult(const QString& commandId, bool ok, const QByteArray& data,
+                       const QString& message);
 
 private slots:
     void handleConnected(bool isAdmin);

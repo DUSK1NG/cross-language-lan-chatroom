@@ -63,12 +63,13 @@ type MLSKeyPackageFetchRequest struct {
 }
 
 type MLSGroupCommitRequest struct {
-	Sender    *Client
-	GroupID   string
-	Room      string
-	Epoch     uint64
-	Commit    string
-	CommandID string
+	Sender     *Client
+	GroupID    string
+	Room       string
+	Epoch      uint64
+	Commit     string
+	ProposalID string
+	CommandID  string
 }
 
 type MLSGroupProposalRequest struct {
@@ -77,6 +78,8 @@ type MLSGroupProposalRequest struct {
 	Room       string
 	Epoch      uint64
 	ProposalID string
+	Action     string
+	TargetCode string
 	Proposal   string
 	CommandID  string
 }
@@ -1306,6 +1309,45 @@ func (h *Hub) handleMLSGroupCommit(request MLSGroupCommitRequest) {
 	if room == "" {
 		room = sender.Room
 	}
+	if request.ProposalID != "" {
+		inserted, membership, err := h.OfflineStore.SaveMLSCommitForMember(request.GroupID, room, sender.NormalizedCode, request.ProposalID, request.Epoch, request.Commit)
+		if err != nil {
+			content := "Invalid MLS group commit"
+			if errors.Is(err, ErrMLSGroupMemberRequired) {
+				content = "MLS group commit access denied"
+			}
+			if errors.Is(err, ErrMLSEpochRollback) {
+				content = "MLS group epoch rollback"
+			}
+			if errors.Is(err, ErrMLSCommitConflict) {
+				content = "MLS group commit conflict"
+			}
+			if errors.Is(err, ErrMLSProposalMissing) {
+				content = "MLS group commit requires an accepted proposal"
+			}
+			h.deliverError(sender, content, "", request.CommandID)
+			return
+		}
+		if inserted {
+			for _, code := range membership.Members {
+				if code == sender.NormalizedCode {
+					continue
+				}
+				if member := h.ActiveCodes[code]; member != nil {
+					h.deliver(member, Message{Type: "mls.group.commit", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, Commit: request.Commit, ProposalID: request.ProposalID})
+				}
+			}
+		}
+		content := "stored"
+		if !inserted {
+			content = "duplicate"
+		}
+		// The sender has already applied its local commit. Keep the ack opaque
+		// payload empty so the receive pump cannot handle the same handshake a
+		// second time; only peer broadcasts carry Commit.
+		h.deliver(sender, Message{Type: "mls.group.commit", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, Content: content, CommandID: request.CommandID, ProposalID: request.ProposalID})
+		return
+	}
 	if !h.canAccessMLSRoom(sender, sender.NormalizedCode, room) || !h.Rooms[room][sender] {
 		h.deliverError(sender, "MLS group commit access denied", "", request.CommandID)
 		return
@@ -1354,6 +1396,44 @@ func (h *Hub) handleMLSGroupProposal(request MLSGroupProposalRequest) {
 	room := request.Room
 	if room == "" {
 		room = sender.Room
+	}
+	if request.Action != "" || request.TargetCode != "" {
+		targetCode, targetErr := normalizeUserCode(request.TargetCode)
+		if targetErr != nil || (request.Action == "add" && !h.canAccessMLSRoom(sender, targetCode, room)) {
+			h.deliverError(sender, "MLS group proposal access denied", "", request.CommandID)
+			return
+		}
+		inserted, membership, err := h.OfflineStore.SaveMLSProposalForMember(request.GroupID, room, sender.NormalizedCode, request.Action, targetCode, request.Epoch, request.ProposalID, request.Proposal)
+		if err != nil {
+			content := "Invalid MLS group proposal"
+			if errors.Is(err, ErrMLSGroupMemberRequired) {
+				content = "MLS group proposal access denied"
+			}
+			if errors.Is(err, ErrMLSEpochRollback) {
+				content = "MLS group proposal epoch rollback"
+			}
+			if errors.Is(err, ErrMLSProposalConflict) || errors.Is(err, ErrMLSMemberConflict) {
+				content = "MLS group proposal conflict"
+			}
+			h.deliverError(sender, content, "", request.CommandID)
+			return
+		}
+		if inserted {
+			for _, code := range membership.Members {
+				if code == sender.NormalizedCode {
+					continue
+				}
+				if member := h.ActiveCodes[code]; member != nil {
+					h.deliver(member, Message{Type: "mls.group.proposal", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, ProposalID: request.ProposalID, Proposal: request.Proposal, TargetUserCode: targetCode, Content: membership.Action})
+				}
+			}
+		}
+		content := "stored"
+		if !inserted {
+			content = "duplicate"
+		}
+		h.deliver(sender, Message{Type: "mls.group.proposal", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, ProposalID: request.ProposalID, Content: content, CommandID: request.CommandID})
+		return
 	}
 	if !h.canAccessMLSRoom(sender, sender.NormalizedCode, room) || !h.Rooms[room][sender] {
 		h.deliverError(sender, "MLS group proposal access denied", "", request.CommandID)
@@ -1404,6 +1484,39 @@ func (h *Hub) handleMLSGroupWelcome(request MLSGroupWelcomeRequest) {
 	room := request.Room
 	if room == "" {
 		room = sender.Room
+	}
+	if members, memberErr := h.OfflineStore.MLSGroupMembers(request.GroupID); memberErr == nil && len(members) > 0 {
+		targetCode, targetErr := normalizeUserCode(request.TargetCode)
+		if targetErr != nil || !h.canAccessMLSRoom(sender, targetCode, room) {
+			h.deliverError(sender, "MLS group welcome access denied", "", request.CommandID)
+			return
+		}
+		inserted, err := h.OfflineStore.SaveMLSWelcomeForMember(request.GroupID, room, sender.NormalizedCode, request.Epoch, targetCode, request.Welcome)
+		if err != nil {
+			content := "Invalid MLS group welcome"
+			if errors.Is(err, ErrMLSGroupMemberRequired) {
+				content = "MLS group welcome access denied"
+			}
+			if errors.Is(err, ErrMLSProposalMissing) || errors.Is(err, ErrMLSMemberConflict) {
+				content = "MLS group welcome requires a matching add commit"
+			}
+			if errors.Is(err, ErrMLSWelcomeConflict) {
+				content = "MLS group welcome conflict"
+			}
+			h.deliverError(sender, content, "", request.CommandID)
+			return
+		}
+		if inserted {
+			if target := h.ActiveCodes[targetCode]; target != nil {
+				h.deliver(target, Message{Type: "mls.group.welcome", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, TargetUserCode: targetCode, Welcome: request.Welcome})
+			}
+		}
+		content := "stored"
+		if !inserted {
+			content = "duplicate"
+		}
+		h.deliver(sender, Message{Type: "mls.group.welcome", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, TargetUserCode: targetCode, Content: content, CommandID: request.CommandID})
+		return
 	}
 	if !h.canAccessMLSRoom(sender, targetCode, room) || !h.Rooms[room][sender] {
 		h.deliverError(sender, "MLS group welcome access denied", "", request.CommandID)

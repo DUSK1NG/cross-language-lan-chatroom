@@ -62,6 +62,7 @@ type Message struct {
 	GroupID    string `json:"group_id,omitempty"`
 	Epoch      uint64 `json:"epoch,omitempty"`
 	ProposalID string `json:"proposal_id,omitempty"`
+	Action     string `json:"action,omitempty"`
 	KeyPackage string `json:"key_package,omitempty"`
 	Proposal   string `json:"proposal,omitempty"`
 	Commit     string `json:"commit,omitempty"`
@@ -265,6 +266,9 @@ func validateMessage(message Message) error {
 				return err
 			}
 		}
+		if message.ProposalID != "" && (!utf8.ValidString(message.ProposalID) || len([]byte(message.ProposalID)) > maxMessageSize) {
+			return fmt.Errorf("MLS group proposal id must be valid UTF-8 and no longer than %d bytes", maxMessageSize)
+		}
 		return validateOpaqueMLS("MLS group commit", message.Commit)
 	case "mls.group.proposal":
 		if err := validateMLSGroupID(message.GroupID); err != nil {
@@ -279,6 +283,14 @@ func validateMessage(message Message) error {
 		if message.Room != "" {
 			if err := validateRoomName(message.Room); err != nil {
 				return err
+			}
+		}
+		if message.Action != "" && message.Action != "add" && message.Action != "remove" {
+			return fmt.Errorf("unsupported MLS group proposal action")
+		}
+		if message.Action != "" {
+			if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+				return fmt.Errorf("invalid MLS group proposal target: %w", err)
 			}
 		}
 		return validateOpaqueMLS("MLS group proposal", message.Proposal)

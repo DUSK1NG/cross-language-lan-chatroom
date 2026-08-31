@@ -540,6 +540,8 @@ void GuiConnectionWorker::addMlsMember(const QString& room, const QString& group
                                          normalizedRoom.toStdString(), {}, ""};
         proposalMessage.protocol_version = "mls-v1";
         proposalMessage.group_id = normalizedGroup.toStdString();
+        proposalMessage.action = "add";
+        proposalMessage.target_user_code = normalizedTarget.toStdString();
         proposalMessage.epoch = epoch;
         proposalMessage.proposal_id = pendingId.toStdString();
         proposalMessage.proposal = proposalEncoded.toStdString();
@@ -616,6 +618,8 @@ void GuiConnectionWorker::removeMlsMember(const QString& room, const QString& gr
                                          normalizedRoom.toStdString(), {}, ""};
         proposalMessage.protocol_version = "mls-v1";
         proposalMessage.group_id = normalizedGroup.toStdString();
+        proposalMessage.action = "remove";
+        proposalMessage.target_user_code = normalizedTarget.toStdString();
         proposalMessage.epoch = epoch;
         proposalMessage.proposal_id = pendingId.toStdString();
         proposalMessage.proposal = proposalEncoded.toStdString();
@@ -648,6 +652,62 @@ void GuiConnectionWorker::resetMlsState() {
         mlsClient_ = std::make_shared<MlsClient>(MlsClient::create(mlsIdentity(savedConnection_.userCode)));
     } catch (...) {
         mlsClient_.reset();
+    }
+#endif
+}
+
+void GuiConnectionWorker::inspectMlsGroup(const QString& groupId, const QString& commandId) {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    emit mlsGroupState(commandId, false, groupId, 0, QStringLiteral("MLS++ support is not enabled"));
+#else
+    const auto it = mlsGroups_.find(groupId.trimmed());
+    if (it == mlsGroups_.end() || !it->second.client) {
+        emit mlsGroupState(commandId, false, groupId, 0, QStringLiteral("MLS group is not initialized"));
+        return;
+    }
+    emit mlsGroupState(commandId, true, it->first, it->second.epoch, {});
+#endif
+}
+
+void GuiConnectionWorker::protectMls(const QString& groupId, const QByteArray& plaintext,
+                                     const QString& commandId) {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    emit mlsDataResult(commandId, false, {}, QStringLiteral("MLS++ support is not enabled"));
+#else
+    try {
+        const auto it = mlsGroups_.find(groupId.trimmed());
+        if (it == mlsGroups_.end() || !it->second.client) {
+            emit mlsDataResult(commandId, false, {}, QStringLiteral("MLS group is not initialized"));
+            return;
+        }
+        const auto ciphertext = encodeMlsOpaque(it->second.client->protect(mlsBytes(plaintext)));
+        if (ciphertext.isEmpty()) {
+            emit mlsDataResult(commandId, false, {}, QStringLiteral("MLS ciphertext exceeds the frame limit"));
+            return;
+        }
+        emit mlsDataResult(commandId, true, ciphertext, {});
+    } catch (const std::exception& error) {
+        emit mlsDataResult(commandId, false, {}, QString::fromUtf8(error.what()));
+    }
+#endif
+}
+
+void GuiConnectionWorker::unprotectMls(const QString& groupId, const QByteArray& ciphertext,
+                                       const QString& commandId) {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    emit mlsDataResult(commandId, false, {}, QStringLiteral("MLS++ support is not enabled"));
+#else
+    try {
+        const auto it = mlsGroups_.find(groupId.trimmed());
+        if (it == mlsGroups_.end() || !it->second.client) {
+            emit mlsDataResult(commandId, false, {}, QStringLiteral("MLS group is not initialized"));
+            return;
+        }
+        const auto plaintext = it->second.client->unprotect(decodeMlsOpaque(ciphertext.toStdString()));
+        emit mlsDataResult(commandId, true,
+                           QByteArray(reinterpret_cast<const char*>(plaintext.data()), static_cast<int>(plaintext.size())), {});
+    } catch (const std::exception& error) {
+        emit mlsDataResult(commandId, false, {}, QString::fromUtf8(error.what()));
     }
 #endif
 }
@@ -712,6 +772,7 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
             commitMessage.protocol_version = "mls-v1";
             commitMessage.group_id = operation.group.toStdString();
             commitMessage.epoch = operation.epoch;
+            commitMessage.proposal_id = commandId.toStdString();
             commitMessage.commit = operation.commit.toStdString();
             commitMessage.command_id = commandId.toStdString();
             operation.phase = PendingMlsOperation::Phase::Commit;

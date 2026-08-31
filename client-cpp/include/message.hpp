@@ -76,6 +76,7 @@ struct Message {
     std::uint64_t epoch = 0;
     std::string key_package;
     std::string proposal_id;
+    std::string action;
     std::string proposal;
     std::string commit;
     std::string welcome;

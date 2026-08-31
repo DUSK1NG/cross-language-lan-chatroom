@@ -58,6 +58,9 @@ public slots:
                       const QString& targetUserCode, const QString& commandId = {});
     void removeMlsMember(const QString& room, const QString& groupId,
                          const QString& targetUserCode, const QString& commandId = {});
+    void inspectMlsGroup(const QString& groupId, const QString& commandId = {});
+    void protectMls(const QString& groupId, const QByteArray& plaintext, const QString& commandId = {});
+    void unprotectMls(const QString& groupId, const QByteArray& ciphertext, const QString& commandId = {});
 
 signals:
     void disconnected();
@@ -87,6 +90,10 @@ signals:
                          const QString& searchQuery);
     void mlsCommandResult(const QString& commandId, bool ok,
                           const QString& code, const QString& message);
+    void mlsGroupState(const QString& commandId, bool ok, const QString& groupId,
+                       quint64 epoch, const QString& message);
+    void mlsDataResult(const QString& commandId, bool ok, const QByteArray& data,
+                       const QString& message);
 
 private:
     bool connectToServerWithRetries(const QString& serverIp,

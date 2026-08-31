@@ -162,6 +162,64 @@ func TestHubMLSProposalRequiresExistingRoomMember(t *testing.T) {
 	}
 }
 
+func TestHubMLSAuthoritativeMembershipSnapshotAndWelcomeActivation(t *testing.T) {
+	hub, alice, bob := setupMLSHub(t)
+	carol := newTestClient(t, "Carol", "Carol01")
+	carol.Room = defaultRoomName
+	hub.Clients[carol] = true
+	hub.ActiveCodes[carol.NormalizedCode] = carol
+	hub.Rooms[defaultRoomName][carol] = true
+	hub.RoomDefinitions[defaultRoomName].Allowed[carol.NormalizedCode] = true
+	proposal := MLSGroupProposalRequest{Sender: alice, GroupID: "strict", Room: defaultRoomName, Epoch: 1,
+		ProposalID: "p1", Action: "add", TargetCode: bob.UserCode, Proposal: "cHJvcG9zYWw=", CommandID: "p1"}
+	hub.handleMLSGroupProposal(proposal)
+	if got := <-alice.Send; got.Content != "stored" {
+		t.Fatalf("proposal ack=%+v", got)
+	}
+	if members, err := hub.OfflineStore.MLSGroupMembers("strict"); err != nil || len(members) != 1 || members[0] != alice.NormalizedCode {
+		t.Fatalf("pre-commit members=%v err=%v", members, err)
+	}
+	select {
+	case got := <-bob.Send:
+		t.Fatalf("target received proposal: %+v", got)
+	default:
+	}
+	hub.handleMLSGroupCommit(MLSGroupCommitRequest{Sender: alice, GroupID: "strict", Room: defaultRoomName, Epoch: 1,
+		ProposalID: "p1", Commit: "Y29tbWl0", CommandID: "c1"})
+	if got := <-alice.Send; got.Content != "stored" {
+		t.Fatalf("commit ack=%+v", got)
+	}
+	select {
+	case got := <-bob.Send:
+		t.Fatalf("target received commit: %+v", got)
+	default:
+	}
+	hub.handleMLSGroupWelcome(MLSGroupWelcomeRequest{Sender: alice, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 1, TargetCode: bob.UserCode, Welcome: "d2VsY29tZQ==", CommandID: "w1"})
+	if got := <-bob.Send; got.Type != "mls.group.welcome" {
+		t.Fatalf("welcome=%+v", got)
+	}
+	if got := <-alice.Send; got.Content != "stored" {
+		t.Fatalf("welcome ack=%+v", got)
+	}
+	members, err := hub.OfflineStore.MLSGroupMembers("strict")
+	if err != nil || len(members) != 2 {
+		t.Fatalf("post-welcome members=%v err=%v", members, err)
+	}
+	hub.handleMLSGroupProposal(MLSGroupProposalRequest{Sender: carol, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 2, ProposalID: "unauthorized-proposal", Action: "add", TargetCode: carol.UserCode,
+		Proposal: "cHJvcG9zYWw=", CommandID: "unauthorized-proposal"})
+	if got := <-carol.Send; got.Type != "error" || got.Content != "MLS group proposal access denied" {
+		t.Fatalf("unauthorized proposal=%+v", got)
+	}
+	// A room-invited Carol is not an MLS member and cannot advance the group.
+	hub.handleMLSGroupCommit(MLSGroupCommitRequest{Sender: carol, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 2, ProposalID: "p1", Commit: "bm8=", CommandID: "unauthorized"})
+	if got := <-carol.Send; got.Type != "error" || got.Content != "MLS group commit access denied" {
+		t.Fatalf("unauthorized commit=%+v", got)
+	}
+}
+
 func TestMLSControlTraversesReadAndWritePumps(t *testing.T) {
 	hub := NewHub()
 	store, _ := newTestAuthStore(t)

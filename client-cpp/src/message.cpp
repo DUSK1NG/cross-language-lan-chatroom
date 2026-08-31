@@ -75,6 +75,7 @@ nlohmann::json serialize(const Message& message) {
     if (message.epoch != 0) object["epoch"] = message.epoch;
     if (!message.key_package.empty()) object["key_package"] = message.key_package;
     if (!message.proposal_id.empty()) object["proposal_id"] = message.proposal_id;
+    if (!message.action.empty()) object["action"] = message.action;
     if (!message.proposal.empty()) object["proposal"] = message.proposal;
     if (!message.commit.empty()) object["commit"] = message.commit;
     if (!message.welcome.empty()) object["welcome"] = message.welcome;
@@ -123,6 +124,7 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("group_id", parsed.group_id) ||
             !read_string("key_package", parsed.key_package) ||
             !read_string("proposal_id", parsed.proposal_id) ||
+            !read_string("action", parsed.action) ||
             !read_string("proposal", parsed.proposal) ||
             !read_string("commit", parsed.commit) ||
             !read_string("welcome", parsed.welcome) ||
