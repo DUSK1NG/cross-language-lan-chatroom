@@ -79,6 +79,7 @@ nlohmann::json serialize(const Message& message) {
     if (!message.proposal.empty()) object["proposal"] = message.proposal;
     if (!message.commit.empty()) object["commit"] = message.commit;
     if (!message.welcome.empty()) object["welcome"] = message.welcome;
+    if (!message.welcome_digest.empty()) object["welcome_digest"] = message.welcome_digest;
     if (!message.messages.empty()) {
         object["messages"] = nlohmann::json::array();
         for (const Message& nested : message.messages) {
@@ -128,6 +129,7 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("proposal", parsed.proposal) ||
             !read_string("commit", parsed.commit) ||
             !read_string("welcome", parsed.welcome) ||
+            !read_string("welcome_digest", parsed.welcome_digest) ||
             !read_string("created_at", parsed.created_at) ||
             !read_string("before_message_id", parsed.before_message_id) ||
             !read_string("search_query", parsed.search_query)) {

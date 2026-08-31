@@ -315,7 +315,18 @@ func (c *Client) readPump(hub *Hub) {
 			}
 			targetCode, _ := normalizeUserCode(message.TargetUserCode)
 			hub.MLSGroupWelcome <- MLSGroupWelcomeRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
-				Epoch: message.Epoch, TargetCode: targetCode, Welcome: message.Welcome, CommandID: message.CommandID}
+				Epoch: message.Epoch, ProposalID: message.ProposalID, WelcomeDigest: message.WelcomeDigest, TargetCode: targetCode, Welcome: message.Welcome, CommandID: message.CommandID}
+
+		case "mls.group.welcome.accept":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid MLS welcome accept"}) {
+					return
+				}
+				continue
+			}
+			targetCode, _ := normalizeUserCode(message.TargetUserCode)
+			hub.MLSGroupWelcomeAccept <- MLSGroupWelcomeAcceptRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
+				Epoch: message.Epoch, ProposalID: message.ProposalID, WelcomeDigest: message.WelcomeDigest, TargetCode: targetCode, CommandID: message.CommandID}
 
 		case "users_request":
 			hub.RequestUsers <- c

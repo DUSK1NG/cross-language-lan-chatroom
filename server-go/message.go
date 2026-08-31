@@ -11,6 +11,7 @@ import (
 
 const maxUsernameSize = 32
 const maxRoomNameSize = 32
+const sha256HexSize = 64
 
 // OnlineUser 是 users_response 中的结构化在线成员信息。
 // Users 字段仍保留，用于与旧客户端兼容。
@@ -59,14 +60,15 @@ type Message struct {
 	Crypto          json.RawMessage `json:"crypto,omitempty"`
 	// MLS control payloads remain opaque to the server. They are base64 text on
 	// the wire so legacy JSON framing and the 64 KiB payload limit still apply.
-	GroupID    string `json:"group_id,omitempty"`
-	Epoch      uint64 `json:"epoch,omitempty"`
-	ProposalID string `json:"proposal_id,omitempty"`
-	Action     string `json:"action,omitempty"`
-	KeyPackage string `json:"key_package,omitempty"`
-	Proposal   string `json:"proposal,omitempty"`
-	Commit     string `json:"commit,omitempty"`
-	Welcome    string `json:"welcome,omitempty"`
+	GroupID       string `json:"group_id,omitempty"`
+	Epoch         uint64 `json:"epoch,omitempty"`
+	ProposalID    string `json:"proposal_id,omitempty"`
+	Action        string `json:"action,omitempty"`
+	KeyPackage    string `json:"key_package,omitempty"`
+	Proposal      string `json:"proposal,omitempty"`
+	Commit        string `json:"commit,omitempty"`
+	Welcome       string `json:"welcome,omitempty"`
+	WelcomeDigest string `json:"welcome_digest,omitempty"`
 	// Password is retained only so old database/test fixtures still compile;
 	// password authentication is removed and this field never crosses the wire.
 	Password string `json:"-"`
@@ -307,6 +309,25 @@ func validateMessage(message Message) error {
 			}
 		}
 		return validateOpaqueMLS("MLS group welcome", message.Welcome)
+	case "mls.group.welcome.accept":
+		if err := validateMLSGroupID(message.GroupID); err != nil {
+			return err
+		}
+		if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
+			return fmt.Errorf("invalid welcome accept target user code: %w", err)
+		}
+		if message.ProposalID == "" || !utf8.ValidString(message.ProposalID) || len([]byte(message.ProposalID)) > maxMessageSize {
+			return fmt.Errorf("MLS welcome accept proposal id is invalid")
+		}
+		if len(message.WelcomeDigest) != sha256HexSize {
+			return fmt.Errorf("MLS welcome accept digest is invalid")
+		}
+		if message.Room != "" {
+			if err := validateRoomName(message.Room); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "users_request", "quit":
 		return nil
 	case "admin_action":

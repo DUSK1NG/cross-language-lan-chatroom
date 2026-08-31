@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"testing"
 	"time"
@@ -53,6 +55,13 @@ func TestHubMLSWelcomeRequiresTargetMembershipOrInvite(t *testing.T) {
 	if got := <-alice.Send; got.Type != "mls.group.welcome" || got.Content != "stored" {
 		t.Fatalf("welcome acknowledgement = %+v", got)
 	}
+	// Once the legacy group row exists, subsequent welcomes must use the
+	// authenticated proposal/commit path rather than reviving the fallback.
+	hub.handleMLSGroupWelcome(MLSGroupWelcomeRequest{Sender: alice, GroupID: "g", Room: defaultRoomName,
+		Epoch: 1, TargetCode: carol.UserCode, Welcome: "d2VsY29tZQ==", CommandID: "w3"})
+	if got := <-alice.Send; got.Type != "error" || got.Content != "MLS group welcome access denied" {
+		t.Fatalf("legacy group welcome must enter strict mode = %+v", got)
+	}
 	_ = bob // retain setup's second member as an explicit authorized-room fixture
 }
 
@@ -97,13 +106,15 @@ func TestHubMLSProposalRoutesToExistingMembersBeforeCommit(t *testing.T) {
 	hub.ActiveCodes[carol.NormalizedCode] = carol
 	hub.RoomDefinitions[defaultRoomName].Allowed[carol.NormalizedCode] = true
 	proposal := MLSGroupProposalRequest{Sender: alice, GroupID: "g", Room: defaultRoomName, Epoch: 1,
-		ProposalID: "p1", Proposal: "cHJvcG9zYWw=", CommandID: "p-cmd"}
+		ProposalID: "p1", Action: "add", TargetCode: carol.UserCode, Proposal: "cHJvcG9zYWw=", CommandID: "p-cmd"}
 	hub.handleMLSGroupProposal(proposal)
 	if got := <-alice.Send; got.Type != "mls.group.proposal" || got.Content != "stored" || got.CommandID != "p-cmd" {
 		t.Fatalf("proposal acknowledgement = %+v", got)
 	}
-	if got := <-bob.Send; got.Type != "mls.group.proposal" || got.Proposal != proposal.Proposal || got.ProposalID != proposal.ProposalID {
-		t.Fatalf("proposal broadcast = %+v", got)
+	select {
+	case got := <-bob.Send:
+		t.Fatalf("non-member received proposal: %+v", got)
+	default:
 	}
 	proposal.CommandID = "p-duplicate"
 	hub.handleMLSGroupProposal(proposal)
@@ -122,21 +133,34 @@ func TestHubMLSProposalRoutesToExistingMembersBeforeCommit(t *testing.T) {
 		t.Fatalf("conflicting proposal response = %+v", got)
 	}
 	commit := MLSGroupCommitRequest{Sender: alice, GroupID: "g", Room: defaultRoomName, Epoch: 1,
-		Commit: "Y29tbWl0", CommandID: "c-cmd"}
+		ProposalID: "p1", Commit: "Y29tbWl0", CommandID: "c-cmd"}
 	hub.handleMLSGroupCommit(commit)
 	if got := <-alice.Send; got.Type != "mls.group.commit" || got.Content != "stored" || got.CommandID != "c-cmd" {
 		t.Fatalf("commit acknowledgement = %+v", got)
 	}
-	if got := <-bob.Send; got.Type != "mls.group.commit" || got.Commit != commit.Commit {
-		t.Fatalf("commit broadcast = %+v", got)
+	select {
+	case got := <-bob.Send:
+		t.Fatalf("non-member received commit: %+v", got)
+	default:
+	}
+	digestBytes := sha256.Sum256([]byte("d2VsY29tZQ=="))
+	hub.handleMLSGroupWelcome(MLSGroupWelcomeRequest{Sender: alice, GroupID: "g", Room: defaultRoomName,
+		Epoch: 1, ProposalID: "p1", WelcomeDigest: "tampered", TargetCode: carol.UserCode, Welcome: "d2VsY29tZQ==", CommandID: "w-tampered"})
+	if got := <-alice.Send; got.Type != "error" || got.Content != "MLS group welcome access denied" {
+		t.Fatalf("tampered welcome = %+v", got)
 	}
 	hub.handleMLSGroupWelcome(MLSGroupWelcomeRequest{Sender: alice, GroupID: "g", Room: defaultRoomName,
-		Epoch: 1, TargetCode: carol.UserCode, Welcome: "d2VsY29tZQ==", CommandID: "w1"})
+		Epoch: 1, ProposalID: "p1", WelcomeDigest: hex.EncodeToString(digestBytes[:]), TargetCode: carol.UserCode, Welcome: "d2VsY29tZQ==", CommandID: "w1"})
 	if got := <-carol.Send; got.Type != "mls.group.welcome" || got.Welcome != "d2VsY29tZQ==" {
 		t.Fatalf("welcome delivery after commit = %+v", got)
 	}
 	if got := <-alice.Send; got.Type != "mls.group.welcome" || got.Content != "stored" || got.CommandID != "w1" {
 		t.Fatalf("welcome acknowledgement = %+v", got)
+	}
+	hub.handleMLSGroupWelcomeAccept(MLSGroupWelcomeAcceptRequest{Sender: carol, GroupID: "g", Room: defaultRoomName,
+		Epoch: 1, ProposalID: "p1", TargetCode: carol.UserCode, WelcomeDigest: hex.EncodeToString(digestBytes[:]), CommandID: "wa1"})
+	if got := <-carol.Send; got.Type != "mls.group.welcome.accept" || got.Content != "activated" {
+		t.Fatalf("welcome accept = %+v", got)
 	}
 	commit.CommandID = "c-duplicate"
 	hub.handleMLSGroupCommit(commit)
@@ -194,8 +218,9 @@ func TestHubMLSAuthoritativeMembershipSnapshotAndWelcomeActivation(t *testing.T)
 		t.Fatalf("target received commit: %+v", got)
 	default:
 	}
+	digestBytes := sha256.Sum256([]byte("d2VsY29tZQ=="))
 	hub.handleMLSGroupWelcome(MLSGroupWelcomeRequest{Sender: alice, GroupID: "strict", Room: defaultRoomName,
-		Epoch: 1, TargetCode: bob.UserCode, Welcome: "d2VsY29tZQ==", CommandID: "w1"})
+		Epoch: 1, ProposalID: "p1", WelcomeDigest: hex.EncodeToString(digestBytes[:]), TargetCode: bob.UserCode, Welcome: "d2VsY29tZQ==", CommandID: "w1"})
 	if got := <-bob.Send; got.Type != "mls.group.welcome" {
 		t.Fatalf("welcome=%+v", got)
 	}
@@ -203,8 +228,27 @@ func TestHubMLSAuthoritativeMembershipSnapshotAndWelcomeActivation(t *testing.T)
 		t.Fatalf("welcome ack=%+v", got)
 	}
 	members, err := hub.OfflineStore.MLSGroupMembers("strict")
+	if err != nil || len(members) != 1 {
+		t.Fatalf("pending-welcome members=%v err=%v", members, err)
+	}
+	hub.handleMLSGroupWelcomeAccept(MLSGroupWelcomeAcceptRequest{Sender: bob, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 1, ProposalID: "p1", TargetCode: bob.UserCode, WelcomeDigest: "tampered", CommandID: "wa-tampered"})
+	if got := <-bob.Send; got.Type != "error" || got.Content != "MLS welcome accept conflict" {
+		t.Fatalf("tampered welcome accept=%+v", got)
+	}
+	hub.handleMLSGroupWelcomeAccept(MLSGroupWelcomeAcceptRequest{Sender: bob, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 1, ProposalID: "p1", TargetCode: bob.UserCode, WelcomeDigest: hex.EncodeToString(digestBytes[:]), CommandID: "wa1"})
+	if got := <-bob.Send; got.Type != "mls.group.welcome.accept" || got.Content != "activated" {
+		t.Fatalf("welcome accept=%+v", got)
+	}
+	members, err = hub.OfflineStore.MLSGroupMembers("strict")
 	if err != nil || len(members) != 2 {
-		t.Fatalf("post-welcome members=%v err=%v", members, err)
+		t.Fatalf("post-accept members=%v err=%v", members, err)
+	}
+	hub.handleMLSGroupWelcomeAccept(MLSGroupWelcomeAcceptRequest{Sender: bob, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 1, ProposalID: "p1", TargetCode: bob.UserCode, WelcomeDigest: hex.EncodeToString(digestBytes[:]), CommandID: "wa-duplicate"})
+	if got := <-bob.Send; got.Type != "mls.group.welcome.accept" || got.Content != "duplicate" {
+		t.Fatalf("duplicate welcome accept=%+v", got)
 	}
 	hub.handleMLSGroupProposal(MLSGroupProposalRequest{Sender: carol, GroupID: "strict", Room: defaultRoomName,
 		Epoch: 2, ProposalID: "unauthorized-proposal", Action: "add", TargetCode: carol.UserCode,
@@ -217,6 +261,25 @@ func TestHubMLSAuthoritativeMembershipSnapshotAndWelcomeActivation(t *testing.T)
 		Epoch: 2, ProposalID: "p1", Commit: "bm8=", CommandID: "unauthorized"})
 	if got := <-carol.Send; got.Type != "error" || got.Content != "MLS group commit access denied" {
 		t.Fatalf("unauthorized commit=%+v", got)
+	}
+	// A fully removed group remains in strict mode and cannot be revived by a
+	// legacy-looking welcome. A new group id and creator proposal are required.
+	hub.handleMLSGroupProposal(MLSGroupProposalRequest{Sender: alice, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 2, ProposalID: "remove-bob", Action: "remove", TargetCode: bob.UserCode,
+		Proposal: "cmVtb3Zl", CommandID: "remove-proposal"})
+	if got := <-alice.Send; got.Content != "stored" {
+		t.Fatalf("remove proposal=%+v", got)
+	}
+	hub.handleMLSGroupCommit(MLSGroupCommitRequest{Sender: alice, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 2, ProposalID: "remove-bob", Commit: "cmVtb3ZlLWNvbW1pdA==", CommandID: "remove-commit"})
+	if got := <-alice.Send; got.Content != "stored" {
+		t.Fatalf("remove commit=%+v", got)
+	}
+	hub.handleMLSGroupWelcome(MLSGroupWelcomeRequest{Sender: alice, GroupID: "strict", Room: defaultRoomName,
+		Epoch: 3, ProposalID: "legacy", WelcomeDigest: "invalid", TargetCode: bob.UserCode,
+		Welcome: "bGVnYWN5", CommandID: "revive"})
+	if got := <-alice.Send; got.Type != "error" {
+		t.Fatalf("revived group welcome=%+v", got)
 	}
 }
 

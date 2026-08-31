@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"log"
 	"net"
@@ -85,13 +87,26 @@ type MLSGroupProposalRequest struct {
 }
 
 type MLSGroupWelcomeRequest struct {
-	Sender     *Client
-	GroupID    string
-	Room       string
-	Epoch      uint64
-	TargetCode string
-	Welcome    string
-	CommandID  string
+	Sender        *Client
+	GroupID       string
+	Room          string
+	Epoch         uint64
+	ProposalID    string
+	WelcomeDigest string
+	TargetCode    string
+	Welcome       string
+	CommandID     string
+}
+
+type MLSGroupWelcomeAcceptRequest struct {
+	Sender        *Client
+	GroupID       string
+	Room          string
+	Epoch         uint64
+	ProposalID    string
+	WelcomeDigest string
+	TargetCode    string
+	CommandID     string
 }
 
 type RoomRequest struct {
@@ -263,6 +278,7 @@ type Hub struct {
 	MLSGroupCommit             chan MLSGroupCommitRequest
 	MLSGroupProposal           chan MLSGroupProposalRequest
 	MLSGroupWelcome            chan MLSGroupWelcomeRequest
+	MLSGroupWelcomeAccept      chan MLSGroupWelcomeAcceptRequest
 	RoomJoin                   chan RoomRequest
 	RoomCreate                 chan RoomCreateRequest
 	RoomAction                 chan RoomActionRequest
@@ -301,6 +317,7 @@ func NewHub() *Hub {
 		MLSGroupCommit:           make(chan MLSGroupCommitRequest),
 		MLSGroupProposal:         make(chan MLSGroupProposalRequest),
 		MLSGroupWelcome:          make(chan MLSGroupWelcomeRequest),
+		MLSGroupWelcomeAccept:    make(chan MLSGroupWelcomeAcceptRequest),
 		RoomJoin:                 make(chan RoomRequest),
 		RoomCreate:               make(chan RoomCreateRequest),
 		RoomAction:               make(chan RoomActionRequest),
@@ -372,6 +389,8 @@ func (h *Hub) Run() {
 
 		case request := <-h.MLSGroupWelcome:
 			h.handleMLSGroupWelcome(request)
+		case request := <-h.MLSGroupWelcomeAccept:
+			h.handleMLSGroupWelcomeAccept(request)
 
 		case request := <-h.RoomJoin:
 			h.handleRoomJoin(request)
@@ -1485,13 +1504,15 @@ func (h *Hub) handleMLSGroupWelcome(request MLSGroupWelcomeRequest) {
 	if room == "" {
 		room = sender.Room
 	}
-	if members, memberErr := h.OfflineStore.MLSGroupMembers(request.GroupID); memberErr == nil && len(members) > 0 {
+	if hasState, memberErr := h.OfflineStore.MLSGroupHasControlState(request.GroupID); memberErr == nil && hasState {
 		targetCode, targetErr := normalizeUserCode(request.TargetCode)
-		if targetErr != nil || !h.canAccessMLSRoom(sender, targetCode, room) {
+		digestBytes := sha256.Sum256([]byte(request.Welcome))
+		expectedDigest := hex.EncodeToString(digestBytes[:])
+		if targetErr != nil || request.ProposalID == "" || !strings.EqualFold(request.WelcomeDigest, expectedDigest) || !h.canAccessMLSRoom(sender, targetCode, room) {
 			h.deliverError(sender, "MLS group welcome access denied", "", request.CommandID)
 			return
 		}
-		inserted, err := h.OfflineStore.SaveMLSWelcomeForMember(request.GroupID, room, sender.NormalizedCode, request.Epoch, targetCode, request.Welcome)
+		inserted, err := h.OfflineStore.SaveMLSWelcomeForMember(request.GroupID, room, sender.NormalizedCode, request.Epoch, targetCode, request.ProposalID, request.Welcome)
 		if err != nil {
 			content := "Invalid MLS group welcome"
 			if errors.Is(err, ErrMLSGroupMemberRequired) {
@@ -1506,16 +1527,16 @@ func (h *Hub) handleMLSGroupWelcome(request MLSGroupWelcomeRequest) {
 			h.deliverError(sender, content, "", request.CommandID)
 			return
 		}
-		if inserted {
-			if target := h.ActiveCodes[targetCode]; target != nil {
-				h.deliver(target, Message{Type: "mls.group.welcome", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, TargetUserCode: targetCode, Welcome: request.Welcome})
-			}
+		if target := h.ActiveCodes[targetCode]; target != nil {
+			// Redeliver an identical pending welcome so a reconnect can complete
+			// it; activation still requires the target's matching accept.
+			h.deliver(target, Message{Type: "mls.group.welcome", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, ProposalID: request.ProposalID, WelcomeDigest: expectedDigest, TargetUserCode: targetCode, Welcome: request.Welcome})
 		}
 		content := "stored"
 		if !inserted {
 			content = "duplicate"
 		}
-		h.deliver(sender, Message{Type: "mls.group.welcome", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, TargetUserCode: targetCode, Content: content, CommandID: request.CommandID})
+		h.deliver(sender, Message{Type: "mls.group.welcome", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, ProposalID: request.ProposalID, WelcomeDigest: request.WelcomeDigest, TargetUserCode: targetCode, Content: content, CommandID: request.CommandID})
 		return
 	}
 	if !h.canAccessMLSRoom(sender, targetCode, room) || !h.Rooms[room][sender] {
@@ -1541,6 +1562,39 @@ func (h *Hub) handleMLSGroupWelcome(request MLSGroupWelcomeRequest) {
 	}
 	h.deliver(sender, Message{Type: "mls.group.welcome", GroupID: request.GroupID,
 		Room: room, Epoch: request.Epoch, TargetUserCode: targetCode, Content: content, CommandID: request.CommandID})
+}
+
+func (h *Hub) handleMLSGroupWelcomeAccept(request MLSGroupWelcomeAcceptRequest) {
+	sender := request.Sender
+	if sender == nil || !h.Clients[sender] || h.OfflineStore == nil {
+		if sender != nil {
+			h.deliverError(sender, "MLS group service unavailable", "", request.CommandID)
+		}
+		return
+	}
+	room := request.Room
+	if room == "" {
+		room = sender.Room
+	}
+	target, err := normalizeUserCode(request.TargetCode)
+	if err != nil || target != sender.NormalizedCode {
+		h.deliverError(sender, "MLS welcome accept identity denied", "", request.CommandID)
+		return
+	}
+	accepted, err := h.OfflineStore.AcceptMLSWelcomeForMember(request.GroupID, room, target, request.Epoch, request.ProposalID, request.WelcomeDigest)
+	if err != nil {
+		content := "Invalid MLS welcome accept"
+		if errors.Is(err, ErrMLSWelcomeConflict) {
+			content = "MLS welcome accept conflict"
+		}
+		h.deliverError(sender, content, "", request.CommandID)
+		return
+	}
+	content := "activated"
+	if !accepted {
+		content = "duplicate"
+	}
+	h.deliver(sender, Message{Type: "mls.group.welcome.accept", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, ProposalID: request.ProposalID, WelcomeDigest: request.WelcomeDigest, Content: content, CommandID: request.CommandID})
 }
 
 func (h *Hub) deliverRecall(record MessageRecord, message Message) {

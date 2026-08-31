@@ -80,6 +80,7 @@ struct Message {
     std::string proposal;
     std::string commit;
     std::string welcome;
+    std::string welcome_digest;
 };
 
 bool send_message(SOCKET socket_handle, const Message& message);

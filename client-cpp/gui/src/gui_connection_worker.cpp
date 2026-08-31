@@ -8,6 +8,7 @@
 #include <limits>
 #include <stdexcept>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -788,6 +789,24 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
             const QString groupId = QString::fromStdString(incoming.group_id);
             const QString room = QString::fromStdString(incoming.room);
             const QByteArray welcome = QByteArray::fromStdString(incoming.welcome);
+            if (!incoming.target_user_code.empty() &&
+                QString::fromStdString(incoming.target_user_code).compare(savedConnection_.userCode, Qt::CaseInsensitive) != 0) {
+                emit mlsCommandResult({}, false, QStringLiteral("mls_welcome_target_mismatch"),
+                                      QStringLiteral("MLS welcome is addressed to another member"));
+                return;
+            }
+            const auto sendWelcomeAccept = [&]() {
+                if (incoming.proposal_id.empty() || incoming.welcome.empty()) return false;
+                message::Message accept{"mls.group.welcome.accept", "", savedConnection_.username.toStdString(), "", {},
+                                        savedConnection_.userCode.toStdString(), room.toStdString(), {}, ""};
+                accept.protocol_version = "mls-v1";
+                accept.group_id = incoming.group_id;
+                accept.epoch = incoming.epoch;
+                accept.proposal_id = incoming.proposal_id;
+                accept.welcome_digest = QCryptographicHash::hash(welcome, QCryptographicHash::Sha256).toHex().toStdString();
+                accept.command_id = QStringLiteral("welcome-accept-%1-%2").arg(groupId).arg(incoming.epoch).toStdString();
+                return connection_ && connection_->send(accept);
+            };
             auto groupIt = mlsGroups_.find(groupId);
             if (groupIt != mlsGroups_.end()) {
                 if (groupIt->second.room != room) {
@@ -796,7 +815,10 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
                     return;
                 }
                 const auto old = groupIt->second.welcomes.find(incoming.epoch);
-                if (old != groupIt->second.welcomes.end() && old->second == welcome) return;
+                if (old != groupIt->second.welcomes.end() && old->second == welcome) {
+                    sendWelcomeAccept();
+                    return;
+                }
                 if (incoming.epoch <= groupIt->second.epoch) {
                     emit mlsCommandResult({}, false, QStringLiteral("mls_epoch_conflict"),
                                           QStringLiteral("MLS welcome epoch is not strictly increasing"));
@@ -820,6 +842,10 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
                 state.epoch = incoming.epoch;
                 state.welcomes.emplace(incoming.epoch, welcome);
                 mlsGroups_.emplace(groupId, std::move(state));
+                if (!sendWelcomeAccept()) {
+                    emit mlsCommandResult({}, false, QStringLiteral("send_failed"), QString::fromStdString(connection_->last_error()));
+                    return;
+                }
                 // Key packages are single-use. Rotate the pending client so
                 // a later group invitation has a fresh package without
                 // disturbing the newly-created group's session.
@@ -873,6 +899,8 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
                     welcome.protocol_version = "mls-v1";
                     welcome.group_id = operation.group.toStdString();
                     welcome.epoch = operation.epoch;
+                    welcome.proposal_id = commandId.toStdString();
+                    welcome.welcome_digest = QCryptographicHash::hash(operation.welcome, QCryptographicHash::Sha256).toHex().toStdString();
                     welcome.welcome = operation.welcome.toStdString();
                     welcome.command_id = commandId.toStdString();
                     operation.phase = PendingMlsOperation::Phase::Welcome;
