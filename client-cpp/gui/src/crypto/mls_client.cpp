@@ -54,7 +54,7 @@ void MlsClient::handleProposal(const MLS_NAMESPACE::bytes_ns::bytes& proposal)
   session_->handle(proposal);
 }
 
-void MlsClient::removeMember(const MLS_NAMESPACE::bytes_ns::bytes& identity)
+MLS_NAMESPACE::bytes_ns::bytes MlsClient::removeMember(const MLS_NAMESPACE::bytes_ns::bytes& identity)
 {
   if (!session_) {
     throw std::logic_error("MLS client has no group session");
@@ -68,7 +68,7 @@ void MlsClient::removeMember(const MLS_NAMESPACE::bytes_ns::bytes& identity)
     if (credential.get<MLS_NAMESPACE::BasicCredential>().identity == identity) {
       const auto proposal = session_->remove(index);
       session_->handle(proposal);
-      return;
+      return proposal;
     }
   }
   throw std::invalid_argument("MLS member identity was not found");

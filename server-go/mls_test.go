@@ -71,6 +71,79 @@ func TestHubMLSCommitRoutesIdempotentAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestHubMLSProposalRoutesToExistingMembersBeforeCommit(t *testing.T) {
+	hub, alice, bob := setupMLSHub(t)
+	carol := newTestClient(t, "Carol", "Carol01")
+	carol.Room = defaultRoomName
+	hub.Clients[carol] = true
+	hub.ActiveCodes[carol.NormalizedCode] = carol
+	hub.RoomDefinitions[defaultRoomName].Allowed[carol.NormalizedCode] = true
+	proposal := MLSGroupProposalRequest{Sender: alice, GroupID: "g", Room: defaultRoomName, Epoch: 1,
+		ProposalID: "p1", Proposal: "cHJvcG9zYWw=", CommandID: "p-cmd"}
+	hub.handleMLSGroupProposal(proposal)
+	if got := <-alice.Send; got.Type != "mls.group.proposal" || got.Content != "stored" || got.CommandID != "p-cmd" {
+		t.Fatalf("proposal acknowledgement = %+v", got)
+	}
+	if got := <-bob.Send; got.Type != "mls.group.proposal" || got.Proposal != proposal.Proposal || got.ProposalID != proposal.ProposalID {
+		t.Fatalf("proposal broadcast = %+v", got)
+	}
+	proposal.CommandID = "p-duplicate"
+	hub.handleMLSGroupProposal(proposal)
+	if got := <-alice.Send; got.Content != "duplicate" {
+		t.Fatalf("duplicate proposal acknowledgement = %+v", got)
+	}
+	select {
+	case got := <-bob.Send:
+		t.Fatalf("duplicate proposal was rebroadcast: %+v", got)
+	default:
+	}
+	proposal.CommandID = "p-conflict"
+	proposal.Proposal = "b3RoZXI="
+	hub.handleMLSGroupProposal(proposal)
+	if got := <-alice.Send; got.Type != "error" || got.Content != "MLS group proposal conflict" {
+		t.Fatalf("conflicting proposal response = %+v", got)
+	}
+	commit := MLSGroupCommitRequest{Sender: alice, GroupID: "g", Room: defaultRoomName, Epoch: 1,
+		Commit: "Y29tbWl0", CommandID: "c-cmd"}
+	hub.handleMLSGroupCommit(commit)
+	if got := <-alice.Send; got.Type != "mls.group.commit" || got.Content != "stored" || got.CommandID != "c-cmd" {
+		t.Fatalf("commit acknowledgement = %+v", got)
+	}
+	if got := <-bob.Send; got.Type != "mls.group.commit" || got.Commit != commit.Commit {
+		t.Fatalf("commit broadcast = %+v", got)
+	}
+	hub.handleMLSGroupWelcome(MLSGroupWelcomeRequest{Sender: alice, GroupID: "g", Room: defaultRoomName,
+		Epoch: 1, TargetCode: carol.UserCode, Welcome: "d2VsY29tZQ==", CommandID: "w1"})
+	if got := <-carol.Send; got.Type != "mls.group.welcome" || got.Welcome != "d2VsY29tZQ==" {
+		t.Fatalf("welcome delivery after commit = %+v", got)
+	}
+	if got := <-alice.Send; got.Type != "mls.group.welcome" || got.Content != "stored" || got.CommandID != "w1" {
+		t.Fatalf("welcome acknowledgement = %+v", got)
+	}
+	commit.CommandID = "c-duplicate"
+	hub.handleMLSGroupCommit(commit)
+	if got := <-alice.Send; got.Content != "duplicate" {
+		t.Fatalf("duplicate commit acknowledgement = %+v", got)
+	}
+	select {
+	case got := <-bob.Send:
+		t.Fatalf("duplicate commit was rebroadcast: %+v", got)
+	default:
+	}
+}
+
+func TestHubMLSProposalRequiresExistingRoomMember(t *testing.T) {
+	hub, _, _ := setupMLSHub(t)
+	outsider := newTestClient(t, "Outsider", "Outsider01")
+	hub.Clients[outsider] = true
+	outsider.Room = defaultRoomName
+	hub.handleMLSGroupProposal(MLSGroupProposalRequest{Sender: outsider, GroupID: "g", Room: defaultRoomName,
+		Epoch: 1, ProposalID: "p1", Proposal: "cHJvcG9zYWw=", CommandID: "p1"})
+	if got := <-outsider.Send; got.Type != "error" || got.Content != "MLS group proposal access denied" {
+		t.Fatalf("unauthorized proposal response = %+v", got)
+	}
+}
+
 func TestMLSControlTraversesReadAndWritePumps(t *testing.T) {
 	hub := NewHub()
 	store, _ := newTestAuthStore(t)
@@ -100,5 +173,16 @@ func TestMLSControlTraversesReadAndWritePumps(t *testing.T) {
 	}
 	if response.Type != "mls.key_package.publish" || response.Content != "stored" || response.CommandID != "kp1" {
 		t.Fatalf("MLS publish response = %+v", response)
+	}
+	if err := sendMessage(clientConn, Message{Type: "mls.group.proposal", CommandID: "proposal1",
+		GroupID: "group1", Room: defaultRoomName, Epoch: 1, ProposalID: "proposal1", Proposal: "cHJvcG9zYWw="}); err != nil {
+		t.Fatal(err)
+	}
+	response, err = receiveMessage(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Type != "mls.group.proposal" || response.Content != "stored" || response.CommandID != "proposal1" {
+		t.Fatalf("MLS proposal response = %+v", response)
 	}
 }

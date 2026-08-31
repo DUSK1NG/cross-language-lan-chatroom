@@ -15,11 +15,18 @@ func TestValidateMLSControlMessages(t *testing.T) {
 		{Type: "mls.key_package.publish", KeyPackage: encoded},
 		{Type: "mls.key_package.fetch", TargetUserCode: "Bob01", Room: "lobby"},
 		{Type: "mls.group.commit", GroupID: "room-group", Room: "lobby", Commit: encoded},
+		{Type: "mls.group.proposal", GroupID: "room-group", Room: "lobby", ProposalID: "p1", Epoch: 1, Proposal: encoded},
 		{Type: "mls.group.welcome", GroupID: "room-group", Room: "lobby", TargetUserCode: "Bob01", Welcome: encoded},
 	} {
 		if err := validateMessage(message); err != nil {
 			t.Fatalf("valid MLS message %+v rejected: %v", message, err)
 		}
+	}
+}
+
+func TestValidateMLSProposalRejectsMalformedOpaqueData(t *testing.T) {
+	if err := validateMessage(Message{Type: "mls.group.proposal", GroupID: "g", Room: "lobby", ProposalID: "p1", Epoch: 1, Proposal: "not base64"}); err == nil {
+		t.Fatal("malformed proposal was accepted")
 	}
 }
 

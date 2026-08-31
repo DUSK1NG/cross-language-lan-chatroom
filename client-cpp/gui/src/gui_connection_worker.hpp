@@ -132,9 +132,20 @@ private:
         std::map<quint64, QByteArray> commits;
         std::map<quint64, QByteArray> welcomes;
     };
+    struct PendingMlsOperation {
+        enum class Phase { Proposal, Commit, Welcome } phase = Phase::Proposal;
+        QString room;
+        QString group;
+        QString target;
+        quint64 epoch = 0;
+        QByteArray commit;
+        QByteArray welcome;
+        bool add = false;
+    };
     std::shared_ptr<MlsClient> mlsClient_;
     std::map<QString, QByteArray> mlsKeyPackages_;
     std::map<QString, MlsGroupState> mlsGroups_;
+    std::map<QString, PendingMlsOperation> pendingMlsOperations_;
     QSet<QString> pendingMlsCommands_;
 #endif
 };

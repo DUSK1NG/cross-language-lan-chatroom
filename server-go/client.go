@@ -296,6 +296,16 @@ func (c *Client) readPump(hub *Hub) {
 			hub.MLSGroupCommit <- MLSGroupCommitRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
 				Epoch: message.Epoch, Commit: message.Commit, CommandID: message.CommandID}
 
+		case "mls.group.proposal":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid MLS group proposal"}) {
+					return
+				}
+				continue
+			}
+			hub.MLSGroupProposal <- MLSGroupProposalRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
+				Epoch: message.Epoch, ProposalID: message.ProposalID, Proposal: message.Proposal, CommandID: message.CommandID}
+
 		case "mls.group.welcome":
 			if err := validateMessage(message); err != nil {
 				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid MLS group welcome"}) {

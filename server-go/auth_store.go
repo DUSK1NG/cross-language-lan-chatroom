@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -23,6 +26,7 @@ var ErrAccountAlreadyExists = errors.New("account already exists")
 var ErrMLSCommitConflict = errors.New("MLS commit conflicts with existing epoch")
 var ErrMLSEpochRollback = errors.New("MLS commit epoch rolls back current group epoch")
 var ErrMLSWelcomeConflict = errors.New("MLS welcome conflicts with existing target")
+var ErrMLSProposalConflict = errors.New("MLS proposal conflicts with existing proposal")
 
 func nullableCrypto(value json.RawMessage) any {
 	if len(value) == 0 {
@@ -147,6 +151,16 @@ CREATE TABLE IF NOT EXISTS mls_group_epochs (
     commit_data TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY(group_id, epoch)
+);
+CREATE TABLE IF NOT EXISTS mls_group_proposals (
+    group_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL,
+    proposal_id TEXT NOT NULL,
+    proposal_data TEXT NOT NULL,
+    proposal_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(group_id, epoch, proposal_id),
+    UNIQUE(group_id, epoch, proposal_digest)
 );
 CREATE TABLE IF NOT EXISTS mls_group_welcomes (
     group_id TEXT NOT NULL,
@@ -284,6 +298,87 @@ func (s *AuthStore) SaveMLSCommit(groupID, room string, epoch uint64, commit str
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit MLS commit: %w", err)
+	}
+	return true, nil
+}
+
+// SaveMLSProposal stores an opaque proposal and enforces idempotency by both
+// caller proposal id and payload digest. It deliberately does not advance the
+// group's epoch; only a committed handshake advances group state.
+func (s *AuthStore) SaveMLSProposal(groupID, room string, epoch uint64, proposalID, proposal string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("auth store is not initialized")
+	}
+	if err := validateMLSGroupID(groupID); err != nil {
+		return false, err
+	}
+	if room != "" {
+		if err := validateRoomName(room); err != nil {
+			return false, err
+		}
+	}
+	if proposalID == "" || !utf8.ValidString(proposalID) || len([]byte(proposalID)) > maxMessageSize {
+		return false, errors.New("MLS proposal id must be valid and no longer than message limit")
+	}
+	if err := validateOpaqueMLS("MLS group proposal", proposal); err != nil {
+		return false, err
+	}
+	epochValue, err := mlsEpochValue(epoch)
+	if err != nil {
+		return false, err
+	}
+	digestBytes := sha256.Sum256([]byte(proposal))
+	digest := hex.EncodeToString(digestBytes[:])
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("begin MLS proposal: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existingData string
+	err = tx.QueryRow(`SELECT proposal_data FROM mls_group_proposals WHERE group_id = ? AND epoch = ? AND proposal_id = ?`, groupID, epochValue, proposalID).Scan(&existingData)
+	if err == nil {
+		if existingData != proposal {
+			return false, ErrMLSProposalConflict
+		}
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("query MLS proposal: %w", err)
+	}
+	var existingDigest string
+	err = tx.QueryRow(`SELECT proposal_digest FROM mls_group_proposals WHERE group_id = ? AND epoch = ? AND proposal_digest = ?`, groupID, epochValue, digest).Scan(&existingDigest)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("query MLS proposal digest: %w", err)
+	}
+	var currentEpoch int64
+	var existingRoom string
+	err = tx.QueryRow(`SELECT room, current_epoch FROM mls_groups WHERE group_id = ?`, groupID).Scan(&existingRoom, &currentEpoch)
+	groupExists := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("query MLS group for proposal: %w", err)
+	}
+	if groupExists {
+		if room != "" && existingRoom != "" && room != existingRoom {
+			return false, ErrMLSProposalConflict
+		}
+		if epochValue < currentEpoch {
+			return false, ErrMLSEpochRollback
+		}
+	} else if _, err := tx.Exec(`INSERT INTO mls_groups(group_id, room, current_epoch) VALUES (?, ?, -1)`, groupID, room); err != nil {
+		return false, fmt.Errorf("create MLS group for proposal: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO mls_group_proposals(group_id, epoch, proposal_id, proposal_data, proposal_digest, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		groupID, epochValue, proposalID, proposal, digest, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return false, fmt.Errorf("save MLS proposal: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE mls_groups SET room = CASE WHEN room = '' THEN ? ELSE room END WHERE group_id = ?`, room, groupID); err != nil {
+		return false, fmt.Errorf("update MLS group for proposal: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit MLS proposal: %w", err)
 	}
 	return true, nil
 }

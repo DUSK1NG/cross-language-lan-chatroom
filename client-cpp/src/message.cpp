@@ -74,6 +74,8 @@ nlohmann::json serialize(const Message& message) {
     if (!message.group_id.empty()) object["group_id"] = message.group_id;
     if (message.epoch != 0) object["epoch"] = message.epoch;
     if (!message.key_package.empty()) object["key_package"] = message.key_package;
+    if (!message.proposal_id.empty()) object["proposal_id"] = message.proposal_id;
+    if (!message.proposal.empty()) object["proposal"] = message.proposal;
     if (!message.commit.empty()) object["commit"] = message.commit;
     if (!message.welcome.empty()) object["welcome"] = message.welcome;
     if (!message.messages.empty()) {
@@ -120,6 +122,8 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("content", parsed.content) ||
             !read_string("group_id", parsed.group_id) ||
             !read_string("key_package", parsed.key_package) ||
+            !read_string("proposal_id", parsed.proposal_id) ||
+            !read_string("proposal", parsed.proposal) ||
             !read_string("commit", parsed.commit) ||
             !read_string("welcome", parsed.welcome) ||
             !read_string("created_at", parsed.created_at) ||
@@ -293,6 +297,10 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
         }
         if (parsed.type == "mls.group.commit" && !parsed.commit.empty() && !is_base64(parsed.commit)) {
             set_error("commit is not base64");
+            return false;
+        }
+        if (parsed.type == "mls.group.proposal" && !parsed.proposal.empty() && !is_base64(parsed.proposal)) {
+            set_error("proposal is not base64");
             return false;
         }
         if (parsed.type == "mls.group.welcome" && !parsed.welcome.empty() && !is_base64(parsed.welcome)) {

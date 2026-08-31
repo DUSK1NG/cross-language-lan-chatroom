@@ -71,6 +71,16 @@ type MLSGroupCommitRequest struct {
 	CommandID string
 }
 
+type MLSGroupProposalRequest struct {
+	Sender     *Client
+	GroupID    string
+	Room       string
+	Epoch      uint64
+	ProposalID string
+	Proposal   string
+	CommandID  string
+}
+
 type MLSGroupWelcomeRequest struct {
 	Sender     *Client
 	GroupID    string
@@ -248,6 +258,7 @@ type Hub struct {
 	MLSKeyPackagePublish       chan MLSKeyPackagePublishRequest
 	MLSKeyPackageFetch         chan MLSKeyPackageFetchRequest
 	MLSGroupCommit             chan MLSGroupCommitRequest
+	MLSGroupProposal           chan MLSGroupProposalRequest
 	MLSGroupWelcome            chan MLSGroupWelcomeRequest
 	RoomJoin                   chan RoomRequest
 	RoomCreate                 chan RoomCreateRequest
@@ -285,6 +296,7 @@ func NewHub() *Hub {
 		MLSKeyPackagePublish:     make(chan MLSKeyPackagePublishRequest),
 		MLSKeyPackageFetch:       make(chan MLSKeyPackageFetchRequest),
 		MLSGroupCommit:           make(chan MLSGroupCommitRequest),
+		MLSGroupProposal:         make(chan MLSGroupProposalRequest),
 		MLSGroupWelcome:          make(chan MLSGroupWelcomeRequest),
 		RoomJoin:                 make(chan RoomRequest),
 		RoomCreate:               make(chan RoomCreateRequest),
@@ -351,6 +363,9 @@ func (h *Hub) Run() {
 
 		case request := <-h.MLSGroupCommit:
 			h.handleMLSGroupCommit(request)
+
+		case request := <-h.MLSGroupProposal:
+			h.handleMLSGroupProposal(request)
 
 		case request := <-h.MLSGroupWelcome:
 			h.handleMLSGroupWelcome(request)
@@ -1310,8 +1325,65 @@ func (h *Hub) handleMLSGroupCommit(request MLSGroupCommitRequest) {
 	if !inserted {
 		content = "duplicate"
 	}
+	// Snapshot the pre-commit room members and relay newly stored opaque commits
+	// to every existing peer. The sender receives only the command acknowledgement
+	// so a locally applied commit cannot be handled twice; duplicate retries do
+	// not rebroadcast a second handshake.
+	if inserted {
+		for member := range h.Rooms[room] {
+			if member != sender && h.Clients[member] {
+				h.deliver(member, Message{Type: "mls.group.commit", GroupID: request.GroupID,
+					Room: room, Epoch: request.Epoch, Commit: request.Commit})
+			}
+		}
+	}
 	h.deliver(sender, Message{Type: "mls.group.commit", GroupID: request.GroupID,
 		Room: room, Epoch: request.Epoch, Content: content, CommandID: request.CommandID})
+}
+
+func (h *Hub) handleMLSGroupProposal(request MLSGroupProposalRequest) {
+	sender := request.Sender
+	if sender == nil || !h.Clients[sender] || h.OfflineStore == nil {
+		if sender != nil {
+			h.deliverError(sender, "MLS group service unavailable", "", request.CommandID)
+		}
+		return
+	}
+	room := request.Room
+	if room == "" {
+		room = sender.Room
+	}
+	if !h.canAccessMLSRoom(sender, sender.NormalizedCode, room) || !h.Rooms[room][sender] {
+		h.deliverError(sender, "MLS group proposal access denied", "", request.CommandID)
+		return
+	}
+	inserted, err := h.OfflineStore.SaveMLSProposal(request.GroupID, room, request.Epoch, request.ProposalID, request.Proposal)
+	if err != nil {
+		content := "Invalid MLS group proposal"
+		if errors.Is(err, ErrMLSEpochRollback) {
+			content = "MLS group proposal epoch rollback"
+		} else if errors.Is(err, ErrMLSProposalConflict) {
+			content = "MLS group proposal conflict"
+		}
+		h.deliverError(sender, content, "", request.CommandID)
+		return
+	}
+	if inserted {
+		// Existing members only: an add target is not a room member yet and must
+		// receive the welcome after the corresponding commit has propagated.
+		for member := range h.Rooms[room] {
+			if member != sender && h.Clients[member] {
+				h.deliver(member, Message{Type: "mls.group.proposal", GroupID: request.GroupID,
+					Room: room, Epoch: request.Epoch, ProposalID: request.ProposalID, Proposal: request.Proposal})
+			}
+		}
+	}
+	content := "stored"
+	if !inserted {
+		content = "duplicate"
+	}
+	h.deliver(sender, Message{Type: "mls.group.proposal", GroupID: request.GroupID,
+		Room: room, Epoch: request.Epoch, ProposalID: request.ProposalID, Content: content, CommandID: request.CommandID})
 }
 
 func (h *Hub) handleMLSGroupWelcome(request MLSGroupWelcomeRequest) {

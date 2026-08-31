@@ -58,6 +58,30 @@ func TestAuthStoreMLSWelcomeIsOpaqueAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestAuthStoreMLSProposalIsIdempotentAndRejectsConflicts(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	inserted, err := store.SaveMLSProposal("group-1", "lobby", 2, "proposal-1", "cHJvcG9zYWw=")
+	if err != nil || !inserted {
+		t.Fatalf("first proposal inserted=%t err=%v", inserted, err)
+	}
+	inserted, err = store.SaveMLSProposal("group-1", "lobby", 2, "proposal-1", "cHJvcG9zYWw=")
+	if err != nil || inserted {
+		t.Fatalf("duplicate proposal inserted=%t err=%v", inserted, err)
+	}
+	if _, err := store.SaveMLSProposal("group-1", "lobby", 2, "proposal-1", "b3RoZXI="); !errors.Is(err, ErrMLSProposalConflict) {
+		t.Fatalf("conflicting proposal error = %v", err)
+	}
+	if _, err := store.SaveMLSProposal("group-1", "lobby", 2, "proposal-2", "cHJvcG9zYWw="); err != nil {
+		t.Fatalf("same-content proposal should be idempotent: %v", err)
+	}
+	if _, err := store.SaveMLSCommit("group-1", "lobby", 2, "Y29tbWl0"); err != nil {
+		t.Fatalf("commit after proposal: %v", err)
+	}
+	if _, err := store.SaveMLSProposal("group-1", "lobby", 1, "proposal-old", "b2xk"); !errors.Is(err, ErrMLSEpochRollback) {
+		t.Fatalf("proposal rollback error = %v", err)
+	}
+}
+
 func TestAuthStorePersistsOpaqueCryptoEnvelope(t *testing.T) {
 	store, _ := newTestAuthStore(t)
 	want := json.RawMessage(`{"v":1,"alg":"xchacha20poly1305","ct":"opaque"}`)

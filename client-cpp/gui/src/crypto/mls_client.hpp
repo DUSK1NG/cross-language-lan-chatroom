@@ -16,7 +16,7 @@ public:
   void createGroup(const MLS_NAMESPACE::bytes_ns::bytes& groupId);
   MLS_NAMESPACE::bytes_ns::bytes addMember(const MLS_NAMESPACE::bytes_ns::bytes& keyPackage);
   void handleProposal(const MLS_NAMESPACE::bytes_ns::bytes& proposal);
-  void removeMember(const MLS_NAMESPACE::bytes_ns::bytes& identity);
+  MLS_NAMESPACE::bytes_ns::bytes removeMember(const MLS_NAMESPACE::bytes_ns::bytes& identity);
   Commit commit();
   void handleCommit(const MLS_NAMESPACE::bytes_ns::bytes& handshake);
   void join(const MLS_NAMESPACE::bytes_ns::bytes& welcome);
