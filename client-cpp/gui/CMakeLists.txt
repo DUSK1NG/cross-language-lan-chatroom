@@ -768,7 +768,12 @@ set_tests_properties(
 if(LAN_CHAT_ENABLE_WEB_UI)
     find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineWidgets WebChannel)
 
-    set(FRONTEND_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../frontend/dist")
+    set(LAN_CHAT_FRONTEND_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../frontend/dist" CACHE PATH
+        "Absolute React release dist directory")
+    if(NOT IS_ABSOLUTE "${LAN_CHAT_FRONTEND_DIST_DIR}")
+        message(FATAL_ERROR "LAN_CHAT_FRONTEND_DIST_DIR must be an absolute path: ${LAN_CHAT_FRONTEND_DIST_DIR}")
+    endif()
+    set(FRONTEND_DIST_DIR "${LAN_CHAT_FRONTEND_DIST_DIR}")
     if(NOT EXISTS "${FRONTEND_DIST_DIR}/index.html")
         message(FATAL_ERROR "React release UI is missing: ${FRONTEND_DIST_DIR}/index.html")
     endif()
