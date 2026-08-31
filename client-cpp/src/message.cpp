@@ -3,6 +3,7 @@
 #include "json.hpp"
 
 #include <utility>
+#include <cstdint>
 
 namespace message {
 namespace {
@@ -13,8 +14,27 @@ void set_error(const std::string& error) {
     g_last_error = error;
 }
 
+bool is_base64(const std::string& value) {
+    if (value.empty() || value.size() % 4 != 0) return false;
+    std::size_t padding = 0;
+    for (std::size_t index = 0; index < value.size(); ++index) {
+        const char character = value[index];
+        const bool alphabet = (character >= 'A' && character <= 'Z') ||
+                              (character >= 'a' && character <= 'z') ||
+                              (character >= '0' && character <= '9') || character == '+' || character == '/';
+        if (character == '=') {
+            ++padding;
+            if (index < value.size() - 2 || padding > 2) return false;
+        } else if (!alphabet || padding != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 nlohmann::json serialize(const Message& message) {
     nlohmann::json object = nlohmann::json{{"type", message.type}};
+    if (!message.protocol_version.empty()) object["protocol_version"] = message.protocol_version;
     if (!message.message_id.empty()) object["message_id"] = message.message_id;
     if (!message.command_id.empty()) object["command_id"] = message.command_id;
     if (!message.delivery_state.empty()) object["delivery_state"] = message.delivery_state;
@@ -51,6 +71,11 @@ nlohmann::json serialize(const Message& message) {
     }
     if (message.is_admin) object["is_admin"] = true;
     if (message.is_private) object["private"] = true;
+    if (!message.group_id.empty()) object["group_id"] = message.group_id;
+    if (message.epoch != 0) object["epoch"] = message.epoch;
+    if (!message.key_package.empty()) object["key_package"] = message.key_package;
+    if (!message.commit.empty()) object["commit"] = message.commit;
+    if (!message.welcome.empty()) object["welcome"] = message.welcome;
     if (!message.messages.empty()) {
         object["messages"] = nlohmann::json::array();
         for (const Message& nested : message.messages) {
@@ -85,6 +110,7 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             return true;
         };
         if (!read_string("username", parsed.username) ||
+            !read_string("protocol_version", parsed.protocol_version) ||
             !read_string("message_id", parsed.message_id) ||
             !read_string("command_id", parsed.command_id) ||
             !read_string("delivery_state", parsed.delivery_state) ||
@@ -92,6 +118,10 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("target_user_code", parsed.target_user_code) ||
             !read_string("room", parsed.room) ||
             !read_string("content", parsed.content) ||
+            !read_string("group_id", parsed.group_id) ||
+            !read_string("key_package", parsed.key_package) ||
+            !read_string("commit", parsed.commit) ||
+            !read_string("welcome", parsed.welcome) ||
             !read_string("created_at", parsed.created_at) ||
             !read_string("before_message_id", parsed.before_message_id) ||
             !read_string("search_query", parsed.search_query)) {
@@ -132,6 +162,13 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
                 return false;
             }
             parsed.limit = object.at("limit").get<int>();
+        }
+        if (object.contains("epoch")) {
+            if (!object.at("epoch").is_number_unsigned()) {
+                set_error("epoch is not an unsigned integer");
+                return false;
+            }
+            parsed.epoch = object.at("epoch").get<std::uint64_t>();
         }
 
         if (object.contains("users")) {
@@ -246,6 +283,22 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             }
         }
 
+        if (parsed.type == "mls.key_package.publish" && !parsed.key_package.empty() && !is_base64(parsed.key_package)) {
+            set_error("key_package is not base64");
+            return false;
+        }
+        if (parsed.type == "mls.key_package.fetch" && !parsed.key_package.empty() && !is_base64(parsed.key_package)) {
+            set_error("key_package is not base64");
+            return false;
+        }
+        if (parsed.type == "mls.group.commit" && !parsed.commit.empty() && !is_base64(parsed.commit)) {
+            set_error("commit is not base64");
+            return false;
+        }
+        if (parsed.type == "mls.group.welcome" && !parsed.welcome.empty() && !is_base64(parsed.welcome)) {
+            set_error("welcome is not base64");
+            return false;
+        }
         message = std::move(parsed);
         return true;
     } catch (const nlohmann::json::exception& error) {

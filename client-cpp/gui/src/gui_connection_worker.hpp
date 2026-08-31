@@ -8,8 +8,15 @@
 #include <QString>
 #include <QVariantList>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <thread>
+
+#ifdef LAN_CHAT_ENABLE_MLSPP
+#include "crypto/mls_client.hpp"
+#include <QByteArray>
+#include <QSet>
+#endif
 
 class GuiConnectionWorker final : public QObject {
     Q_OBJECT
@@ -45,6 +52,12 @@ public slots:
                         bool isPrivate, const QString& beforeMessageId = {}, int limit = 50,
                         const QString& searchQuery = {});
     void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {}, const QString& commandId = {});
+    void fetchMlsKeyPackage(const QString& room, const QString& targetUserCode,
+                            const QString& commandId = {});
+    void addMlsMember(const QString& room, const QString& groupId,
+                      const QString& targetUserCode, const QString& commandId = {});
+    void removeMlsMember(const QString& room, const QString& groupId,
+                         const QString& targetUserCode, const QString& commandId = {});
 
 signals:
     void disconnected();
@@ -72,6 +85,8 @@ signals:
     void historyReceived(const QString& room, const QString& targetUserCode,
                          bool isPrivate, const QVariantList& messages, bool hasMore,
                          const QString& searchQuery);
+    void mlsCommandResult(const QString& commandId, bool ok,
+                          const QString& code, const QString& message);
 
 private:
     bool connectToServerWithRetries(const QString& serverIp,
@@ -87,6 +102,9 @@ private:
     void stopHostedServer();
     void receiveLoop();
     void stopReceiveLoop();
+    void resetMlsState();
+    void publishMlsKeyPackage();
+    void processMlsMessage(const message::Message& incoming);
 
     std::unique_ptr<connection::ConnectionState> connection_;
     std::unique_ptr<QProcess> hostProcess_;
@@ -105,4 +123,18 @@ private:
     bool reconnectTimerActive_ = false;
     QString lastConnectionFailure_;
     bool explicitDisconnect_ = false;
+
+#ifdef LAN_CHAT_ENABLE_MLSPP
+    struct MlsGroupState {
+        std::shared_ptr<MlsClient> client;
+        QString room;
+        quint64 epoch = 0;
+        std::map<quint64, QByteArray> commits;
+        std::map<quint64, QByteArray> welcomes;
+    };
+    std::shared_ptr<MlsClient> mlsClient_;
+    std::map<QString, QByteArray> mlsKeyPackages_;
+    std::map<QString, MlsGroupState> mlsGroups_;
+    QSet<QString> pendingMlsCommands_;
+#endif
 };

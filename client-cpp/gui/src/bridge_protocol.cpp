@@ -117,6 +117,12 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
         return hasRequiredStrings(payload, {"targetUserCode"}) &&
                (nonEmptyString(payload, "content") || hasOpaqueCrypto(payload));
     }
+    if (type == QStringLiteral("mls.keyPackage.fetch")) {
+        return hasRequiredStrings(payload, {"room", "targetUserCode"});
+    }
+    if (type == QStringLiteral("mls.group.add") || type == QStringLiteral("mls.group.remove")) {
+        return hasRequiredStrings(payload, {"room", "groupId", "targetUserCode"});
+    }
     if (type == QStringLiteral("history.search")) {
         return payload.value(QStringLiteral("query")).isString();
     }

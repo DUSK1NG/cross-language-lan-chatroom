@@ -3,6 +3,7 @@
 #include "protocol.hpp"
 
 #include <string>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -70,6 +71,12 @@ struct Message {
     std::vector<Message> messages{};
     bool is_admin = false;
     bool is_private = false;
+    std::string protocol_version;
+    std::string group_id;
+    std::uint64_t epoch = 0;
+    std::string key_package;
+    std::string commit;
+    std::string welcome;
 };
 
 bool send_message(SOCKET socket_handle, const Message& message);

@@ -97,6 +97,12 @@ public:
     Q_INVOKABLE void removeLocalMessage(const QString& messageId);
     Q_INVOKABLE bool recallMessage(const QString& messageId, const QString& commandId = {});
     Q_INVOKABLE bool retryMessage(const QString& messageId);
+    Q_INVOKABLE void fetchMlsKeyPackage(const QString& room, const QString& targetUserCode,
+                                        const QString& commandId = {});
+    Q_INVOKABLE void addMlsMember(const QString& room, const QString& groupId,
+                                  const QString& targetUserCode, const QString& commandId = {});
+    Q_INVOKABLE void removeMlsMember(const QString& room, const QString& groupId,
+                                     const QString& targetUserCode, const QString& commandId = {});
 
 signals:
     void connectedChanged();
@@ -113,6 +119,8 @@ signals:
     void connectionLost(const QString& reason);
     void recallSucceeded(const QString& commandId);
     void recallFailed(const QString& commandId, const QString& reason);
+    void mlsCommandResult(const QString& commandId, bool ok,
+                          const QString& code, const QString& message);
 
 private slots:
     void handleConnected(bool isAdmin);

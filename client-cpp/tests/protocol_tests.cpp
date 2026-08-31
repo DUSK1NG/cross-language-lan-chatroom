@@ -560,6 +560,36 @@ bool test_room_message_round_trip() {
         expect_equal(case_name, received.room, "study_room_2", "room");
 }
 
+bool test_mls_control_message_round_trip() {
+    const std::string case_name = "MLS control message round trip";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
+        return false;
+    }
+
+    message::Message sent{"mls.group.commit", "", "", "", {}, ""};
+    sent.protocol_version = "mls-v1";
+    sent.group_id = "room-group";
+    sent.room = "lobby";
+    sent.epoch = 4;
+    sent.commit = "Y29tbWl0";
+    if (!expect_true(case_name, message::send_message(sockets.client, sent),
+                     "message::send_message should succeed")) {
+        return false;
+    }
+    message::Message received;
+    if (!expect_true(case_name, message::receive_message(sockets.server, received),
+                     "message::receive_message should succeed")) {
+        return false;
+    }
+    return expect_equal(case_name, received.type, sent.type, "type") &&
+        expect_equal(case_name, received.protocol_version, sent.protocol_version, "protocol_version") &&
+        expect_equal(case_name, received.group_id, sent.group_id, "group_id") &&
+        expect_equal(case_name, received.room, sent.room, "room") &&
+        expect_true(case_name, received.epoch == sent.epoch, "epoch mismatch") &&
+        expect_equal(case_name, received.commit, sent.commit, "commit");
+}
+
 bool test_room_list_response_round_trip() {
     const std::string case_name = "room list response round trip";
     SocketPair sockets = create_loopback_pair(case_name);
@@ -678,6 +708,7 @@ int main() {
         {"valid private message round-trip preserves fields",
          test_valid_private_message_round_trip},
         {"room message round-trip preserves fields", test_room_message_round_trip},
+        {"MLS control message round-trip preserves fields", test_mls_control_message_round_trip},
         {"room list response round-trip preserves fields", test_room_list_response_round_trip},
         {"three valid frames are received in send order", test_three_frames_preserve_order},
     };

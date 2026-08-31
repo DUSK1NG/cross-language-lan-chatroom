@@ -111,6 +111,18 @@ ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* perfor
     connect(controller_, &GuiChatController::recallFailed, this, [this](const QString& commandId, const QString& reason) {
         completeRecallCommand(commandId, false, reason);
     });
+    connect(controller_, &GuiChatController::mlsCommandResult,
+            this, [this](const QString& commandId, bool ok, const QString& code, const QString& message) {
+        if (commandId.isEmpty()) return;
+        QJsonObject error;
+        if (!ok) {
+            error = bridge::makeError(code.isEmpty() ? QStringLiteral("mls_operation_failed") : code,
+                                      message.isEmpty() ? QStringLiteral("MLS operation failed") : message,
+                                      false, QStringLiteral("mls"), commandId);
+        }
+        emit commandResult(QString::fromUtf8(
+            QJsonDocument(bridge::makeCommandResult(commandId, ok, error)).toJson(QJsonDocument::Compact)));
+    });
 
     connectModel(controller_->roomModel(), false);
     connectModel(controller_->directMessageModel(), false);
@@ -330,6 +342,7 @@ void ChatBridge::dispatch(const QString& commandJson) {
     const QString type = command.value(QStringLiteral("type")).toString();
     const QJsonObject payload = command.value(QStringLiteral("payload")).toObject();
     bool awaitRecallResult = false;
+    bool awaitMlsResult = false;
     if (type == QStringLiteral("session.connectRemote")) {
         const QString tlsServerName = payload.value("tlsServerName").toString();
         if (tlsServerName == QStringLiteral("localhost")) {
@@ -382,6 +395,18 @@ void ChatBridge::dispatch(const QString& commandJson) {
         controller_->connectToLocalHost(payload.value("serverExe").toString(), payload.value("certFile").toString(),
                                         payload.value("keyFile").toString(), payload.value("dbFile").toString(),
                                         payload.value("username").toString(), payload.value("userCode").toString());
+    } else if (type == QStringLiteral("mls.keyPackage.fetch")) {
+        controller_->fetchMlsKeyPackage(payload.value("room").toString(),
+                                        payload.value("targetUserCode").toString(), commandId);
+        awaitMlsResult = true;
+    } else if (type == QStringLiteral("mls.group.add")) {
+        controller_->addMlsMember(payload.value("room").toString(), payload.value("groupId").toString(),
+                                  payload.value("targetUserCode").toString(), commandId);
+        awaitMlsResult = true;
+    } else if (type == QStringLiteral("mls.group.remove")) {
+        controller_->removeMlsMember(payload.value("room").toString(), payload.value("groupId").toString(),
+                                     payload.value("targetUserCode").toString(), commandId);
+        awaitMlsResult = true;
     } else if (type == QStringLiteral("session.disconnect")) {
         controller_->disconnectFromServer();
     } else if (type == QStringLiteral("chat.sendRoom")) {
@@ -452,6 +477,10 @@ void ChatBridge::dispatch(const QString& commandJson) {
     }
 
     if (awaitRecallResult) {
+        scheduleStateUpdate();
+        return;
+    }
+    if (awaitMlsResult) {
         scheduleStateUpdate();
         return;
     }

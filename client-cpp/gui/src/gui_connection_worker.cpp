@@ -3,6 +3,10 @@
 #include "openssl_runtime.hpp"
 
 #include <utility>
+#include <cstdint>
+#include <algorithm>
+#include <limits>
+#include <stdexcept>
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -27,6 +31,47 @@ QString userFacingLoginFailure(const QString& reason) {
     }
     return QStringLiteral("登录被拒绝：") + reason;
 }
+
+#ifdef LAN_CHAT_ENABLE_MLSPP
+constexpr int kMaxMlsOpaqueBytes = 48 * 1024;
+
+QByteArray encodeMlsOpaque(const MLS_NAMESPACE::bytes_ns::bytes& value)
+{
+    if (value.empty()) return {};
+    const auto raw = QByteArray(reinterpret_cast<const char*>(value.data()),
+                                static_cast<int>(value.size()));
+    const auto encoded = raw.toBase64();
+    return encoded.size() <= kMaxMlsOpaqueBytes ? encoded : QByteArray();
+}
+
+MLS_NAMESPACE::bytes_ns::bytes decodeMlsOpaque(const std::string& value)
+{
+    const auto encoded = QByteArray::fromStdString(value);
+    if (encoded.isEmpty() || encoded.size() > kMaxMlsOpaqueBytes ||
+        QByteArray::fromBase64(encoded).toBase64() != encoded) {
+        throw std::invalid_argument("invalid MLS opaque value");
+    }
+    const auto raw = QByteArray::fromBase64(encoded);
+    MLS_NAMESPACE::bytes_ns::bytes result(raw.size());
+    std::copy_n(reinterpret_cast<const std::uint8_t*>(raw.constData()), raw.size(), result.begin());
+    return result;
+}
+
+MLS_NAMESPACE::bytes_ns::bytes mlsIdentity(const QString& userCode)
+{
+    const auto identity = userCode.toUtf8();
+    MLS_NAMESPACE::bytes_ns::bytes result(identity.size());
+    std::copy_n(reinterpret_cast<const std::uint8_t*>(identity.constData()), identity.size(), result.begin());
+    return result;
+}
+
+MLS_NAMESPACE::bytes_ns::bytes mlsBytes(const QByteArray& value)
+{
+    MLS_NAMESPACE::bytes_ns::bytes result(value.size());
+    std::copy_n(reinterpret_cast<const std::uint8_t*>(value.constData()), value.size(), result.begin());
+    return result;
+}
+#endif
 
 }
 
@@ -88,6 +133,10 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
             NetworkDiagnostics::writeConnectionEvent(QStringLiteral("login_ok"), serverIp, serverPort, attempt + 1);
             running_.store(true);
             receiveThread_ = std::thread(&GuiConnectionWorker::receiveLoop, this);
+#ifdef LAN_CHAT_ENABLE_MLSPP
+            resetMlsState();
+            publishMlsKeyPackage();
+#endif
             emit connected(loginResponse.is_admin);
             return true;
         }
@@ -390,6 +439,321 @@ void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& 
     }
 }
 
+void GuiConnectionWorker::fetchMlsKeyPackage(const QString& room,
+                                             const QString& targetUserCode,
+                                             const QString& commandId) {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    emit mlsCommandResult(commandId, false, QStringLiteral("capability_unavailable"),
+                          QStringLiteral("MLS++ support is not enabled"));
+    return;
+#else
+    if (!connection_ || !connection_->is_ready()) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("not_connected"),
+                              QStringLiteral("MLS control requires an active connection"));
+        return;
+    }
+    if (room.trimmed().isEmpty() || targetUserCode.trimmed().isEmpty()) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("invalid_mls_request"),
+                              QStringLiteral("MLS room and target are required"));
+        return;
+    }
+    message::Message message{"mls.key_package.fetch", "", "", "", {},
+                             targetUserCode.trimmed().toStdString(), room.trimmed().toStdString(), {}, ""};
+    message.protocol_version = "mls-v1";
+    message.command_id = commandId.trimmed().toStdString();
+    pendingMlsCommands_.insert(commandId);
+    if (!connection_->send(message)) {
+        pendingMlsCommands_.remove(commandId);
+        emit mlsCommandResult(commandId, false, QStringLiteral("send_failed"),
+                              QString::fromStdString(connection_->last_error()));
+        emit connectionLost(QString::fromStdString(connection_->last_error()));
+    }
+#endif
+}
+
+void GuiConnectionWorker::addMlsMember(const QString& room, const QString& groupId,
+                                       const QString& targetUserCode, const QString& commandId) {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    emit mlsCommandResult(commandId, false, QStringLiteral("capability_unavailable"),
+                          QStringLiteral("MLS++ support is not enabled"));
+    return;
+#else
+    if (!connection_ || !connection_->is_ready()) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("not_connected"),
+                              QStringLiteral("MLS control requires an active connection"));
+        return;
+    }
+    const QString normalizedRoom = room.trimmed();
+    const QString normalizedGroup = groupId.trimmed();
+    const QString normalizedTarget = targetUserCode.trimmed();
+    if (normalizedRoom.isEmpty() || normalizedGroup.isEmpty() || normalizedTarget.isEmpty()) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("invalid_mls_request"),
+                              QStringLiteral("MLS room, group and target are required"));
+        return;
+    }
+    const auto keyPackageIt = mlsKeyPackages_.find(normalizedTarget);
+    if (keyPackageIt == mlsKeyPackages_.end()) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("key_package_unavailable"),
+                              QStringLiteral("Fetch the target key package before adding a member"));
+        return;
+    }
+
+    try {
+        auto groupIt = mlsGroups_.find(normalizedGroup);
+        if (groupIt == mlsGroups_.end()) {
+            MlsGroupState state;
+            state.client = std::make_shared<MlsClient>(MlsClient::create(mlsIdentity(savedConnection_.userCode)));
+            state.client->createGroup(mlsBytes(normalizedGroup.toUtf8()));
+            state.room = normalizedRoom;
+            groupIt = mlsGroups_.emplace(normalizedGroup, std::move(state)).first;
+        } else if (groupIt->second.room != normalizedRoom) {
+            emit mlsCommandResult(commandId, false, QStringLiteral("group_room_mismatch"),
+                                  QStringLiteral("MLS group is already bound to another room"));
+            return;
+        }
+
+        auto& state = groupIt->second;
+        state.client->addMember(decodeMlsOpaque(keyPackageIt->second.toStdString()));
+        const auto commit = state.client->commit();
+        const auto commitEncoded = encodeMlsOpaque(commit.handshake);
+        const auto welcomeEncoded = encodeMlsOpaque(commit.welcome);
+        if (commitEncoded.isEmpty() || welcomeEncoded.isEmpty()) {
+            emit mlsCommandResult(commandId, false, QStringLiteral("mls_opaque_too_large"),
+                                  QStringLiteral("MLS control payload exceeds the frame limit"));
+            return;
+        }
+        if (state.epoch == std::numeric_limits<quint64>::max()) {
+            emit mlsCommandResult(commandId, false, QStringLiteral("mls_epoch_exhausted"),
+                                  QStringLiteral("MLS group epoch cannot advance"));
+            return;
+        }
+        const quint64 epoch = state.epoch + 1;
+
+        message::Message welcome{"mls.group.welcome", "", "", "", {},
+                                 normalizedTarget.toStdString(), normalizedRoom.toStdString(), {}, ""};
+        welcome.protocol_version = "mls-v1";
+        welcome.group_id = normalizedGroup.toStdString();
+        welcome.epoch = epoch;
+        welcome.welcome = welcomeEncoded.toStdString();
+        if (!connection_->send(welcome)) {
+            emit mlsCommandResult(commandId, false, QStringLiteral("send_failed"),
+                                  QString::fromStdString(connection_->last_error()));
+            return;
+        }
+
+        message::Message commitMessage{"mls.group.commit", "", "", "", {}, "",
+                                       normalizedRoom.toStdString(), {}, ""};
+        commitMessage.protocol_version = "mls-v1";
+        commitMessage.group_id = normalizedGroup.toStdString();
+        commitMessage.epoch = epoch;
+        commitMessage.commit = commitEncoded.toStdString();
+        commitMessage.command_id = commandId.trimmed().toStdString();
+        pendingMlsCommands_.insert(commandId);
+        if (!connection_->send(commitMessage)) {
+            pendingMlsCommands_.remove(commandId);
+            emit mlsCommandResult(commandId, false, QStringLiteral("send_failed"),
+                                  QString::fromStdString(connection_->last_error()));
+            return;
+        }
+        state.epoch = epoch;
+        state.commits.emplace(epoch, commitEncoded);
+        state.welcomes.emplace(epoch, welcomeEncoded);
+    } catch (const std::exception& error) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("mls_operation_failed"),
+                              QString::fromUtf8(error.what()));
+    }
+#endif
+}
+
+void GuiConnectionWorker::removeMlsMember(const QString& room, const QString& groupId,
+                                          const QString& targetUserCode, const QString& commandId) {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    emit mlsCommandResult(commandId, false, QStringLiteral("capability_unavailable"),
+                          QStringLiteral("MLS++ support is not enabled"));
+    return;
+#else
+    if (!connection_ || !connection_->is_ready()) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("not_connected"),
+                              QStringLiteral("MLS control requires an active connection"));
+        return;
+    }
+    const QString normalizedRoom = room.trimmed();
+    const QString normalizedGroup = groupId.trimmed();
+    const QString normalizedTarget = targetUserCode.trimmed();
+    auto groupIt = mlsGroups_.find(normalizedGroup);
+    if (normalizedRoom.isEmpty() || normalizedGroup.isEmpty() || normalizedTarget.isEmpty() ||
+        groupIt == mlsGroups_.end()) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("invalid_mls_request"),
+                              QStringLiteral("MLS room, group and target are required"));
+        return;
+    }
+    if (groupIt->second.room != normalizedRoom) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("group_room_mismatch"),
+                              QStringLiteral("MLS group is already bound to another room"));
+        return;
+    }
+    try {
+        auto& state = groupIt->second;
+        state.client->removeMember(mlsIdentity(normalizedTarget));
+        const auto commit = state.client->commit();
+        const auto commitEncoded = encodeMlsOpaque(commit.handshake);
+        if (commitEncoded.isEmpty()) {
+            emit mlsCommandResult(commandId, false, QStringLiteral("mls_opaque_too_large"),
+                                  QStringLiteral("MLS control payload exceeds the frame limit"));
+            return;
+        }
+        if (state.epoch == std::numeric_limits<quint64>::max()) {
+            emit mlsCommandResult(commandId, false, QStringLiteral("mls_epoch_exhausted"),
+                                  QStringLiteral("MLS group epoch cannot advance"));
+            return;
+        }
+        const quint64 epoch = state.epoch + 1;
+        message::Message commitMessage{"mls.group.commit", "", "", "", {}, "",
+                                       normalizedRoom.toStdString(), {}, ""};
+        commitMessage.protocol_version = "mls-v1";
+        commitMessage.group_id = normalizedGroup.toStdString();
+        commitMessage.epoch = epoch;
+        commitMessage.commit = commitEncoded.toStdString();
+        commitMessage.command_id = commandId.trimmed().toStdString();
+        pendingMlsCommands_.insert(commandId);
+        if (!connection_->send(commitMessage)) {
+            pendingMlsCommands_.remove(commandId);
+            emit mlsCommandResult(commandId, false, QStringLiteral("send_failed"),
+                                  QString::fromStdString(connection_->last_error()));
+            return;
+        }
+        state.epoch = epoch;
+        state.commits.emplace(epoch, commitEncoded);
+    } catch (const std::exception& error) {
+        emit mlsCommandResult(commandId, false, QStringLiteral("mls_operation_failed"),
+                              QString::fromUtf8(error.what()));
+    }
+#endif
+}
+
+void GuiConnectionWorker::resetMlsState() {
+#ifdef LAN_CHAT_ENABLE_MLSPP
+    mlsKeyPackages_.clear();
+    mlsGroups_.clear();
+    pendingMlsCommands_.clear();
+    try {
+        mlsClient_ = std::make_shared<MlsClient>(MlsClient::create(mlsIdentity(savedConnection_.userCode)));
+    } catch (...) {
+        mlsClient_.reset();
+    }
+#endif
+}
+
+void GuiConnectionWorker::publishMlsKeyPackage() {
+#ifdef LAN_CHAT_ENABLE_MLSPP
+    if (!connection_ || !connection_->is_ready() || !mlsClient_) {
+        return;
+    }
+    try {
+        const auto encoded = encodeMlsOpaque(mlsClient_->keyPackage());
+        if (encoded.isEmpty()) {
+            emit connectionLost(QStringLiteral("MLS key package exceeds the frame limit"));
+            return;
+        }
+        message::Message message{"mls.key_package.publish", "", savedConnection_.userCode.toStdString(), "", {}, "", "", {}, ""};
+        message.protocol_version = "mls-v1";
+        message.key_package = encoded.toStdString();
+        if (!connection_->send(message)) {
+            emit connectionLost(QString::fromStdString(connection_->last_error()));
+        }
+    } catch (const std::exception& error) {
+        emit connectionLost(QStringLiteral("MLS key package initialization failed: ") + QString::fromUtf8(error.what()));
+    }
+#endif
+}
+
+void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
+#ifdef LAN_CHAT_ENABLE_MLSPP
+    try {
+        if (incoming.type == "mls.key_package.fetch" && !incoming.key_package.empty()) {
+            mlsKeyPackages_[QString::fromStdString(incoming.target_user_code)] = QByteArray::fromStdString(incoming.key_package);
+            const QString commandId = QString::fromStdString(incoming.command_id);
+            if (pendingMlsCommands_.remove(commandId)) {
+                emit mlsCommandResult(commandId, true, {}, {});
+            }
+            return;
+        }
+        if (incoming.type == "mls.group.welcome" && !incoming.welcome.empty()) {
+            const QString groupId = QString::fromStdString(incoming.group_id);
+            const QString room = QString::fromStdString(incoming.room);
+            const QByteArray welcome = QByteArray::fromStdString(incoming.welcome);
+            auto groupIt = mlsGroups_.find(groupId);
+            if (groupIt != mlsGroups_.end()) {
+                if (groupIt->second.room != room) {
+                    emit mlsCommandResult({}, false, QStringLiteral("group_room_mismatch"),
+                                          QStringLiteral("MLS group is already bound to another room"));
+                    return;
+                }
+                const auto old = groupIt->second.welcomes.find(incoming.epoch);
+                if (old != groupIt->second.welcomes.end() && old->second == welcome) return;
+                if (incoming.epoch <= groupIt->second.epoch) {
+                    emit mlsCommandResult({}, false, QStringLiteral("mls_epoch_conflict"),
+                                          QStringLiteral("MLS welcome epoch is not strictly increasing"));
+                    return;
+                }
+            } else {
+                MlsGroupState state;
+                state.client = std::make_shared<MlsClient>(MlsClient::create(mlsIdentity(savedConnection_.userCode)));
+                state.room = room;
+                state.client->join(decodeMlsOpaque(incoming.welcome));
+                state.epoch = incoming.epoch;
+                state.welcomes.emplace(incoming.epoch, welcome);
+                mlsGroups_.emplace(groupId, std::move(state));
+                return;
+            }
+            return;
+        }
+        if (incoming.type == "mls.group.commit" && !incoming.commit.empty()) {
+            const QString groupId = QString::fromStdString(incoming.group_id);
+            const QString room = QString::fromStdString(incoming.room);
+            auto groupIt = mlsGroups_.find(groupId);
+            if (groupIt == mlsGroups_.end() || groupIt->second.room != room) {
+                emit mlsCommandResult({}, false, QStringLiteral("group_unavailable"),
+                                      QStringLiteral("MLS group is not initialized for this room"));
+                return;
+            }
+            const QByteArray commit = QByteArray::fromStdString(incoming.commit);
+            const auto old = groupIt->second.commits.find(incoming.epoch);
+            if (old != groupIt->second.commits.end() && old->second == commit) return;
+            if (incoming.epoch != groupIt->second.epoch + 1) {
+                emit mlsCommandResult({}, false, QStringLiteral("mls_epoch_conflict"),
+                                      QStringLiteral("MLS commit epoch is not the next epoch"));
+                return;
+            }
+            groupIt->second.client->handleCommit(decodeMlsOpaque(incoming.commit));
+            groupIt->second.epoch = incoming.epoch;
+            groupIt->second.commits.emplace(incoming.epoch, commit);
+            return;
+        }
+        if (incoming.type == "mls.group.commit" && incoming.commit.empty() && !incoming.command_id.empty()) {
+            const QString commandId = QString::fromStdString(incoming.command_id);
+            if (pendingMlsCommands_.remove(commandId)) {
+                const bool duplicate = incoming.content == "duplicate";
+                emit mlsCommandResult(commandId, true, duplicate ? QStringLiteral("duplicate") : QString(), {});
+            }
+            return;
+        }
+        if (incoming.type == "error" && !incoming.command_id.empty()) {
+            const QString commandId = QString::fromStdString(incoming.command_id);
+            if (pendingMlsCommands_.remove(commandId)) {
+                emit mlsCommandResult(commandId, false, QStringLiteral("server_rejected"),
+                                      QString::fromStdString(incoming.content));
+            }
+        }
+    } catch (const std::exception& error) {
+        emit mlsCommandResult(QString::fromStdString(incoming.command_id), false,
+                              QStringLiteral("mls_operation_failed"), QString::fromUtf8(error.what()));
+    }
+#else
+    Q_UNUSED(incoming);
+#endif
+}
+
 void GuiConnectionWorker::receiveLoop() {
     while (running_.load()) {
         message::Message incoming;
@@ -430,6 +794,8 @@ void GuiConnectionWorker::receiveLoop() {
             detail.insert("canManage", roomInfo.can_manage);
             roomDetails.append(detail);
         }
+
+        processMlsMessage(incoming);
 
         if (incoming.type == "history_response") {
             QVariantList historyMessages;

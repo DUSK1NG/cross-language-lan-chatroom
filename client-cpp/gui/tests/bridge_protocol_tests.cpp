@@ -13,6 +13,9 @@ private slots:
     void acceptsPerformanceModeCommand();
     void acceptsConnectionLogPreferenceCommand();
     void acceptsBoundedFrameTelemetryCommand();
+    void acceptsMlsKeyPackageFetchCommand();
+    void acceptsMlsGroupAddCommand();
+    void acceptsMlsGroupRemoveCommand();
     void acceptsRemoteConnectionWithoutCaFile();
     void rejectsTunnelTlsIdentityOtherThanLocalhost();
     void rejectsMissingIdAndPayload();
@@ -92,6 +95,39 @@ void BridgeProtocolTests::acceptsBoundedFrameTelemetryCommand() {
         {"payload", QJsonObject{{"frameTimesMs", QJsonArray{16.0, 17.0, 33.0}}}}
     };
 
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::acceptsMlsKeyPackageFetchCommand() {
+    const QJsonObject command{
+        {"id", "cmd-mls-fetch"},
+        {"type", "mls.keyPackage.fetch"},
+        {"payload", QJsonObject{{"room", "lobby"}, {"targetUserCode", "BOB01"}}}
+    };
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::acceptsMlsGroupAddCommand() {
+    const QJsonObject command{
+        {"id", "cmd-mls-add"},
+        {"type", "mls.group.add"},
+        {"payload", QJsonObject{{"room", "lobby"}, {"groupId", "group-1"}, {"targetUserCode", "BOB01"}}}
+    };
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::acceptsMlsGroupRemoveCommand() {
+    const QJsonObject command{
+        {"id", "cmd-mls-remove"},
+        {"type", "mls.group.remove"},
+        {"payload", QJsonObject{{"room", "lobby"}, {"groupId", "group-1"}, {"targetUserCode", "BOB01"}}}
+    };
     QString error;
     QVERIFY(bridge::validateCommand(command, &error));
     QVERIFY(error.isEmpty());

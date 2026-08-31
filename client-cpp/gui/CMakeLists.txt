@@ -245,7 +245,17 @@ target_link_libraries(lan-chat-gui PRIVATE
     OpenSSL::Crypto
 )
 
+if(LAN_CHAT_ENABLE_MLSPP)
+    target_sources(lan-chat-gui PRIVATE
+        src/crypto/mls_client.cpp
+        src/crypto/mls_client.hpp
+    )
+    target_link_libraries(lan-chat-gui PRIVATE mlspp)
+    target_compile_definitions(lan-chat-gui PRIVATE LAN_CHAT_ENABLE_MLSPP=1)
+endif()
+
 target_include_directories(lan-chat-gui PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
 )
@@ -431,6 +441,15 @@ target_link_libraries(chat-bridge-tests PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
 )
+
+if(LAN_CHAT_ENABLE_MLSPP)
+    target_sources(chat-bridge-tests PRIVATE
+        src/crypto/mls_client.cpp
+        src/crypto/mls_client.hpp
+    )
+    target_link_libraries(chat-bridge-tests PRIVATE mlspp)
+    target_compile_definitions(chat-bridge-tests PRIVATE LAN_CHAT_ENABLE_MLSPP=1)
+endif()
 
 # Qt WebEngine also brings its own TLS stack. Loading the vcpkg OpenSSL DLLs
 # during process startup can select the wrong copy and crash before the UI is
