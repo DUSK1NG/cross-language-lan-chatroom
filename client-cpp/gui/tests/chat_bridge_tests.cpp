@@ -8,15 +8,20 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QTcpSocket>
 #include <QThread>
 #include <QSignalSpy>
 #include <QScopeGuard>
+#include <QSslSocket>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <winsock2.h>
+
+#include <array>
 
 namespace {
 class WinsockScope final {
@@ -32,6 +37,61 @@ private:
     WSADATA data_{};
     int result_ = SOCKET_ERROR;
 };
+
+bool sendRawTlsFrame(QSslSocket& socket, const QJsonObject& object) {
+    const QByteArray payload = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    if (payload.isEmpty() || payload.size() > 64 * 1024) return false;
+    QByteArray frame(4, Qt::Uninitialized);
+    const auto size = static_cast<quint32>(payload.size());
+    frame[0] = static_cast<char>((size >> 24) & 0xff);
+    frame[1] = static_cast<char>((size >> 16) & 0xff);
+    frame[2] = static_cast<char>((size >> 8) & 0xff);
+    frame[3] = static_cast<char>(size & 0xff);
+    frame.append(payload);
+    return socket.write(frame) == frame.size() && socket.waitForBytesWritten(2000);
+}
+
+bool readRawTlsFrame(QSslSocket& socket, QJsonObject* object, int timeoutMs) {
+    std::array<char, 4> header{};
+    int offset = 0;
+    while (offset < static_cast<int>(header.size())) {
+        if (socket.bytesAvailable() == 0 && !socket.waitForReadyRead(timeoutMs)) return false;
+        const qint64 read = socket.read(header.data() + offset, header.size() - offset);
+        if (read <= 0) return false;
+        offset += static_cast<int>(read);
+    }
+    const auto size = (static_cast<quint32>(static_cast<unsigned char>(header[0])) << 24) |
+                      (static_cast<quint32>(static_cast<unsigned char>(header[1])) << 16) |
+                      (static_cast<quint32>(static_cast<unsigned char>(header[2])) << 8) |
+                      static_cast<quint32>(static_cast<unsigned char>(header[3]));
+    if (size == 0 || size > 64 * 1024) return false;
+    QByteArray payload;
+    payload.reserve(static_cast<int>(size));
+    while (payload.size() < static_cast<int>(size)) {
+        if (socket.bytesAvailable() == 0 && !socket.waitForReadyRead(timeoutMs)) return false;
+        const QByteArray chunk = socket.read(static_cast<qint64>(size) - payload.size());
+        if (chunk.isEmpty()) return false;
+        payload.append(chunk);
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(payload);
+    if (!document.isObject()) return false;
+    *object = document.object();
+    return true;
+}
+
+bool receiveRawTlsType(QSslSocket& socket, const QString& type, QJsonObject* object, int timeoutMs) {
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
+        QJsonObject message;
+        if (!readRawTlsFrame(socket, &message, qMax(1, timeoutMs - static_cast<int>(timer.elapsed())))) return false;
+        if (message.value(QStringLiteral("type")).toString() == type) {
+            if (object) *object = message;
+            return true;
+        }
+    }
+    return false;
+}
 }  // namespace
 
 class ChatBridgeTests final : public QObject {
@@ -57,6 +117,7 @@ private slots:
     void serverConnectionCompletesWithoutMessageLifetimeCorruption();
     void localHostConnectionCompletesWithoutMessageLifetimeCorruption();
     void approvedLanMemberConnectionCompletesAfterLoginPending();
+    void authenticatedRawTlsMLSFramesAreRejected();
     void mlsControlRoundTripUsesProposalCommitWelcomeOrder();
     void usersResponseUsesBulkModelUpdates();
     void roomsResponseUsesBulkModelUpdates();
@@ -403,6 +464,286 @@ void ChatBridgeTests::approvedLanMemberConnectionCompletesAfterLoginPending() {
     host.disconnectFromServer();
 }
 
+void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    QSKIP("MLS++ support is disabled for this build");
+#else
+    QTcpSocket portProbe;
+    portProbe.connectToHost(QStringLiteral("127.0.0.1"), 8888);
+    if (portProbe.waitForConnected(100)) {
+        QSKIP("Local port 8888 is occupied by an interactive host");
+    }
+
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    qputenv("LAN_CHAT_TEST_HOST_DATA_ROOT", temporary.path().toUtf8());
+    const auto clearTestRoot = qScopeGuard([]() { qunsetenv("LAN_CHAT_TEST_HOST_DATA_ROOT"); });
+    const auto hostPaths = HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
+    if (!hostPaths.available()) {
+        QSKIP("Local Host executable is not available in this checkout");
+    }
+
+    WinsockScope winsock;
+    QVERIFY2(winsock.result() == 0, "WSAStartup failed");
+    GuiChatController host;
+    QSignalSpy hostConnectedSpy(&host, &GuiChatController::connectedChanged);
+    QSignalSpy hostFailedSpy(&host, &GuiChatController::connectionFailed);
+    QSignalSpy hostMlsSpy(&host, &GuiChatController::mlsCommandResult);
+    host.connectToLocalHost(hostPaths.serverExe, hostPaths.certFile, hostPaths.keyFile,
+                            temporary.filePath(QStringLiteral("chat.db")), "Alice", "A001");
+    QTRY_VERIFY_WITH_TIMEOUT(hostConnectedSpy.count() > 0 || hostFailedSpy.count() > 0, 12000);
+    QVERIFY2(host.connected(), qPrintable(host.statusText()));
+    QVERIFY(host.admin());
+
+    GuiChatController member;
+    QSignalSpy memberConnectedSpy(&member, &GuiChatController::connectedChanged);
+    QSignalSpy memberFailedSpy(&member, &GuiChatController::connectionFailed);
+    member.connectToServerWithTlsName("127.0.0.1", 8888, "Bob", "B001", hostPaths.certFile, "localhost");
+    QTRY_VERIFY_WITH_TIMEOUT(!host.pendingConnectionApprovals().isEmpty(), 5000);
+    QVariantMap memberRequest;
+    for (const QVariant& value : host.pendingConnectionApprovals()) {
+        const auto request = value.toMap();
+        if (request.value("userCode").toString().compare(QStringLiteral("B001"), Qt::CaseInsensitive) == 0) {
+            memberRequest = request;
+            break;
+        }
+    }
+    QVERIFY(!memberRequest.isEmpty());
+    host.sendAdminAction("approve_connection", memberRequest.value("userCode").toString(),
+                         memberRequest.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(memberConnectedSpy.count() > 0 || memberFailedSpy.count() > 0, 12000);
+    QVERIFY2(member.connected(), qPrintable(member.statusText()));
+
+    QSignalSpy hostMlsResultSpy(&host, &GuiChatController::mlsCommandResult);
+    host.fetchMlsKeyPackage(QStringLiteral("lobby"), QStringLiteral("B001"), QStringLiteral("raw-fetch-bob"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsResultSpy.count() > 0, 5000);
+    QVERIFY2(hostMlsResultSpy.at(0).at(1).toBool(), qPrintable(QStringLiteral("fetch-bob failed: %1")
+                                                                 .arg(hostMlsResultSpy.at(0).at(3).toString())));
+    host.addMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
+                      QStringLiteral("B001"), QStringLiteral("raw-add-bob"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsResultSpy.count() > 1, 8000);
+    QVERIFY2(hostMlsResultSpy.at(1).at(1).toBool(), qPrintable(QStringLiteral("add-bob failed: %1")
+                                                                 .arg(hostMlsResultSpy.at(1).at(3).toString())));
+
+    GuiChatController newMember;
+    QSignalSpy newMemberConnectedSpy(&newMember, &GuiChatController::connectedChanged);
+    QSignalSpy newMemberFailedSpy(&newMember, &GuiChatController::connectionFailed);
+    QSignalSpy newMemberMlsSpy(&newMember, &GuiChatController::mlsCommandResult);
+    QSignalSpy newMemberGroupSpy(&newMember, &GuiChatController::mlsGroupState);
+    newMember.connectToServerWithTlsName("127.0.0.1", 8888, "Carol", "C001", hostPaths.certFile, "localhost");
+    QTRY_VERIFY_WITH_TIMEOUT(!host.pendingConnectionApprovals().isEmpty(), 5000);
+    QVariantMap newMemberRequest;
+    for (const QVariant& value : host.pendingConnectionApprovals()) {
+        const auto request = value.toMap();
+        if (request.value("userCode").toString().compare(QStringLiteral("C001"), Qt::CaseInsensitive) == 0) {
+            newMemberRequest = request;
+            break;
+        }
+    }
+    QVERIFY(!newMemberRequest.isEmpty());
+    host.sendAdminAction("approve_connection", newMemberRequest.value("userCode").toString(),
+                         newMemberRequest.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(newMemberConnectedSpy.count() > 0 || newMemberFailedSpy.count() > 0, 12000);
+    QVERIFY2(newMember.connected(), qPrintable(newMember.statusText()));
+    const int fetchCountBeforeCarol = hostMlsResultSpy.count();
+    host.fetchMlsKeyPackage(QStringLiteral("lobby"), QStringLiteral("C001"), QStringLiteral("raw-fetch-carol"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsResultSpy.count() > fetchCountBeforeCarol, 5000);
+    QVERIFY2(hostMlsResultSpy.at(fetchCountBeforeCarol).at(1).toBool(),
+             qPrintable(QStringLiteral("fetch-carol failed: %1").arg(hostMlsResultSpy.at(fetchCountBeforeCarol).at(3).toString())));
+    QVERIFY(QMetaObject::invokeMethod(&newMember, "handleConnectionLost", Qt::DirectConnection,
+                                      Q_ARG(QString, QStringLiteral("raw tampered welcome setup"))));
+    QTRY_VERIFY_WITH_TIMEOUT(newMember.reconnecting(), 1000);
+
+    // Bob's controller is deliberately closed before the raw authenticated
+    // client takes the same account. This leaves the real host as the only
+    // legal MLS member receiving the opaque attack frames.
+    member.disconnectFromServer();
+    QTest::qWait(300);
+
+    auto approve = [&](const QString& userCode) {
+        QVariantMap request;
+        for (const QVariant& value : host.pendingConnectionApprovals()) {
+            const auto candidate = value.toMap();
+            if (candidate.value("userCode").toString().compare(userCode, Qt::CaseInsensitive) == 0) {
+                request = candidate;
+                break;
+            }
+        }
+        if (request.isEmpty()) return false;
+        host.sendAdminAction("approve_connection", request.value("userCode").toString(),
+                             request.value("id").toString());
+        return true;
+    };
+    auto hasPending = [&](const QString& userCode) {
+        for (const QVariant& value : host.pendingConnectionApprovals()) {
+            if (value.toMap().value("userCode").toString().compare(userCode, Qt::CaseInsensitive) == 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto pendingCodes = [&]() {
+        QStringList codes;
+        for (const QVariant& value : host.pendingConnectionApprovals()) {
+            codes.append(value.toMap().value("userCode").toString());
+        }
+        return codes.join(QLatin1Char(','));
+    };
+    auto expectRawError = [&](QSslSocket& socket, const QJsonObject& frame,
+                              const QString& commandId, const QString& content) {
+        if (!sendRawTlsFrame(socket, frame)) return false;
+        QJsonObject response;
+        if (!receiveRawTlsType(socket, QStringLiteral("error"), &response, 5000)) return false;
+        return response.value(QStringLiteral("command_id")).toString() == commandId &&
+               response.value(QStringLiteral("content")).toString() == content;
+    };
+    auto expectRawAck = [&](QSslSocket& socket, const QJsonObject& frame,
+                            const QString& type, const QString& commandId,
+                            const QString& content) {
+        if (!sendRawTlsFrame(socket, frame)) return false;
+        QJsonObject response;
+        if (!receiveRawTlsType(socket, type, &response, 5000)) return false;
+        if (response.value(QStringLiteral("command_id")).toString() != commandId) return false;
+        if (!content.isEmpty() && response.value(QStringLiteral("content")).toString() != content) return false;
+        return true;
+    };
+
+    QSslSocket mallory;
+    mallory.setPeerVerifyMode(QSslSocket::VerifyNone);
+    mallory.connectToHostEncrypted(QStringLiteral("127.0.0.1"), 8888);
+    QVERIFY2(mallory.waitForEncrypted(10000), qPrintable(mallory.errorString()));
+    QVERIFY(sendRawTlsFrame(mallory, QJsonObject{{"type", "login"}, {"username", "Mallory"}, {"user_code", "M001"}}));
+    QJsonObject malloryPending;
+    QVERIFY(receiveRawTlsType(mallory, QStringLiteral("login_pending"), &malloryPending, 5000));
+    QTRY_VERIFY_WITH_TIMEOUT(hasPending(QStringLiteral("M001")), 5000);
+    QVERIFY(approve(QStringLiteral("M001")));
+    QJsonObject malloryLogin;
+    QVERIFY(receiveRawTlsType(mallory, QStringLiteral("login_ok"), &malloryLogin, 5000));
+
+    QVERIFY(expectRawError(mallory,
+                           QJsonObject{{"type", "mls.group.proposal"}, {"command_id", "raw-mallory-proposal"},
+                                       {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
+                                       {"proposal_id", "raw-mallory-proposal"}, {"action", "add"},
+                                       {"target_user_code", "C001"}, {"proposal", "YQ=="}},
+                           QStringLiteral("raw-mallory-proposal"), QStringLiteral("MLS group proposal access denied")));
+    QVERIFY(expectRawError(mallory,
+                           QJsonObject{{"type", "mls.group.commit"}, {"command_id", "raw-mallory-commit"},
+                                       {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
+                                       {"proposal_id", "raw-mallory-proposal"}, {"commit", "Yg=="}},
+                           QStringLiteral("raw-mallory-commit"), QStringLiteral("MLS group commit access denied")));
+    QVERIFY(expectRawError(mallory,
+                           QJsonObject{{"type", "mls.group.welcome.accept"}, {"command_id", "raw-mallory-accept"},
+                                       {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 1},
+                                       {"proposal_id", "raw-mallory-proposal"}, {"target_user_code", "M001"},
+                                       {"welcome_digest", QString(64, QLatin1Char('0'))}},
+                           QStringLiteral("raw-mallory-accept"), QStringLiteral("MLS welcome accept conflict")));
+    const QJsonObject publishMallory{{"type", "mls.key_package.publish"}, {"command_id", "raw-publish-1"},
+                                     {"key_package", "YQ=="}};
+    QVERIFY(expectRawAck(mallory, publishMallory, QStringLiteral("mls.key_package.publish"),
+                         QStringLiteral("raw-publish-1"), QStringLiteral("stored")));
+    QVERIFY(expectRawAck(mallory, publishMallory, QStringLiteral("mls.key_package.publish"),
+                         QStringLiteral("raw-publish-1"), QStringLiteral("stored")));
+    mallory.disconnectFromHost();
+
+    QSslSocket rawBob;
+    rawBob.setPeerVerifyMode(QSslSocket::VerifyNone);
+    rawBob.connectToHostEncrypted(QStringLiteral("127.0.0.1"), 8888);
+    QVERIFY2(rawBob.waitForEncrypted(10000), qPrintable(rawBob.errorString()));
+    QVERIFY(sendRawTlsFrame(rawBob, QJsonObject{{"type", "login"}, {"username", "Bob"}, {"user_code", "B001"}}));
+    QJsonObject bobPending;
+    QVERIFY(receiveRawTlsType(rawBob, QStringLiteral("login_pending"), &bobPending, 5000));
+    QTRY_VERIFY_WITH_TIMEOUT(hasPending(QStringLiteral("B001")), 5000);
+    QVERIFY2(approve(QStringLiteral("B001")), qPrintable(QStringLiteral("pending approvals: %1").arg(pendingCodes())));
+    QJsonObject bobLogin;
+    QVERIFY(receiveRawTlsType(rawBob, QStringLiteral("login_ok"), &bobLogin, 5000));
+
+    const QJsonObject missingProposalCommit{{"type", "mls.group.commit"}, {"command_id", "raw-missing-proposal"},
+                                            {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
+                                            {"proposal_id", "missing-proposal"}, {"commit", "Y29tbWl0"}};
+    QVERIFY(expectRawError(rawBob, missingProposalCommit, QStringLiteral("raw-missing-proposal"),
+                           QStringLiteral("MLS group commit requires an accepted proposal")));
+    QVERIFY(expectRawError(rawBob,
+                           QJsonObject{{"type", "mls.group.commit"}, {"command_id", "raw-wrong-proposal"},
+                                       {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
+                                       {"proposal_id", "wrong-proposal"}, {"commit", "Y29tbWl0"}},
+                           QStringLiteral("raw-wrong-proposal"), QStringLiteral("MLS group commit requires an accepted proposal")));
+
+    const QJsonObject tamperedProposal{{"type", "mls.group.proposal"}, {"command_id", "raw-tampered-proposal"},
+                                       {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
+                                       {"proposal_id", "raw-tampered-proposal"}, {"action", "add"},
+                                       {"target_user_code", "C001"}, {"proposal", "YQ=="}};
+    QVERIFY(expectRawAck(rawBob, tamperedProposal, QStringLiteral("mls.group.proposal"),
+                         QStringLiteral("raw-tampered-proposal"), QStringLiteral("stored")));
+    QVERIFY(expectRawAck(rawBob, tamperedProposal, QStringLiteral("mls.group.proposal"),
+                         QStringLiteral("raw-tampered-proposal"), QStringLiteral("duplicate")));
+    const QJsonObject tamperedCommit{{"type", "mls.group.commit"}, {"command_id", "raw-tampered-commit"},
+                                     {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
+                                     {"proposal_id", "raw-tampered-proposal"}, {"commit", "Yg=="}};
+    QVERIFY(expectRawAck(rawBob, tamperedCommit, QStringLiteral("mls.group.commit"),
+                         QStringLiteral("raw-tampered-commit"), QStringLiteral("stored")));
+    QVERIFY(expectRawAck(rawBob, tamperedCommit, QStringLiteral("mls.group.commit"),
+                         QStringLiteral("raw-tampered-commit"), QStringLiteral("duplicate")));
+    const QByteArray tamperedWelcome = QByteArrayLiteral("Yw==");
+    const QString tamperedDigest = QString::fromLatin1(QCryptographicHash::hash(tamperedWelcome,
+                                                                                QCryptographicHash::Sha256).toHex());
+    const QJsonObject tamperedWelcomeFrame{{"type", "mls.group.welcome"}, {"command_id", "raw-tampered-welcome"},
+                                           {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
+                                           {"proposal_id", "raw-tampered-proposal"}, {"target_user_code", "C001"},
+                                           {"welcome_digest", tamperedDigest}, {"welcome", tamperedWelcome.constData()}};
+    QVERIFY(expectRawAck(rawBob, tamperedWelcomeFrame, QStringLiteral("mls.group.welcome"),
+                         QStringLiteral("raw-tampered-welcome"), QStringLiteral("stored")));
+    QVERIFY(expectRawAck(rawBob, tamperedWelcomeFrame, QStringLiteral("mls.group.welcome"),
+                         QStringLiteral("raw-tampered-welcome"), QStringLiteral("duplicate")));
+    // The target-only delivery contract must not leak Carol's pending welcome
+    // to the submitting member, even though Bob is still authenticated.
+    QJsonObject leakedWelcome;
+    QVERIFY(!receiveRawTlsType(rawBob, QStringLiteral("mls.group.welcome"), &leakedWelcome, 300));
+    rawBob.disconnectFromHost();
+
+    // The opaque tampered commit is intentionally persisted by the server;
+    // cryptographic rejection is a client responsibility. Alice's real MLS
+    // session must nevertheless stay at epoch 1 after receiving it.
+    QSignalSpy hostGroupSpy(&host, &GuiChatController::mlsGroupState);
+    host.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("raw-before"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostGroupSpy.count() > 0, 5000);
+    QCOMPARE(hostGroupSpy.at(0).at(3).toULongLong(), quint64(1));
+    QVERIFY(!hostMlsSpy.isEmpty());
+    bool sawRejectedInbound = false;
+    for (int index = 0; index < hostMlsSpy.count(); ++index) {
+        const auto result = hostMlsSpy.at(index);
+        if (result.at(0).toString().isEmpty() && !result.at(1).toBool()) {
+            sawRejectedInbound = true;
+            break;
+        }
+    }
+    QVERIFY2(sawRejectedInbound, "real host did not reject the opaque tampered MLS frames");
+    host.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("raw-after"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostGroupSpy.count() > 1, 5000);
+    QCOMPARE(hostGroupSpy.at(1).at(3).toULongLong(), quint64(1));
+
+    // Approve Carol's existing reconnect only after the pending welcome was
+    // durably stored. The retained key package must reject the tampered bytes,
+    // and no welcome.accept or local group may be created.
+    QTRY_VERIFY_WITH_TIMEOUT(hasPending(QStringLiteral("C001")), 5000);
+    QVERIFY(approve(QStringLiteral("C001")));
+    QTRY_VERIFY_WITH_TIMEOUT(newMember.connected(), 12000);
+    QVERIFY(!newMemberMlsSpy.isEmpty());
+    bool sawWelcomeRejection = false;
+    for (int index = 0; index < newMemberMlsSpy.count(); ++index) {
+        const auto result = newMemberMlsSpy.at(index);
+        if (!result.at(1).toBool()) {
+            sawWelcomeRejection = true;
+            break;
+        }
+    }
+    QVERIFY2(sawWelcomeRejection, "tampered welcome was not rejected by the target MLS client");
+    QCOMPARE(newMemberGroupSpy.count(), 0);
+
+    newMember.disconnectFromServer();
+    host.disconnectFromServer();
+#endif
+}
+
 void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
 #ifndef LAN_CHAT_ENABLE_MLSPP
     QSKIP("MLS++ support is disabled for this build");
@@ -493,6 +834,7 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
     GuiChatController newMember;
     QSignalSpy newMemberGroupSpy(&newMember, &GuiChatController::mlsGroupState);
     QSignalSpy newMemberDataSpy(&newMember, &GuiChatController::mlsDataResult);
+    QSignalSpy newMemberMlsSpy(&newMember, &GuiChatController::mlsCommandResult);
     QSignalSpy newMemberConnectedSpy(&newMember, &GuiChatController::connectedChanged);
     QSignalSpy newMemberFailedSpy(&newMember, &GuiChatController::connectionFailed);
     newMember.connectToServerWithTlsName("127.0.0.1", 8888, "Carol", "C001", hostPaths.certFile, "localhost");
@@ -505,12 +847,33 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
     host.fetchMlsKeyPackage(QStringLiteral("lobby"), QStringLiteral("C001"), QStringLiteral("fetch-carol"));
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 2, 5000);
     QCOMPARE(hostMlsSpy.at(2).at(0).toString(), QStringLiteral("fetch-carol"));
-    QVERIFY(hostMlsSpy.at(2).at(1).toBool());
+    QVERIFY2(hostMlsSpy.at(2).at(1).toBool(), qPrintable(QStringLiteral("fetch-carol failed: code=%1 detail=%2")
+                                                           .arg(hostMlsSpy.at(2).at(2).toString(), hostMlsSpy.at(2).at(3).toString())));
+
+    // Exercise an actual transient reconnect while the next welcome is
+    // pending. The reconnect must retain the package-backed PendingJoin until
+    // the offline welcome is consumed.
+    QVERIFY(QMetaObject::invokeMethod(&newMember, "handleConnectionLost", Qt::DirectConnection,
+                                      Q_ARG(QString, QStringLiteral("test transient disconnect"))));
+    QTRY_VERIFY_WITH_TIMEOUT(newMember.reconnecting(), 1000);
+
     host.addMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
                       QStringLiteral("C001"), QStringLiteral("add-carol"));
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 3, 8000);
     QCOMPARE(hostMlsSpy.at(3).at(0).toString(), QStringLiteral("add-carol"));
     QVERIFY(hostMlsSpy.at(3).at(1).toBool());
+    // The reconnect login is intentionally held at the existing approval
+    // gate while the welcome is pending. Approving it after the welcome was
+    // stored exercises replay through the normal authenticated write pump.
+    QTRY_VERIFY_WITH_TIMEOUT(!host.pendingConnectionApprovals().isEmpty(), 5000);
+    const QVariantMap reconnectRequest = host.pendingConnectionApprovals().back().toMap();
+    host.sendAdminAction("approve_connection", reconnectRequest.value("userCode").toString(),
+                         reconnectRequest.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(newMember.connected(), 12000);
+    for (int index = 0; index < newMemberMlsSpy.count(); ++index) {
+        const auto result = newMemberMlsSpy.at(index);
+        QVERIFY2(result.at(1).toBool(), "offline welcome replay was rejected by the joining client");
+    }
     for (int index = 0; index < memberMlsSpy.count(); ++index) {
         const auto result = memberMlsSpy.at(index);
         QVERIFY2(result.at(1).toBool(), "existing member rejected the proposal/commit chain");

@@ -1266,6 +1266,13 @@ func (h *Hub) canAccessMLSRoom(sender *Client, targetCode, room string) bool {
 	if definition.Allowed[targetCode] {
 		return true
 	}
+	if !definition.Private && h.OfflineStore != nil {
+		// Public rooms authorize an existing account even while its socket is
+		// offline, allowing a pending MLS welcome to be delivered on reconnect.
+		if exists, err := h.OfflineStore.HasUserCode(targetCode); err == nil && exists {
+			return true
+		}
+	}
 	target, online := h.ActiveCodes[targetCode]
 	return online && target.Room == room && h.Rooms[room][target]
 }

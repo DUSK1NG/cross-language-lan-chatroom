@@ -186,6 +186,22 @@ func TestHubMLSProposalRequiresExistingRoomMember(t *testing.T) {
 	}
 }
 
+func TestHubMLSProposalAllowsAuthenticatedOfflineTargetInPublicRoom(t *testing.T) {
+	hub, alice, _ := setupMLSHub(t)
+	carol := newTestClient(t, "Carol", "Carol01")
+	if _, err := hub.OfflineStore.EnsureIdentity("Carol", "Carol01"); err != nil {
+		t.Fatal(err)
+	}
+	// Carol's account has previously authenticated, but her current socket is
+	// offline. A public room still authorizes a valid account as a target.
+	proposal := MLSGroupProposalRequest{Sender: alice, GroupID: "offline-target", Room: defaultRoomName, Epoch: 1,
+		ProposalID: "p1", Action: "add", TargetCode: carol.UserCode, Proposal: "cHJvcG9zYWw=", CommandID: "p1"}
+	hub.handleMLSGroupProposal(proposal)
+	if got := <-alice.Send; got.Type != "mls.group.proposal" || got.Content != "stored" {
+		t.Fatalf("offline public-room target proposal=%+v", got)
+	}
+}
+
 func TestHubMLSAuthoritativeMembershipSnapshotAndWelcomeActivation(t *testing.T) {
 	hub, alice, bob := setupMLSHub(t)
 	carol := newTestClient(t, "Carol", "Carol01")
@@ -334,5 +350,112 @@ func TestMLSControlTraversesReadAndWritePumps(t *testing.T) {
 	}
 	if response.Type != "error" || response.Content != "MLS group commit requires an accepted proposal" {
 		t.Fatalf("unsolicited MLS commit response = %+v", response)
+	}
+}
+
+func TestMLSWelcomeReplaysToAuthenticatedReconnectUntilAccepted(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if _, err := store.EnsureIdentity("Alice", "alice01"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.EnsureIdentity("Bob", "bob01"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveMLSProposalForMember("replay-group", defaultRoomName, "alice01", "add", "bob01", 1, "proposal-1", "cHJvcG9zYWw="); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveMLSCommitForMember("replay-group", defaultRoomName, "alice01", "proposal-1", 1, "Y29tbWl0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveMLSWelcomeForMember("replay-group", defaultRoomName, "alice01", 1, "bob01", "proposal-1", "d2VsY29tZQ=="); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.PendingMLSWelcomes("bob01")
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("initial pending welcomes=%+v err=%v", pending, err)
+	}
+
+	hub := NewHub()
+	hub.OfflineStore = store
+	hub.AdminCode = "bob01"
+	go hub.Run()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	accepted := make(chan net.Conn, 2)
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			accepted <- conn
+		}
+	}()
+
+	receiveType := func(conn net.Conn, want string, timeout time.Duration) (Message, error) {
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return Message{}, err
+		}
+		for {
+			message, receiveErr := receiveMessage(conn)
+			if receiveErr != nil {
+				return Message{}, receiveErr
+			}
+			if message.Type == want {
+				return message, nil
+			}
+		}
+	}
+
+	dial := func() net.Conn {
+		conn, dialErr := net.Dial("tcp", listener.Addr().String())
+		if dialErr != nil {
+			t.Fatal(dialErr)
+		}
+		serverConn := <-accepted
+		go handleConnectionWithStore(serverConn, hub, store)
+		return conn
+	}
+	first := dial()
+	t.Cleanup(func() { _ = first.Close() })
+	if err := sendMessage(first, Message{Type: "login", Username: "Bob", UserCode: "bob01"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := receiveType(first, "login_ok", time.Second); err != nil {
+		t.Fatalf("first login: %v", err)
+	}
+	welcome, err := receiveType(first, "mls.group.welcome", time.Second)
+	if err != nil {
+		t.Fatalf("first pending welcome: %v", err)
+	}
+	if welcome.GroupID != "replay-group" || welcome.ProposalID != "proposal-1" || welcome.Welcome != "d2VsY29tZQ==" {
+		t.Fatalf("first pending welcome=%+v", welcome)
+	}
+	if err := sendMessage(first, Message{Type: "mls.group.welcome.accept", GroupID: welcome.GroupID,
+		Room: welcome.Room, Epoch: welcome.Epoch, ProposalID: welcome.ProposalID,
+		TargetUserCode: "bob01", WelcomeDigest: welcome.WelcomeDigest, CommandID: "accept-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if acceptedMessage, err := receiveType(first, "mls.group.welcome.accept", time.Second); err != nil || acceptedMessage.Content != "activated" {
+		t.Fatalf("first welcome accept=%+v err=%v", acceptedMessage, err)
+	}
+	if members, err := store.MLSGroupMembers("replay-group"); err != nil || len(members) != 2 {
+		t.Fatalf("members after accept=%v err=%v", members, err)
+	}
+	_ = first.Close()
+
+	second := dial()
+	defer second.Close()
+	if err := sendMessage(second, Message{Type: "login", Username: "Bob", UserCode: "bob01"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := receiveType(second, "login_ok", time.Second); err != nil {
+		t.Fatalf("second login: %v", err)
+	}
+	if _, err := receiveType(second, "mls.group.welcome", 250*time.Millisecond); err == nil {
+		t.Fatal("accepted welcome was replayed after reconnect")
 	}
 }

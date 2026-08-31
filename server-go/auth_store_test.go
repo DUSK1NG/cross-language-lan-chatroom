@@ -62,6 +62,36 @@ func TestAuthStoreMLSWelcomeIsOpaqueAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestAuthStoreListsPendingMLSWelcomesForTarget(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if _, _, err := store.SaveMLSProposalForMember("pending-group", "lobby", "alice01", "add", "bob01", 1, "proposal-1", "cHJvcG9zYWw="); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveMLSCommitForMember("pending-group", "lobby", "alice01", "proposal-1", 1, "Y29tbWl0"); err != nil {
+		t.Fatal(err)
+	}
+	if inserted, err := store.SaveMLSWelcomeForMember("pending-group", "lobby", "alice01", 1, "bob01", "proposal-1", "d2VsY29tZQ=="); err != nil || !inserted {
+		t.Fatalf("pending welcome inserted=%t err=%v", inserted, err)
+	}
+	pending, err := store.PendingMLSWelcomes("bob01")
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending welcomes=%+v err=%v", pending, err)
+	}
+	if pending[0].GroupID != "pending-group" || pending[0].Room != "lobby" || pending[0].Epoch != 1 ||
+		pending[0].TargetCode != "bob01" || pending[0].ProposalID != "proposal-1" ||
+		pending[0].Welcome != "d2VsY29tZQ==" || pending[0].WelcomeDigest == "" {
+		t.Fatalf("pending welcome = %+v", pending[0])
+	}
+	accepted, err := store.AcceptMLSWelcomeForMember("pending-group", "lobby", "bob01", 1, "proposal-1", pending[0].WelcomeDigest)
+	if err != nil || !accepted {
+		t.Fatalf("accept pending welcome = accepted:%v err:%v", accepted, err)
+	}
+	pending, err = store.PendingMLSWelcomes("bob01")
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("accepted welcome still pending=%+v err=%v", pending, err)
+	}
+}
+
 func TestAuthStoreMLSCommitConcurrentWithoutProposalNeverAdvances(t *testing.T) {
 	store, _ := newTestAuthStore(t)
 	const attempts = 2

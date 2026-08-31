@@ -185,6 +185,17 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 				client.Send <- offlineMessage
 			}
 		}
+		pendingWelcomes, err := store.PendingMLSWelcomes(client.UserCode)
+		if err != nil {
+			log.Printf("failed to load pending MLS welcomes for %s", client.Username)
+		} else {
+			for _, pending := range pendingWelcomes {
+				client.Send <- Message{Type: "mls.group.welcome", GroupID: pending.GroupID,
+					Room: pending.Room, Epoch: pending.Epoch, ProposalID: pending.ProposalID,
+					WelcomeDigest: pending.WelcomeDigest, TargetUserCode: pending.TargetCode,
+					Welcome: pending.Welcome}
+			}
+		}
 	}
 	log.Printf("user logged in: %s (admin=%t)", client.Username, client.IsAdmin)
 

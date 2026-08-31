@@ -93,10 +93,13 @@ void GuiConnectionWorker::connectToServer(const QString& serverIp,
     explicitDisconnect_ = false;
     reconnectPolicy_.markConnected();
     reconnectTimerActive_ = false;
+    const bool preserveMlsState = savedConnection_.valid &&
+                                  savedConnection_.userCode.compare(userCode, Qt::CaseInsensitive) == 0;
     savedConnection_ = {serverIp, serverPort, username, userCode, caFile, tlsServerName, true};
     NetworkDiagnostics::writeConnectionEvent(QStringLiteral("connect_requested"), serverIp, serverPort,
                                               0, tlsServerName.isEmpty() ? QString() : QStringLiteral("tls_name=") + tlsServerName);
-    connectToServerWithRetries(serverIp, serverPort, username, userCode, caFile, tlsServerName, 1);
+    connectToServerWithRetries(serverIp, serverPort, username, userCode, caFile, tlsServerName, 1,
+                               true, preserveMlsState);
 }
 
 bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
@@ -106,7 +109,8 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
                                                       const QString& caFile,
                                                       const QString& tlsServerName,
                                                       const int attempts,
-                                                      const bool reportFailure) {
+                                                      const bool reportFailure,
+                                                      const bool preserveMlsState) {
     const int boundedAttempts = qMax(1, attempts);
     QString lastReason;
     connection::LoginResult loginResult = connection::LoginResult::kRetryableFailure;
@@ -135,7 +139,15 @@ bool GuiConnectionWorker::connectToServerWithRetries(const QString& serverIp,
             running_.store(true);
             receiveThread_ = std::thread(&GuiConnectionWorker::receiveLoop, this);
 #ifdef LAN_CHAT_ENABLE_MLSPP
-            resetMlsState();
+            if (!preserveMlsState) {
+                resetMlsState();
+            } else if (!mlsClient_) {
+                try {
+                    mlsClient_ = std::make_shared<MlsClient>(MlsClient::create(mlsIdentity(savedConnection_.userCode)));
+                } catch (...) {
+                    mlsClient_.reset();
+                }
+            }
             publishMlsKeyPackage();
 #endif
             emit connected(loginResponse.is_admin);
@@ -296,7 +308,7 @@ void GuiConnectionWorker::retrySavedConnection() {
     emit reconnectAttempt(reconnectPolicy_.attemptCount());
     if (connectToServerWithRetries(savedConnection_.serverIp, savedConnection_.serverPort,
                                    savedConnection_.username, savedConnection_.userCode,
-                                   savedConnection_.caFile, savedConnection_.tlsServerName, 1, false)) {
+                                   savedConnection_.caFile, savedConnection_.tlsServerName, 1, false, true)) {
         reconnectPolicy_.markConnected();
         return;
     }

@@ -228,6 +228,18 @@ type MLSGroupMembership struct {
 	Members []string
 }
 
+// PendingMLSWelcome is an opaque welcome awaiting acknowledgement from its
+// target. The server returns only the target's own pending records.
+type PendingMLSWelcome struct {
+	GroupID       string
+	Room          string
+	Epoch         uint64
+	TargetCode    string
+	ProposalID    string
+	Welcome       string
+	WelcomeDigest string
+}
+
 func (s *AuthStore) MLSGroupMembers(groupID string) ([]string, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("auth store is not initialized")
@@ -269,6 +281,44 @@ func (s *AuthStore) MLSGroupHasControlState(groupID string) (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// PendingMLSWelcomes returns unaccepted welcomes for an authenticated target.
+// A welcome is replayable only while its group remains at that welcome's
+// epoch; a later commit makes the stale pending record ineligible for replay.
+func (s *AuthStore) PendingMLSWelcomes(targetCode string) ([]PendingMLSWelcome, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("auth store is not initialized")
+	}
+	target, err := normalizeUserCode(targetCode)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`SELECT w.group_id,g.room,w.epoch,w.target_code,w.proposal_id,w.welcome,w.welcome_digest
+		FROM mls_group_welcomes w JOIN mls_groups g ON g.group_id=w.group_id AND g.current_epoch=w.epoch
+		WHERE w.target_code=? AND w.accepted=0 ORDER BY w.group_id,w.epoch`, target)
+	if err != nil {
+		return nil, fmt.Errorf("query pending MLS welcomes: %w", err)
+	}
+	defer rows.Close()
+	var pending []PendingMLSWelcome
+	for rows.Next() {
+		var welcome PendingMLSWelcome
+		var epoch int64
+		if err := rows.Scan(&welcome.GroupID, &welcome.Room, &epoch, &welcome.TargetCode,
+			&welcome.ProposalID, &welcome.Welcome, &welcome.WelcomeDigest); err != nil {
+			return nil, fmt.Errorf("scan pending MLS welcome: %w", err)
+		}
+		if epoch < 0 {
+			return nil, errors.New("pending MLS welcome has invalid epoch")
+		}
+		welcome.Epoch = uint64(epoch)
+		pending = append(pending, welcome)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending MLS welcomes: %w", err)
+	}
+	return pending, nil
 }
 
 func encodeMLSMemberSnapshot(members []string) (string, error) {

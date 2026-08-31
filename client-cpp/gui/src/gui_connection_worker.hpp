@@ -103,7 +103,8 @@ private:
                                     const QString& caFile,
                                     const QString& tlsServerName,
                                     int attempts,
-                                    bool reportFailure = true);
+                                    bool reportFailure = true,
+                                    bool preserveMlsState = false);
     void retrySavedConnection();
     bool isLocalServerListening(int timeoutMs) const;
     void stopHostedServer();
