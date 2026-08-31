@@ -58,6 +58,9 @@ func TestHubMLSWelcomeRequiresTargetMembershipOrInvite(t *testing.T) {
 
 func TestHubMLSCommitRoutesIdempotentAcknowledgement(t *testing.T) {
 	hub, alice, _ := setupMLSHub(t)
+	if _, err := hub.OfflineStore.SaveMLSProposal("g", defaultRoomName, 4, "p1", "cHJvcG9zYWw="); err != nil {
+		t.Fatal(err)
+	}
 	request := MLSGroupCommitRequest{Sender: alice, GroupID: "g", Room: defaultRoomName, Epoch: 4,
 		Commit: "Y29tbWl0", CommandID: "c1"}
 	hub.handleMLSGroupCommit(request)
@@ -68,6 +71,21 @@ func TestHubMLSCommitRoutesIdempotentAcknowledgement(t *testing.T) {
 	hub.handleMLSGroupCommit(request)
 	if got := <-alice.Send; got.Type != "mls.group.commit" || got.Content != "duplicate" {
 		t.Fatalf("duplicate commit response = %+v", got)
+	}
+}
+
+func TestHubMLSCommitRejectsUnsolicitedEpoch(t *testing.T) {
+	hub, alice, bob := setupMLSHub(t)
+	request := MLSGroupCommitRequest{Sender: alice, GroupID: "unproposed", Room: defaultRoomName, Epoch: 1,
+		Commit: "Y29tbWl0", CommandID: "unrequested"}
+	hub.handleMLSGroupCommit(request)
+	if got := <-alice.Send; got.Type != "error" || got.Content != "MLS group commit requires an accepted proposal" {
+		t.Fatalf("unsolicited commit response = %+v", got)
+	}
+	select {
+	case got := <-bob.Send:
+		t.Fatalf("unsolicited commit was broadcast: %+v", got)
+	default:
 	}
 }
 
@@ -184,5 +202,16 @@ func TestMLSControlTraversesReadAndWritePumps(t *testing.T) {
 	}
 	if response.Type != "mls.group.proposal" || response.Content != "stored" || response.CommandID != "proposal1" {
 		t.Fatalf("MLS proposal response = %+v", response)
+	}
+	if err := sendMessage(clientConn, Message{Type: "mls.group.commit", CommandID: "commit-before-proposal",
+		GroupID: "group-without-proposal", Room: defaultRoomName, Epoch: 1, Commit: "Y29tbWl0"}); err != nil {
+		t.Fatal(err)
+	}
+	response, err = receiveMessage(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Type != "error" || response.Content != "MLS group commit requires an accepted proposal" {
+		t.Fatalf("unsolicited MLS commit response = %+v", response)
 	}
 }

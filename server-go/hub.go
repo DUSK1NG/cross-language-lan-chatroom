@@ -1317,6 +1317,8 @@ func (h *Hub) handleMLSGroupCommit(request MLSGroupCommitRequest) {
 			content = "MLS group epoch rollback"
 		} else if errors.Is(err, ErrMLSCommitConflict) {
 			content = "MLS group commit conflict"
+		} else if errors.Is(err, ErrMLSProposalMissing) {
+			content = "MLS group commit requires an accepted proposal"
 		}
 		h.deliverError(sender, content, "", request.CommandID)
 		return

@@ -8,6 +8,7 @@ import (
 	"net"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,6 +26,9 @@ func TestAuthStorePersistsMLSKeyPackagesAndCommitIdempotency(t *testing.T) {
 	}
 	if got, _ := store.FetchMLSKeyPackage("alice01"); got != "bmV3" {
 		t.Fatalf("updated key package = %q", got)
+	}
+	if inserted, err := store.SaveMLSProposal("group-1", "lobby", 3, "proposal-1", "cHJvcG9zYWw="); err != nil || !inserted {
+		t.Fatalf("proposal inserted=%t err=%v", inserted, err)
 	}
 	inserted, err := store.SaveMLSCommit("group-1", "lobby", 3, "Y29tbWl0")
 	if err != nil || !inserted {
@@ -55,6 +59,35 @@ func TestAuthStoreMLSWelcomeIsOpaqueAndIdempotent(t *testing.T) {
 	}
 	if _, err := store.SaveMLSWelcome("group-1", "lobby", 2, "bob01", "b3RoZXI="); !errors.Is(err, ErrMLSWelcomeConflict) {
 		t.Fatalf("conflicting welcome error = %v", err)
+	}
+}
+
+func TestAuthStoreMLSCommitConcurrentWithoutProposalNeverAdvances(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	const attempts = 2
+	results := make(chan error, attempts)
+	var wait sync.WaitGroup
+	wait.Add(attempts)
+	for index := 0; index < attempts; index++ {
+		go func() {
+			defer wait.Done()
+			_, err := store.SaveMLSCommit("concurrent-group", "lobby", 1, "Y29tbWl0")
+			results <- err
+		}()
+	}
+	wait.Wait()
+	close(results)
+	for err := range results {
+		if err == nil {
+			t.Fatal("an unsolicited concurrent commit advanced the MLS group")
+		}
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(1) FROM mls_group_epochs WHERE group_id = ?`, "concurrent-group").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("concurrent unsolicited commits persisted %d epochs", count)
 	}
 }
 

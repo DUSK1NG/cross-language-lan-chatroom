@@ -25,6 +25,7 @@ const (
 var ErrAccountAlreadyExists = errors.New("account already exists")
 var ErrMLSCommitConflict = errors.New("MLS commit conflicts with existing epoch")
 var ErrMLSEpochRollback = errors.New("MLS commit epoch rolls back current group epoch")
+var ErrMLSProposalMissing = errors.New("MLS commit has no accepted proposal")
 var ErrMLSWelcomeConflict = errors.New("MLS welcome conflicts with existing target")
 var ErrMLSProposalConflict = errors.New("MLS proposal conflicts with existing proposal")
 
@@ -288,6 +289,17 @@ func (s *AuthStore) SaveMLSCommit(groupID, room string, epoch uint64, commit str
 		if _, err := tx.Exec(`INSERT INTO mls_groups(group_id, room, current_epoch) VALUES (?, ?, -1)`, groupID, room); err != nil {
 			return false, fmt.Errorf("create MLS group: %w", err)
 		}
+	}
+	// A commit is accepted only after at least one proposal for this exact
+	// group/epoch has been durably accepted in the same database. Keeping this
+	// check inside the write transaction closes the check-then-insert race and
+	// prevents members from advancing a group with an unsolicited commit.
+	var proposalCount int
+	if err := tx.QueryRow(`SELECT COUNT(1) FROM mls_group_proposals WHERE group_id = ? AND epoch = ?`, groupID, epochValue).Scan(&proposalCount); err != nil {
+		return false, fmt.Errorf("query MLS proposal for commit: %w", err)
+	}
+	if proposalCount == 0 {
+		return false, ErrMLSProposalMissing
 	}
 	if _, err := tx.Exec(`INSERT INTO mls_group_epochs(group_id, epoch, commit_data, created_at) VALUES (?, ?, ?, ?)`,
 		groupID, epochValue, commit, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {

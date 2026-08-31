@@ -485,7 +485,7 @@ void GuiConnectionWorker::addMlsMember(const QString& room, const QString& group
     }
     const QString normalizedRoom = room.trimmed();
     const QString normalizedGroup = groupId.trimmed();
-    const QString normalizedTarget = targetUserCode.trimmed();
+    const QString normalizedTarget = targetUserCode.trimmed().toLower();
     if (normalizedRoom.isEmpty() || normalizedGroup.isEmpty() || normalizedTarget.isEmpty()) {
         emit mlsCommandResult(commandId, false, QStringLiteral("invalid_mls_request"),
                               QStringLiteral("MLS room, group and target are required"));
@@ -679,7 +679,7 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
 #ifdef LAN_CHAT_ENABLE_MLSPP
     try {
         if (incoming.type == "mls.key_package.fetch" && !incoming.key_package.empty()) {
-            mlsKeyPackages_[QString::fromStdString(incoming.target_user_code)] = QByteArray::fromStdString(incoming.key_package);
+            mlsKeyPackages_[QString::fromStdString(incoming.target_user_code).toLower()] = QByteArray::fromStdString(incoming.key_package);
             const QString commandId = QString::fromStdString(incoming.command_id);
             if (pendingMlsCommands_.remove(commandId)) {
                 emit mlsCommandResult(commandId, true, {}, {});
@@ -742,13 +742,28 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
                     return;
                 }
             } else {
+                if (!mlsClient_) {
+                    emit mlsCommandResult({}, false, QStringLiteral("key_package_unavailable"),
+                                          QStringLiteral("No pending MLS key package is available for this welcome"));
+                    return;
+                }
                 MlsGroupState state;
-                state.client = std::make_shared<MlsClient>(MlsClient::create(mlsIdentity(savedConnection_.userCode)));
+                // The PendingJoin must be consumed by the exact MlsClient
+                // whose key package was published after authentication. A
+                // newly-created client has a different private init key even
+                // when its identity is identical, so its join would reject
+                // this welcome as not intended for its key package.
+                state.client = mlsClient_;
                 state.room = room;
                 state.client->join(decodeMlsOpaque(incoming.welcome));
                 state.epoch = incoming.epoch;
                 state.welcomes.emplace(incoming.epoch, welcome);
                 mlsGroups_.emplace(groupId, std::move(state));
+                // Key packages are single-use. Rotate the pending client so
+                // a later group invitation has a fresh package without
+                // disturbing the newly-created group's session.
+                mlsClient_ = std::make_shared<MlsClient>(MlsClient::create(mlsIdentity(savedConnection_.userCode)));
+                publishMlsKeyPackage();
                 return;
             }
             return;

@@ -13,6 +13,8 @@
 #include <QTcpSocket>
 #include <QThread>
 #include <QSignalSpy>
+#include <QScopeGuard>
+#include <QTemporaryDir>
 #include <QtTest>
 #include <winsock2.h>
 
@@ -55,6 +57,7 @@ private slots:
     void serverConnectionCompletesWithoutMessageLifetimeCorruption();
     void localHostConnectionCompletesWithoutMessageLifetimeCorruption();
     void approvedLanMemberConnectionCompletesAfterLoginPending();
+    void mlsControlRoundTripUsesProposalCommitWelcomeOrder();
     void usersResponseUsesBulkModelUpdates();
     void roomsResponseUsesBulkModelUpdates();
     void connectionApprovalStateIsExposedAndCleared();
@@ -398,6 +401,100 @@ void ChatBridgeTests::approvedLanMemberConnectionCompletesAfterLoginPending() {
     QVERIFY2(member.connected(), qPrintable(member.statusText()));
     member.disconnectFromServer();
     host.disconnectFromServer();
+}
+
+void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    QSKIP("MLS++ support is disabled for this build");
+#else
+    QTcpSocket portProbe;
+    portProbe.connectToHost(QStringLiteral("127.0.0.1"), 8888);
+    if (portProbe.waitForConnected(100)) {
+        QSKIP("Local port 8888 is occupied by an interactive host");
+    }
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    qputenv("LAN_CHAT_TEST_HOST_DATA_ROOT", temporary.path().toUtf8());
+    const auto clearTestRoot = qScopeGuard([]() { qunsetenv("LAN_CHAT_TEST_HOST_DATA_ROOT"); });
+    const HostPathResolver::HostPaths hostPaths =
+        HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
+    if (!hostPaths.available()) {
+        QSKIP("Local Host executable is not available in this checkout");
+    }
+
+    WinsockScope winsock;
+    QVERIFY2(winsock.result() == 0, "WSAStartup failed");
+    GuiChatController host;
+    QSignalSpy hostConnectedSpy(&host, &GuiChatController::connectedChanged);
+    QSignalSpy hostFailedSpy(&host, &GuiChatController::connectionFailed);
+    host.connectToLocalHost(hostPaths.serverExe, hostPaths.certFile, hostPaths.keyFile,
+                            temporary.filePath(QStringLiteral("chat.db")), "Alice", "A001");
+    QTRY_VERIFY_WITH_TIMEOUT(hostConnectedSpy.count() > 0 || hostFailedSpy.count() > 0, 12000);
+    QVERIFY2(host.connected(), qPrintable(host.statusText()));
+    QVERIFY(host.admin());
+
+    GuiChatController member;
+    QSignalSpy memberConnectedSpy(&member, &GuiChatController::connectedChanged);
+    QSignalSpy memberFailedSpy(&member, &GuiChatController::connectionFailed);
+    QSignalSpy memberMlsSpy(&member, &GuiChatController::mlsCommandResult);
+    member.connectToServerWithTlsName("127.0.0.1", 8888, "Bob", "B001", hostPaths.certFile, "localhost");
+    QTRY_VERIFY_WITH_TIMEOUT(!host.pendingConnectionApprovals().isEmpty(), 5000);
+    const QVariantMap request = host.pendingConnectionApprovals().front().toMap();
+    host.sendAdminAction("approve_connection", request.value("userCode").toString(), request.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(memberConnectedSpy.count() > 0 || memberFailedSpy.count() > 0, 12000);
+    QVERIFY2(member.connected(), qPrintable(member.statusText()));
+
+    QSignalSpy hostMlsSpy(&host, &GuiChatController::mlsCommandResult);
+    host.fetchMlsKeyPackage(QStringLiteral("lobby"), QStringLiteral("B001"), QStringLiteral("fetch-bob"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 0, 5000);
+    QCOMPARE(hostMlsSpy.at(0).at(0).toString(), QStringLiteral("fetch-bob"));
+    QVERIFY(hostMlsSpy.at(0).at(1).toBool());
+    host.addMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
+                      QStringLiteral("B001"), QStringLiteral("add-bob"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 1, 8000);
+    QCOMPARE(hostMlsSpy.at(1).at(0).toString(), QStringLiteral("add-bob"));
+    QVERIFY(hostMlsSpy.at(1).at(1).toBool());
+    // The pre-commit snapshot includes Bob, so he may receive the add-bob
+    // commit before his welcome. That expected group_unavailable result is
+    // asynchronous; discard it before asserting the next member's chain.
+    // The welcome acknowledgement is the host-side completion signal, but it
+    // does not emit a success signal on the joining client.
+    QTest::qWait(3000);
+    memberMlsSpy.clear();
+
+    GuiChatController newMember;
+    QSignalSpy newMemberConnectedSpy(&newMember, &GuiChatController::connectedChanged);
+    QSignalSpy newMemberFailedSpy(&newMember, &GuiChatController::connectionFailed);
+    newMember.connectToServerWithTlsName("127.0.0.1", 8888, "Carol", "C001", hostPaths.certFile, "localhost");
+    QTRY_VERIFY_WITH_TIMEOUT(!host.pendingConnectionApprovals().isEmpty(), 5000);
+    const QVariantMap newRequest = host.pendingConnectionApprovals().back().toMap();
+    host.sendAdminAction("approve_connection", newRequest.value("userCode").toString(), newRequest.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(newMemberConnectedSpy.count() > 0 || newMemberFailedSpy.count() > 0, 12000);
+    QVERIFY2(newMember.connected(), qPrintable(newMember.statusText()));
+
+    host.fetchMlsKeyPackage(QStringLiteral("lobby"), QStringLiteral("C001"), QStringLiteral("fetch-carol"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 2, 5000);
+    QCOMPARE(hostMlsSpy.at(2).at(0).toString(), QStringLiteral("fetch-carol"));
+    QVERIFY(hostMlsSpy.at(2).at(1).toBool());
+    host.addMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
+                      QStringLiteral("C001"), QStringLiteral("add-carol"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 3, 8000);
+    QCOMPARE(hostMlsSpy.at(3).at(0).toString(), QStringLiteral("add-carol"));
+    QVERIFY(hostMlsSpy.at(3).at(1).toBool());
+    for (int index = 0; index < memberMlsSpy.count(); ++index) {
+        const auto result = memberMlsSpy.at(index);
+        QVERIFY2(result.at(1).toBool(), "existing member rejected the proposal/commit chain");
+    }
+
+    host.removeMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
+                         QStringLiteral("B001"), QStringLiteral("remove-bob"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 4, 8000);
+    QCOMPARE(hostMlsSpy.at(4).at(0).toString(), QStringLiteral("remove-bob"));
+    QVERIFY(hostMlsSpy.at(4).at(1).toBool());
+    member.disconnectFromServer();
+    newMember.disconnectFromServer();
+    host.disconnectFromServer();
+#endif
 }
 
 void ChatBridgeTests::usersResponseUsesBulkModelUpdates() {
