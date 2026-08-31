@@ -817,9 +817,13 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
     QVERIFY(!bobKeyPackageDigest.isEmpty());
     QCOMPARE(hostMlsSpy.at(0).at(0).toString(), QStringLiteral("fetch-bob"));
     QVERIFY(hostMlsSpy.at(0).at(1).toBool());
+    // The legacy environment variable must never arm a production worker.
+    qputenv("LAN_CHAT_TEST_DROP_MLS_COMMIT_ONCE", "1");
     host.addMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
                       QStringLiteral("B001"), QStringLiteral("add-bob"));
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 1, 8000);
+    QVERIFY(!host.reconnecting());
+    qunsetenv("LAN_CHAT_TEST_DROP_MLS_COMMIT_ONCE");
     QCOMPARE(hostMlsSpy.at(1).at(0).toString(), QStringLiteral("add-bob"));
     QVERIFY2(hostMlsSpy.at(1).at(1).toBool(), qPrintable(QStringLiteral("add-bob failed: code=%1 detail=%2").arg(hostMlsSpy.at(1).at(2).toString(), hostMlsSpy.at(1).at(3).toString())));
     // The first proposal/commit snapshot contains only Alice. Bob is
@@ -887,13 +891,12 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
 
     // Drop the real host connection after the proposal acknowledgement and
     // before its commit send. Reconnect must resume the retained operation.
-    qputenv("LAN_CHAT_TEST_DROP_MLS_COMMIT_ONCE", "1");
+    host.enableDropNextMlsCommitForTesting();
 
     host.addMlsMember(QStringLiteral("lobby"), QStringLiteral("group-e2e"),
                       QStringLiteral("C001"), QStringLiteral("add-carol"));
     QTRY_VERIFY_WITH_TIMEOUT(host.reconnecting(), 5000);
     QTRY_VERIFY_WITH_TIMEOUT(host.connected(), 12000);
-    qunsetenv("LAN_CHAT_TEST_DROP_MLS_COMMIT_ONCE");
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > 3, 8000);
     QCOMPARE(hostMlsSpy.at(3).at(0).toString(), QStringLiteral("add-carol"));
     QVERIFY(hostMlsSpy.at(3).at(1).toBool());

@@ -14,6 +14,7 @@ find_package(Threads REQUIRED)
 option(LAN_CHAT_ENABLE_WEB_UI "Build the React WebEngine UI" ON)
 option(LAN_CHAT_ENABLE_PERF_OVERLAY "Enable the debug-only frame performance overlay" OFF)
 option(LAN_CHAT_ENABLE_MLSPP "Build the MLS++ client adapter and tests" OFF)
+option(LAN_CHAT_ENABLE_TEST_HOOKS "Enable explicit test-only runtime hooks" OFF)
 
 if(LAN_CHAT_ENABLE_MLSPP)
     if(NOT DEFINED MLSPP_SOURCE_DIR OR NOT EXISTS "${MLSPP_SOURCE_DIR}/CMakeLists.txt")
@@ -449,6 +450,9 @@ if(LAN_CHAT_ENABLE_MLSPP)
     )
     target_link_libraries(chat-bridge-tests PRIVATE mlspp)
     target_compile_definitions(chat-bridge-tests PRIVATE LAN_CHAT_ENABLE_MLSPP=1)
+    if(LAN_CHAT_ENABLE_TEST_HOOKS)
+        target_compile_definitions(chat-bridge-tests PRIVATE LAN_CHAT_ENABLE_TEST_HOOKS=1)
+    endif()
 endif()
 
 # Qt WebEngine also brings its own TLS stack. Loading the vcpkg OpenSSL DLLs

@@ -61,6 +61,9 @@ public slots:
     void inspectMlsGroup(const QString& groupId, const QString& commandId = {});
     void protectMls(const QString& groupId, const QByteArray& plaintext, const QString& commandId = {});
     void unprotectMls(const QString& groupId, const QByteArray& ciphertext, const QString& commandId = {});
+#if defined(LAN_CHAT_ENABLE_MLSPP) && defined(LAN_CHAT_ENABLE_TEST_HOOKS)
+    void enableDropNextMlsCommitForTesting();
+#endif
 
 signals:
     void disconnected();
@@ -161,6 +164,8 @@ private:
     std::map<QString, MlsGroupState> mlsGroups_;
     std::map<QString, PendingMlsOperation> pendingMlsOperations_;
     QSet<QString> pendingMlsCommands_;
-    bool testDroppedMlsCommit_ = false;
+#if defined(LAN_CHAT_ENABLE_TEST_HOOKS)
+    bool dropNextMlsCommitForTesting_ = false;
+#endif
 #endif
 };

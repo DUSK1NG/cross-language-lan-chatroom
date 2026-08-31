@@ -104,6 +104,12 @@ void GuiChatController::connectToServer(const QString& serverIp, int serverPort,
     connectToServerWithTlsName(serverIp, serverPort, username, userCode, caFile, {});
 }
 
+#if defined(LAN_CHAT_ENABLE_MLSPP) && defined(LAN_CHAT_ENABLE_TEST_HOOKS)
+void GuiChatController::enableDropNextMlsCommitForTesting() {
+    QMetaObject::invokeMethod(worker_, "enableDropNextMlsCommitForTesting", Qt::QueuedConnection);
+}
+#endif
+
 void GuiChatController::connectToServerWithTlsName(const QString& serverIp, int serverPort,
                                                    const QString& username, const QString& userCode,
                                                    const QString& caFile, const QString& tlsServerName) {

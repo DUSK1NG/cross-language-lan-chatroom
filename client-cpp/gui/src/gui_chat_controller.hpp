@@ -107,6 +107,9 @@ public:
     Q_INVOKABLE void inspectMlsGroup(const QString& groupId, const QString& commandId = {});
     Q_INVOKABLE void protectMls(const QString& groupId, const QByteArray& plaintext, const QString& commandId = {});
     Q_INVOKABLE void unprotectMls(const QString& groupId, const QByteArray& ciphertext, const QString& commandId = {});
+#if defined(LAN_CHAT_ENABLE_MLSPP) && defined(LAN_CHAT_ENABLE_TEST_HOOKS)
+    void enableDropNextMlsCommitForTesting();
+#endif
 
 signals:
     void connectedChanged();

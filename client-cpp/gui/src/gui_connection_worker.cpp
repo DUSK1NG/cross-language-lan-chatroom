@@ -728,6 +728,12 @@ void GuiConnectionWorker::unprotectMls(const QString& groupId, const QByteArray&
 #endif
 }
 
+#if defined(LAN_CHAT_ENABLE_MLSPP) && defined(LAN_CHAT_ENABLE_TEST_HOOKS)
+void GuiConnectionWorker::enableDropNextMlsCommitForTesting() {
+    dropNextMlsCommitForTesting_ = true;
+}
+#endif
+
 void GuiConnectionWorker::publishMlsKeyPackage() {
 #ifdef LAN_CHAT_ENABLE_MLSPP
     if (!connection_ || !connection_->is_ready() || !mlsClient_) {
@@ -835,11 +841,13 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
             commitMessage.commit = operation.commit.toStdString();
             commitMessage.command_id = commandId.toStdString();
             operation.phase = PendingMlsOperation::Phase::Commit;
-            if (!testDroppedMlsCommit_ && qEnvironmentVariableIntValue("LAN_CHAT_TEST_DROP_MLS_COMMIT_ONCE") != 0) {
-                testDroppedMlsCommit_ = true;
+            #if defined(LAN_CHAT_ENABLE_TEST_HOOKS)
+            if (dropNextMlsCommitForTesting_) {
+                dropNextMlsCommitForTesting_ = false;
                 connection_->close_current();
                 return;
             }
+            #endif
             if (!connection_->send(commitMessage)) {
                 pendingMlsOperations_.erase(operationIt);
                 pendingMlsCommands_.remove(commandId);

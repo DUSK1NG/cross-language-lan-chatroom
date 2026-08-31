@@ -5,10 +5,10 @@ param(
     [string]$ManifestPath = (Join-Path $PSScriptRoot '..\vendor\mls\manifest.json')
 )
 $ErrorActionPreference = 'Stop'
-$manifest = Get-Content -Raw $ManifestPath | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 if (-not (Get-Command cmake.exe -ErrorAction SilentlyContinue)) { throw 'cmake.exe is required.' }
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'MSVC cl.exe is required; run from an x64 VS Developer Command Prompt.' }
-if (-not (Test-Path (Join-Path $OpenSslRoot 'include\openssl\ssl.h'))) { throw "OpenSSL 3 headers are missing: $OpenSslRoot" }
+if (-not (Test-Path -LiteralPath (Join-Path $OpenSslRoot 'include\openssl\ssl.h') -PathType Leaf)) { throw "OpenSSL 3 headers are missing: $OpenSslRoot" }
 $CacheDirectory = [IO.Path]::GetFullPath($CacheDirectory)
 $OpenSslRoot = [IO.Path]::GetFullPath($OpenSslRoot)
 $ManifestPath = [IO.Path]::GetFullPath($ManifestPath)
@@ -17,7 +17,7 @@ New-Item -ItemType Directory -Force -Path $CacheDirectory | Out-Null
 
 function Get-VerifiedArchive($spec, [string]$name) {
     $archive = Join-Path $CacheDirectory ($name + '.tar.gz')
-    if (-not (Test-Path $archive)) {
+    if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
         Invoke-WebRequest -Uri ($spec.repository + '/archive/' + $spec.commit + '.tar.gz') -OutFile $archive
     }
     $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -29,13 +29,13 @@ function Get-VerifiedArchive($spec, [string]$name) {
 
 function Expand-Verified($archive, [string]$name) {
     $destination = Join-Path $CacheDirectory ($name + '-source')
-    $root = Get-ChildItem $destination -Directory -ErrorAction SilentlyContinue | Where-Object Name -like ('*' + $manifest.$name.commit) | Select-Object -First 1
-    if ($null -eq $root -or -not (Test-Path (Join-Path $root.FullName 'CMakeLists.txt'))) {
+    $root = Get-ChildItem -LiteralPath $destination -Directory -ErrorAction SilentlyContinue | Where-Object Name -like ('*' + $manifest.$name.commit) | Select-Object -First 1
+    if ($null -eq $root -or -not (Test-Path -LiteralPath (Join-Path $root.FullName 'CMakeLists.txt') -PathType Leaf)) {
         New-Item -ItemType Directory -Force -Path $destination | Out-Null
         tar -xf $archive -C $destination
-        $root = Get-ChildItem $destination -Directory | Where-Object Name -like ('*' + $manifest.$name.commit) | Select-Object -First 1
+        $root = Get-ChildItem -LiteralPath $destination -Directory | Where-Object Name -like ('*' + $manifest.$name.commit) | Select-Object -First 1
     }
-    if ($null -eq $root -or -not (Test-Path (Join-Path $root.FullName 'CMakeLists.txt'))) { throw "Extracted $name source is incomplete." }
+    if ($null -eq $root -or -not (Test-Path -LiteralPath (Join-Path $root.FullName 'CMakeLists.txt') -PathType Leaf)) { throw "Extracted $name source is incomplete." }
     if ($name -eq 'mlspp') {
         $sourceDigest = Get-SourceDigest $root.FullName
         if ($sourceDigest -ne $manifest.mlspp.sourceDigest.sha256.ToUpperInvariant()) {
