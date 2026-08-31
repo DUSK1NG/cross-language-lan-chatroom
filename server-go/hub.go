@@ -1351,6 +1351,9 @@ func (h *Hub) handleMLSGroupCommit(request MLSGroupCommitRequest) {
 			if errors.Is(err, ErrMLSProposalMissing) {
 				content = "MLS group commit requires an accepted proposal"
 			}
+			if errors.Is(err, ErrMLSGroupPendingWelcome) {
+				content = "MLS group has pending welcome"
+			}
 			h.deliverError(sender, content, "", request.CommandID)
 			return
 		}
@@ -1440,6 +1443,9 @@ func (h *Hub) handleMLSGroupProposal(request MLSGroupProposalRequest) {
 			}
 			if errors.Is(err, ErrMLSProposalConflict) || errors.Is(err, ErrMLSMemberConflict) {
 				content = "MLS group proposal conflict"
+			}
+			if errors.Is(err, ErrMLSGroupPendingWelcome) {
+				content = "MLS group has pending welcome"
 			}
 			h.deliverError(sender, content, "", request.CommandID)
 			return

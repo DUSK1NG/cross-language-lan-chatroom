@@ -489,6 +489,7 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
     QSignalSpy hostConnectedSpy(&host, &GuiChatController::connectedChanged);
     QSignalSpy hostFailedSpy(&host, &GuiChatController::connectionFailed);
     QSignalSpy hostMlsSpy(&host, &GuiChatController::mlsCommandResult);
+    QSignalSpy hostGroupSpy(&host, &GuiChatController::mlsGroupState);
     host.connectToLocalHost(hostPaths.serverExe, hostPaths.certFile, hostPaths.keyFile,
                             temporary.filePath(QStringLiteral("chat.db")), "Alice", "A001");
     QTRY_VERIFY_WITH_TIMEOUT(hostConnectedSpy.count() > 0 || hostFailedSpy.count() > 0, 12000);
@@ -499,15 +500,17 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
     QSignalSpy memberConnectedSpy(&member, &GuiChatController::connectedChanged);
     QSignalSpy memberFailedSpy(&member, &GuiChatController::connectionFailed);
     member.connectToServerWithTlsName("127.0.0.1", 8888, "Bob", "B001", hostPaths.certFile, "localhost");
-    QTRY_VERIFY_WITH_TIMEOUT(!host.pendingConnectionApprovals().isEmpty(), 5000);
     QVariantMap memberRequest;
-    for (const QVariant& value : host.pendingConnectionApprovals()) {
-        const auto request = value.toMap();
-        if (request.value("userCode").toString().compare(QStringLiteral("B001"), Qt::CaseInsensitive) == 0) {
-            memberRequest = request;
-            break;
+    QTRY_VERIFY_WITH_TIMEOUT([&]() {
+        for (const QVariant& value : host.pendingConnectionApprovals()) {
+            const auto request = value.toMap();
+            if (request.value("userCode").toString().compare(QStringLiteral("B001"), Qt::CaseInsensitive) == 0) {
+                memberRequest = request;
+                return true;
+            }
         }
-    }
+        return false;
+    }(), 5000);
     QVERIFY(!memberRequest.isEmpty());
     host.sendAdminAction("approve_connection", memberRequest.value("userCode").toString(),
                          memberRequest.value("id").toString());
@@ -531,15 +534,17 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
     QSignalSpy newMemberMlsSpy(&newMember, &GuiChatController::mlsCommandResult);
     QSignalSpy newMemberGroupSpy(&newMember, &GuiChatController::mlsGroupState);
     newMember.connectToServerWithTlsName("127.0.0.1", 8888, "Carol", "C001", hostPaths.certFile, "localhost");
-    QTRY_VERIFY_WITH_TIMEOUT(!host.pendingConnectionApprovals().isEmpty(), 5000);
     QVariantMap newMemberRequest;
-    for (const QVariant& value : host.pendingConnectionApprovals()) {
-        const auto request = value.toMap();
-        if (request.value("userCode").toString().compare(QStringLiteral("C001"), Qt::CaseInsensitive) == 0) {
-            newMemberRequest = request;
-            break;
+    QTRY_VERIFY_WITH_TIMEOUT([&]() {
+        for (const QVariant& value : host.pendingConnectionApprovals()) {
+            const auto request = value.toMap();
+            if (request.value("userCode").toString().compare(QStringLiteral("C001"), Qt::CaseInsensitive) == 0) {
+                newMemberRequest = request;
+                return true;
+            }
         }
-    }
+        return false;
+    }(), 5000);
     QVERIFY(!newMemberRequest.isEmpty());
     host.sendAdminAction("approve_connection", newMemberRequest.value("userCode").toString(),
                          newMemberRequest.value("id").toString());
@@ -657,6 +662,25 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
     QJsonObject bobLogin;
     QVERIFY(receiveRawTlsType(rawBob, QStringLiteral("login_ok"), &bobLogin, 5000));
 
+    // A valid member can persist a proposal without advancing the group. A
+    // commit that skips the next epoch must still be rejected by the server.
+    const QJsonObject acceptedProposalWithoutCommit{{"type", "mls.group.proposal"},
+                                                    {"command_id", "raw-no-commit-proposal"},
+                                                    {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
+                                                    {"proposal_id", "raw-no-commit-proposal"}, {"action", "add"},
+                                                    {"target_user_code", "C001"}, {"proposal", "Yg=="}};
+    QVERIFY(expectRawAck(rawBob, acceptedProposalWithoutCommit, QStringLiteral("mls.group.proposal"),
+                         QStringLiteral("raw-no-commit-proposal"), QStringLiteral("stored")));
+    QTest::qWait(300);
+    const QJsonObject skippedEpochCommit{{"type", "mls.group.commit"}, {"command_id", "raw-skipped-epoch"},
+                                         {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 3},
+                                         {"proposal_id", "raw-no-commit-proposal"}, {"commit", "Yw=="}};
+    QVERIFY(expectRawError(rawBob, skippedEpochCommit, QStringLiteral("raw-skipped-epoch"),
+                           QStringLiteral("MLS group commit conflict")));
+    host.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("raw-before-no-commit"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostGroupSpy.count() > 0, 5000);
+    QCOMPARE(hostGroupSpy.at(0).at(3).toULongLong(), quint64(1));
+
     const QJsonObject missingProposalCommit{{"type", "mls.group.commit"}, {"command_id", "raw-missing-proposal"},
                                             {"group_id", "group-e2e"}, {"room", "lobby"}, {"epoch", 2},
                                             {"proposal_id", "missing-proposal"}, {"commit", "Y29tbWl0"}};
@@ -703,7 +727,6 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
     // The opaque tampered commit is intentionally persisted by the server;
     // cryptographic rejection is a client responsibility. Alice's real MLS
     // session must nevertheless stay at epoch 1 after receiving it.
-    QSignalSpy hostGroupSpy(&host, &GuiChatController::mlsGroupState);
     host.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("raw-before"));
     QTRY_VERIFY_WITH_TIMEOUT(hostGroupSpy.count() > 0, 5000);
     QCOMPARE(hostGroupSpy.at(0).at(3).toULongLong(), quint64(1));
@@ -925,6 +948,71 @@ void ChatBridgeTests::mlsControlRoundTripUsesProposalCommitWelcomeOrder() {
     member.unprotectMls(QStringLiteral("group-e2e"), postRemovalCiphertext, QStringLiteral("bob-after-remove"));
     QTRY_VERIFY_WITH_TIMEOUT(memberDataSpy.count() > 0, 5000);
     QVERIFY(!memberDataSpy.at(0).at(1).toBool());
+
+    // A second transient disconnect must replay no accepted welcome and must
+    // preserve the existing Carol group/session at the same epoch.
+    const int mlsResultsBeforeReconnect = newMemberMlsSpy.count();
+    const int groupStatesBeforeReconnect = newMemberGroupSpy.count();
+    QVERIFY(QMetaObject::invokeMethod(&newMember, "handleConnectionLost", Qt::DirectConnection,
+                                      Q_ARG(QString, QStringLiteral("second transient disconnect"))));
+    QTRY_VERIFY_WITH_TIMEOUT(newMember.reconnecting(), 1000);
+    QVariantMap secondReconnectRequest;
+    QTRY_VERIFY_WITH_TIMEOUT([&]() {
+        for (const QVariant& value : host.pendingConnectionApprovals()) {
+            const QVariantMap candidate = value.toMap();
+            if (candidate.value("userCode").toString().compare(QStringLiteral("C001"), Qt::CaseInsensitive) == 0) {
+                secondReconnectRequest = candidate;
+                return true;
+            }
+        }
+        return false;
+    }(), 5000);
+    host.sendAdminAction("approve_connection", secondReconnectRequest.value("userCode").toString(),
+                         secondReconnectRequest.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(newMember.connected(), 12000);
+    QTest::qWait(500);
+    QCOMPARE(newMemberMlsSpy.count(), mlsResultsBeforeReconnect);
+    newMember.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-carol-reconnect"));
+    QTRY_VERIFY_WITH_TIMEOUT(newMemberGroupSpy.count() > groupStatesBeforeReconnect, 5000);
+    QCOMPARE(newMemberGroupSpy.back().at(3).toULongLong(), quint64(3));
+
+    hostDataSpy.clear();
+    newMemberDataSpy.clear();
+    host.protectMls(QStringLiteral("group-e2e"), QByteArrayLiteral("after-reconnect"), QStringLiteral("protect-reconnect"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostDataSpy.count() > 0, 5000);
+    QVERIFY(hostDataSpy.at(0).at(1).toBool());
+    newMember.unprotectMls(QStringLiteral("group-e2e"), hostDataSpy.at(0).at(2).toByteArray(), QStringLiteral("unprotect-reconnect"));
+    QTRY_VERIFY_WITH_TIMEOUT(newMemberDataSpy.count() > 0, 5000);
+    QVERIFY(newMemberDataSpy.at(0).at(1).toBool());
+    QCOMPARE(newMemberDataSpy.at(0).at(2).toByteArray(), QByteArrayLiteral("after-reconnect"));
+
+    // Switching identity on the same worker must discard the old group
+    // session; the new identity still publishes its own fresh key package.
+    const int groupStatesBeforeIdentitySwitch = newMemberGroupSpy.count();
+    newMember.connectToServerWithTlsName("127.0.0.1", 8888, "Dave", "D001", hostPaths.certFile, "localhost");
+    QVariantMap identityRequest;
+    QTRY_VERIFY_WITH_TIMEOUT([&]() {
+        for (const QVariant& value : host.pendingConnectionApprovals()) {
+            const QVariantMap candidate = value.toMap();
+            if (candidate.value("userCode").toString().compare(QStringLiteral("D001"), Qt::CaseInsensitive) == 0) {
+                identityRequest = candidate;
+                return true;
+            }
+        }
+        return false;
+    }(), 5000);
+    host.sendAdminAction("approve_connection", identityRequest.value("userCode").toString(),
+                         identityRequest.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(newMember.connected(), 12000);
+    newMember.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("state-after-identity-switch"));
+    QTRY_VERIFY_WITH_TIMEOUT(newMemberGroupSpy.count() > groupStatesBeforeIdentitySwitch, 5000);
+    QVERIFY(!newMemberGroupSpy.back().at(1).toBool());
+    const int fetchD001Before = hostMlsSpy.count();
+    host.fetchMlsKeyPackage(QStringLiteral("lobby"), QStringLiteral("D001"), QStringLiteral("fetch-dave"));
+    QTRY_VERIFY_WITH_TIMEOUT(hostMlsSpy.count() > fetchD001Before, 5000);
+    QVERIFY2(hostMlsSpy.at(fetchD001Before).at(1).toBool(),
+             qPrintable(QStringLiteral("fetch-dave failed: %1").arg(hostMlsSpy.at(fetchD001Before).at(3).toString())));
+
     member.disconnectFromServer();
     newMember.disconnectFromServer();
     host.disconnectFromServer();

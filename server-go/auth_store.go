@@ -30,6 +30,8 @@ var ErrMLSWelcomeConflict = errors.New("MLS welcome conflicts with existing targ
 var ErrMLSProposalConflict = errors.New("MLS proposal conflicts with existing proposal")
 var ErrMLSGroupMemberRequired = errors.New("MLS group member authorization required")
 var ErrMLSMemberConflict = errors.New("MLS group member state conflicts")
+var ErrMLSGroupPendingWelcome = errors.New("MLS group has pending welcome")
+var ErrMLSWelcomeStale = errors.New("MLS pending welcome is stale")
 
 func nullableCrypto(value json.RawMessage) any {
 	if len(value) == 0 {
@@ -294,8 +296,8 @@ func (s *AuthStore) PendingMLSWelcomes(targetCode string) ([]PendingMLSWelcome, 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT w.group_id,g.room,w.epoch,w.target_code,w.proposal_id,w.welcome,w.welcome_digest
-		FROM mls_group_welcomes w JOIN mls_groups g ON g.group_id=w.group_id AND g.current_epoch=w.epoch
+	rows, err := s.db.Query(`SELECT w.group_id,g.room,w.epoch,w.target_code,w.proposal_id,w.welcome,w.welcome_digest,g.current_epoch
+		FROM mls_group_welcomes w LEFT JOIN mls_groups g ON g.group_id=w.group_id
 		WHERE w.target_code=? AND w.accepted=0 ORDER BY w.group_id,w.epoch`, target)
 	if err != nil {
 		return nil, fmt.Errorf("query pending MLS welcomes: %w", err)
@@ -305,13 +307,16 @@ func (s *AuthStore) PendingMLSWelcomes(targetCode string) ([]PendingMLSWelcome, 
 	for rows.Next() {
 		var welcome PendingMLSWelcome
 		var epoch int64
-		if err := rows.Scan(&welcome.GroupID, &welcome.Room, &epoch, &welcome.TargetCode,
-			&welcome.ProposalID, &welcome.Welcome, &welcome.WelcomeDigest); err != nil {
+		var room sql.NullString
+		var currentEpoch sql.NullInt64
+		if err := rows.Scan(&welcome.GroupID, &room, &epoch, &welcome.TargetCode,
+			&welcome.ProposalID, &welcome.Welcome, &welcome.WelcomeDigest, &currentEpoch); err != nil {
 			return nil, fmt.Errorf("scan pending MLS welcome: %w", err)
 		}
-		if epoch < 0 {
-			return nil, errors.New("pending MLS welcome has invalid epoch")
+		if epoch < 0 || !room.Valid || !currentEpoch.Valid || currentEpoch.Int64 < 0 || epoch != currentEpoch.Int64 {
+			return nil, fmt.Errorf("%w: group=%s", ErrMLSWelcomeStale, welcome.GroupID)
 		}
+		welcome.Room = room.String
 		welcome.Epoch = uint64(epoch)
 		pending = append(pending, welcome)
 	}
@@ -319,6 +324,17 @@ func (s *AuthStore) PendingMLSWelcomes(targetCode string) ([]PendingMLSWelcome, 
 		return nil, fmt.Errorf("iterate pending MLS welcomes: %w", err)
 	}
 	return pending, nil
+}
+
+func hasPendingMLSWelcome(tx *sql.Tx, groupID string) (bool, error) {
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(1)
+		FROM mls_group_welcomes w
+		JOIN mls_group_proposals p ON p.group_id=w.group_id AND p.epoch=w.epoch AND p.proposal_id=w.proposal_id
+		WHERE w.group_id=? AND w.accepted=0 AND p.action='add'`, groupID).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func encodeMLSMemberSnapshot(members []string) (string, error) {
@@ -437,6 +453,11 @@ func (s *AuthStore) SaveMLSCommit(groupID, room string, epoch uint64, commit str
 			return false, fmt.Errorf("create MLS group: %w", err)
 		}
 	}
+	if pending, err := hasPendingMLSWelcome(tx, groupID); err != nil {
+		return false, fmt.Errorf("query pending MLS welcome: %w", err)
+	} else if pending {
+		return false, ErrMLSGroupPendingWelcome
+	}
 	// A commit is accepted only after at least one proposal for this exact
 	// group/epoch has been durably accepted in the same database. Keeping this
 	// check inside the write transaction closes the check-then-insert race and
@@ -517,6 +538,11 @@ func (s *AuthStore) SaveMLSCommitForMember(groupID, room, senderCode, proposalID
 	}
 	if existingRoom != room {
 		return false, result, ErrMLSCommitConflict
+	}
+	if pending, err := hasPendingMLSWelcome(tx, groupID); err != nil {
+		return false, result, fmt.Errorf("query pending MLS welcome: %w", err)
+	} else if pending {
+		return false, result, ErrMLSGroupPendingWelcome
 	}
 	if currentEpoch >= 0 && epochValue != currentEpoch+1 {
 		if epochValue < currentEpoch {
@@ -643,6 +669,11 @@ func (s *AuthStore) SaveMLSProposal(groupID, room string, epoch uint64, proposal
 	} else if _, err := tx.Exec(`INSERT INTO mls_groups(group_id, room, current_epoch) VALUES (?, ?, -1)`, groupID, room); err != nil {
 		return false, fmt.Errorf("create MLS group for proposal: %w", err)
 	}
+	if pending, err := hasPendingMLSWelcome(tx, groupID); err != nil {
+		return false, fmt.Errorf("query pending MLS welcome: %w", err)
+	} else if pending {
+		return false, ErrMLSGroupPendingWelcome
+	}
 	if _, err := tx.Exec(`INSERT INTO mls_group_proposals(group_id, epoch, proposal_id, proposal_data, proposal_digest, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		groupID, epochValue, proposalID, proposal, digest, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return false, fmt.Errorf("save MLS proposal: %w", err)
@@ -745,6 +776,11 @@ func (s *AuthStore) SaveMLSProposalForMember(groupID, room, senderCode, action, 
 		}
 	} else if _, err := tx.Exec(`INSERT INTO mls_groups(group_id,room,current_epoch) VALUES (?,?, -1)`, groupID, room); err != nil {
 		return false, result, fmt.Errorf("create MLS group: %w", err)
+	}
+	if pending, err := hasPendingMLSWelcome(tx, groupID); err != nil {
+		return false, result, fmt.Errorf("query pending MLS welcome: %w", err)
+	} else if pending {
+		return false, result, ErrMLSGroupPendingWelcome
 	}
 	// A newly-created group has exactly its creator as a member. This is done
 	// in the same transaction as the first proposal, preventing room invites

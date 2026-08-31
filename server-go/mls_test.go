@@ -202,6 +202,43 @@ func TestHubMLSProposalAllowsAuthenticatedOfflineTargetInPublicRoom(t *testing.T
 	}
 }
 
+func TestHubMLSProgressIsSerializedUntilWelcomeAccepted(t *testing.T) {
+	hub, alice, bob := setupMLSHub(t)
+	proposal := MLSGroupProposalRequest{Sender: alice, GroupID: "serial", Room: defaultRoomName, Epoch: 1,
+		ProposalID: "p1", Action: "add", TargetCode: bob.UserCode, Proposal: "cHJvcG9zYWw=", CommandID: "p1"}
+	hub.handleMLSGroupProposal(proposal)
+	if got := <-alice.Send; got.Type != "mls.group.proposal" || got.Content != "stored" {
+		t.Fatalf("proposal acknowledgement = %+v", got)
+	}
+	commit := MLSGroupCommitRequest{Sender: alice, GroupID: "serial", Room: defaultRoomName, Epoch: 1,
+		ProposalID: "p1", Commit: "Y29tbWl0", CommandID: "c1"}
+	hub.handleMLSGroupCommit(commit)
+	if got := <-alice.Send; got.Type != "mls.group.commit" || got.Content != "stored" {
+		t.Fatalf("commit acknowledgement = %+v", got)
+	}
+	digest := sha256.Sum256([]byte("d2VsY29tZQ=="))
+	hub.handleMLSGroupWelcome(MLSGroupWelcomeRequest{Sender: alice, GroupID: "serial", Room: defaultRoomName,
+		Epoch: 1, ProposalID: "p1", TargetCode: bob.UserCode, WelcomeDigest: hex.EncodeToString(digest[:]),
+		Welcome: "d2VsY29tZQ==", CommandID: "w1"})
+	if got := <-bob.Send; got.Type != "mls.group.welcome" {
+		t.Fatalf("pending welcome delivery = %+v", got)
+	}
+	if got := <-alice.Send; got.Type != "mls.group.welcome" || got.Content != "stored" {
+		t.Fatalf("welcome acknowledgement = %+v", got)
+	}
+
+	hub.handleMLSGroupProposal(MLSGroupProposalRequest{Sender: alice, GroupID: "serial", Room: defaultRoomName, Epoch: 2,
+		ProposalID: "p2", Action: "add", TargetCode: bob.UserCode, Proposal: "cHJvcG9zYWwy", CommandID: "p2"})
+	if got := <-alice.Send; got.Type != "error" || got.Content != "MLS group has pending welcome" {
+		t.Fatalf("proposal during pending welcome = %+v", got)
+	}
+	hub.handleMLSGroupCommit(MLSGroupCommitRequest{Sender: alice, GroupID: "serial", Room: defaultRoomName, Epoch: 2,
+		ProposalID: "p2", Commit: "Y29tbWl0Mg==", CommandID: "c2"})
+	if got := <-alice.Send; got.Type != "error" || got.Content != "MLS group has pending welcome" {
+		t.Fatalf("commit during pending welcome = %+v", got)
+	}
+}
+
 func TestHubMLSAuthoritativeMembershipSnapshotAndWelcomeActivation(t *testing.T) {
 	hub, alice, bob := setupMLSHub(t)
 	carol := newTestClient(t, "Carol", "Carol01")

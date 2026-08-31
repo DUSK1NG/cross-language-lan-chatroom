@@ -92,6 +92,60 @@ func TestAuthStoreListsPendingMLSWelcomesForTarget(t *testing.T) {
 	}
 }
 
+func TestAuthStoreBlocksMLSProgressWhileWelcomePending(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if _, err := store.EnsureIdentity("Alice", "alice01"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.EnsureIdentity("Bob", "bob01"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveMLSProposalForMember("serial-group", "lobby", "alice01", "add", "bob01", 1, "proposal-1", "cHJvcG9zYWw="); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveMLSCommitForMember("serial-group", "lobby", "alice01", "proposal-1", 1, "Y29tbWl0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveMLSWelcomeForMember("serial-group", "lobby", "alice01", 1, "bob01", "proposal-1", "d2VsY29tZQ=="); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveMLSProposalForMember("serial-group", "lobby", "alice01", "add", "bob01", 2, "proposal-2", "cHJvcG9zYWwy"); !errors.Is(err, ErrMLSGroupPendingWelcome) {
+		t.Fatalf("proposal while welcome pending error=%v", err)
+	}
+	if _, _, err := store.SaveMLSCommitForMember("serial-group", "lobby", "alice01", "proposal-2", 2, "Y29tbWl0Mg=="); !errors.Is(err, ErrMLSGroupPendingWelcome) {
+		t.Fatalf("commit while welcome pending error=%v", err)
+	}
+	if _, err := store.SaveMLSProposal("serial-group", "lobby", 2, "legacy-proposal-2", "cHJvcG9zYWwy"); !errors.Is(err, ErrMLSGroupPendingWelcome) {
+		t.Fatalf("legacy proposal while welcome pending error=%v", err)
+	}
+}
+
+func TestAuthStoreDoesNotSilentlyDropStalePendingWelcome(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	if _, err := store.EnsureIdentity("Alice", "alice01"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.EnsureIdentity("Bob", "bob01"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveMLSProposalForMember("stale-group", "lobby", "alice01", "add", "bob01", 1, "proposal-1", "cHJvcG9zYWw="); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.SaveMLSCommitForMember("stale-group", "lobby", "alice01", "proposal-1", 1, "Y29tbWl0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveMLSWelcomeForMember("stale-group", "lobby", "alice01", 1, "bob01", "proposal-1", "d2VsY29tZQ=="); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE mls_groups SET current_epoch=2 WHERE group_id='stale-group'`); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.PendingMLSWelcomes("bob01")
+	if !errors.Is(err, ErrMLSWelcomeStale) {
+		t.Fatalf("stale pending welcomes=%+v err=%v", pending, err)
+	}
+}
+
 func TestAuthStoreMLSCommitConcurrentWithoutProposalNeverAdvances(t *testing.T) {
 	store, _ := newTestAuthStore(t)
 	const attempts = 2
