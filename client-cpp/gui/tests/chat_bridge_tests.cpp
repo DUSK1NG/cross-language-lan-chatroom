@@ -92,6 +92,21 @@ bool receiveRawTlsType(QSslSocket& socket, const QString& type, QJsonObject* obj
     }
     return false;
 }
+
+bool waitForLocalHostPortClosed(const int timeoutMs = 5000) {
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < timeoutMs) {
+        QTcpSocket probe;
+        probe.connectToHost(QStringLiteral("127.0.0.1"), 8888);
+        const bool connected = probe.waitForConnected(100);
+        probe.abort();
+        if (!connected) return true;
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QTest::qWait(50);
+    }
+    return false;
+}
 }  // namespace
 
 class ChatBridgeTests final : public QObject {
@@ -462,6 +477,7 @@ void ChatBridgeTests::approvedLanMemberConnectionCompletesAfterLoginPending() {
     QVERIFY2(member.connected(), qPrintable(member.statusText()));
     member.disconnectFromServer();
     host.disconnectFromServer();
+    QVERIFY2(waitForLocalHostPortClosed(), "local host remained listening after disconnect");
 }
 
 void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
