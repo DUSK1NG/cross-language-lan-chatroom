@@ -29,10 +29,12 @@ function Get-VerifiedArchive($spec, [string]$name) {
 
 function Expand-Verified($archive, [string]$name) {
     $destination = Join-Path $CacheDirectory ($name + '-source')
+    $freshExtraction = $false
     $root = Get-ChildItem -LiteralPath $destination -Directory -ErrorAction SilentlyContinue | Where-Object Name -like ('*' + $manifest.$name.commit) | Select-Object -First 1
     if ($null -eq $root -or -not (Test-Path -LiteralPath (Join-Path $root.FullName 'CMakeLists.txt') -PathType Leaf)) {
         New-Item -ItemType Directory -Force -Path $destination | Out-Null
         tar -xf $archive -C $destination
+        $freshExtraction = $true
         $root = Get-ChildItem -LiteralPath $destination -Directory | Where-Object Name -like ('*' + $manifest.$name.commit) | Select-Object -First 1
     }
     if ($null -eq $root -or -not (Test-Path -LiteralPath (Join-Path $root.FullName 'CMakeLists.txt') -PathType Leaf)) { throw "Extracted $name source is incomplete." }
@@ -41,13 +43,32 @@ function Expand-Verified($archive, [string]$name) {
         if ($sourceDigest -ne $manifest.mlspp.sourceDigest.sha256.ToUpperInvariant()) {
             throw "mlspp source digest mismatch: expected $($manifest.mlspp.sourceDigest.sha256), got $sourceDigest"
         }
+        $proofPath = Join-Path $root.FullName '.lan-chat-mlspp-source-proof.json'
+        if (Test-Path -LiteralPath $proofPath) {
+            if (-not (Test-Path -LiteralPath $proofPath -PathType Leaf)) { throw "MLS++ source proof is not a file: $proofPath" }
+            try { $existingProof = Get-Content -LiteralPath $proofPath -Raw | ConvertFrom-Json }
+            catch { throw "MLS++ source proof is invalid JSON: $proofPath" }
+            foreach ($field in @('repository', 'commit', 'archiveSha256', 'sourceDigest')) {
+                if (-not ($existingProof.PSObject.Properties.Name -contains $field) -or [string]::IsNullOrWhiteSpace([string]$existingProof.$field)) {
+                    throw "MLS++ source proof is missing field: $field"
+                }
+            }
+            if ([string]$existingProof.repository -cne [string]$manifest.mlspp.repository -or
+                [string]$existingProof.commit -cne [string]$manifest.mlspp.commit -or
+                [string]$existingProof.archiveSha256 -cne [string]$manifest.mlspp.archiveSha256 -or
+                [string]$existingProof.sourceDigest -cne [string]$manifest.mlspp.sourceDigest.sha256) {
+                throw "MLS++ source proof does not match the locked manifest: $proofPath"
+            }
+            return $root.FullName
+        }
+        if (-not $freshExtraction) { throw "MLS++ source proof is missing from an existing source tree: $proofPath" }
         $proof = [ordered]@{
             repository = $manifest.mlspp.repository
             commit = $manifest.mlspp.commit
             archiveSha256 = $manifest.mlspp.archiveSha256.ToUpperInvariant()
             sourceDigest = $sourceDigest
         }
-        $proof | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $root.FullName '.lan-chat-mlspp-source-proof.json')
+        $proof | ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath $proofPath
     }
     return $root.FullName
 }
