@@ -23,10 +23,10 @@
 - Modify: `server-go/auth_store.go`, `server-go/message.go`, `server-go/message_test.go`, `server-go/auth_store_test.go`
 - Create: `server-go/attachment_store.go`, `server-go/attachment_store_test.go`
 
-- [ ] 写失败测试：500MB 接受、500MB+1 拒绝；20GiB 精确上限与并发预占不得超额。
-- [ ] 创建 `attachments`, `attachment_uploads`, `attachment_chunks`, `room_quotas` 迁移和事务 API。
-- [ ] `attachment.init` 生成 UUID，校验成员权限与配额，并返回 `upload_id`；不接受客户端文件路径。
-- [ ] 运行 `go test ./... -race`；提交：`feat(attachments): add quota-backed upload metadata`。
+- [x] 写失败测试：500MB 接受、500MB+1 拒绝；20GiB 精确上限与并发预占不得超额。
+- [x] 创建 `attachments`, `attachment_uploads`, `attachment_chunks`, `room_quotas` 迁移和事务 API。
+- [x] `attachment.init` 生成 UUID，校验成员权限与配额，并返回 `upload_id`；不接受客户端文件路径。
+- [x] 运行 `go test ./... -race`；提交：`feat(attachments): add quota-backed upload metadata`。
 
 ### Task 2: 密文块上传与断点续传
 

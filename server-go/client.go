@@ -339,6 +339,16 @@ func (c *Client) readPump(hub *Hub) {
 			hub.MLSGroupWelcomeAccept <- MLSGroupWelcomeAcceptRequest{Sender: c, GroupID: message.GroupID, Room: message.Room,
 				Epoch: message.Epoch, ProposalID: message.ProposalID, WelcomeDigest: message.WelcomeDigest, TargetCode: targetCode, CommandID: message.CommandID}
 
+		case "attachment.init":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid attachment initialization"}) {
+					return
+				}
+				continue
+			}
+			hub.AttachmentInit <- AttachmentInitHubRequest{Sender: c, Room: message.Room,
+				LogicalSize: message.LogicalSize, CommandID: message.CommandID}
+
 		case "users_request":
 			hub.RequestUsers <- c
 

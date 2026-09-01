@@ -109,6 +109,13 @@ type MLSGroupWelcomeAcceptRequest struct {
 	CommandID     string
 }
 
+type AttachmentInitHubRequest struct {
+	Sender      *Client
+	Room        string
+	LogicalSize int64
+	CommandID   string
+}
+
 type RoomRequest struct {
 	Client *Client
 	Room   string
@@ -279,6 +286,7 @@ type Hub struct {
 	MLSGroupProposal           chan MLSGroupProposalRequest
 	MLSGroupWelcome            chan MLSGroupWelcomeRequest
 	MLSGroupWelcomeAccept      chan MLSGroupWelcomeAcceptRequest
+	AttachmentInit             chan AttachmentInitHubRequest
 	RoomJoin                   chan RoomRequest
 	RoomCreate                 chan RoomCreateRequest
 	RoomAction                 chan RoomActionRequest
@@ -318,6 +326,7 @@ func NewHub() *Hub {
 		MLSGroupProposal:         make(chan MLSGroupProposalRequest),
 		MLSGroupWelcome:          make(chan MLSGroupWelcomeRequest),
 		MLSGroupWelcomeAccept:    make(chan MLSGroupWelcomeAcceptRequest),
+		AttachmentInit:           make(chan AttachmentInitHubRequest),
 		RoomJoin:                 make(chan RoomRequest),
 		RoomCreate:               make(chan RoomCreateRequest),
 		RoomAction:               make(chan RoomActionRequest),
@@ -391,6 +400,8 @@ func (h *Hub) Run() {
 			h.handleMLSGroupWelcome(request)
 		case request := <-h.MLSGroupWelcomeAccept:
 			h.handleMLSGroupWelcomeAccept(request)
+		case request := <-h.AttachmentInit:
+			h.handleAttachmentInit(request)
 
 		case request := <-h.RoomJoin:
 			h.handleRoomJoin(request)
@@ -1608,6 +1619,36 @@ func (h *Hub) handleMLSGroupWelcomeAccept(request MLSGroupWelcomeAcceptRequest) 
 		content = "duplicate"
 	}
 	h.deliver(sender, Message{Type: "mls.group.welcome.accept", GroupID: request.GroupID, Room: room, Epoch: request.Epoch, ProposalID: request.ProposalID, WelcomeDigest: request.WelcomeDigest, Content: content, CommandID: request.CommandID})
+}
+
+func (h *Hub) handleAttachmentInit(request AttachmentInitHubRequest) {
+	sender := request.Sender
+	if sender == nil || !h.Clients[sender] || h.OfflineStore == nil {
+		if sender != nil {
+			h.deliverError(sender, "Attachment service unavailable", "", request.CommandID)
+		}
+		return
+	}
+	if !h.Rooms[request.Room][sender] {
+		h.deliverError(sender, "Attachment upload access denied", "", request.CommandID)
+		return
+	}
+	upload, err := h.OfflineStore.InitializeAttachment(AttachmentInitRequest{
+		Room: request.Room, AuthorCode: sender.NormalizedCode, LogicalSize: request.LogicalSize,
+	})
+	if err != nil {
+		content := "Attachment initialization failed"
+		if errors.Is(err, ErrAttachmentTooLarge) || errors.Is(err, ErrInvalidAttachmentSize) {
+			content = "Invalid attachment size"
+		} else if errors.Is(err, ErrRoomQuotaExceeded) {
+			content = "Room attachment quota exceeded"
+		}
+		h.deliverError(sender, content, "", request.CommandID)
+		return
+	}
+	h.deliver(sender, Message{Type: "attachment.init", Room: request.Room,
+		AttachmentID: upload.AttachmentID, UploadID: upload.UploadID, ChunkSize: upload.ChunkSize,
+		ExpiresAt: upload.ExpiresAt.Format(time.RFC3339Nano), CommandID: request.CommandID})
 }
 
 func (h *Hub) deliverRecall(record MessageRecord, message Message) {

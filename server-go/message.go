@@ -69,6 +69,13 @@ type Message struct {
 	Commit        string `json:"commit,omitempty"`
 	Welcome       string `json:"welcome,omitempty"`
 	WelcomeDigest string `json:"welcome_digest,omitempty"`
+	// Attachment fields carry only server-visible transfer metadata. Plaintext
+	// names and local paths belong exclusively in the encrypted manifest.
+	AttachmentID string `json:"attachment_id,omitempty"`
+	UploadID     string `json:"upload_id,omitempty"`
+	LogicalSize  int64  `json:"logical_size,omitempty"`
+	ChunkSize    int64  `json:"chunk_size,omitempty"`
+	ExpiresAt    string `json:"expires_at,omitempty"`
 	// Password is retained only so old database/test fixtures still compile;
 	// password authentication is removed and this field never crosses the wire.
 	Password string `json:"-"`
@@ -164,7 +171,30 @@ func receiveMessage(reader io.Reader) (Message, error) {
 	if message.Type == "" {
 		return Message{}, fmt.Errorf("message type is required")
 	}
+	if message.Type == "attachment.init" {
+		if err := validateAttachmentInitFrame(payload); err != nil {
+			return Message{}, err
+		}
+	}
 	return message, nil
+}
+
+// attachment.init is an inbound client command. Its narrow wire schema makes
+// it impossible to smuggle a client file path, display name, or server-issued
+// identifier into the server's attachment metadata.
+func validateAttachmentInitFrame(payload []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return fmt.Errorf("decode attachment init fields: %w", err)
+	}
+	for field := range fields {
+		switch field {
+		case "type", "command_id", "room", "logical_size":
+		default:
+			return fmt.Errorf("attachment init contains unsupported field %q", field)
+		}
+	}
+	return nil
 }
 
 func validateMessage(message Message) error {
@@ -326,6 +356,17 @@ func validateMessage(message Message) error {
 			if err := validateRoomName(message.Room); err != nil {
 				return err
 			}
+		}
+		return nil
+	case "attachment.init":
+		if err := validateRoomName(message.Room); err != nil {
+			return err
+		}
+		if message.LogicalSize <= 0 || message.LogicalSize > maxAttachmentLogicalBytes {
+			return fmt.Errorf("attachment logical size must be between 1 and %d", maxAttachmentLogicalBytes)
+		}
+		if message.Content != "" {
+			return fmt.Errorf("attachment init must not include text content")
 		}
 		return nil
 	case "users_request", "quit":

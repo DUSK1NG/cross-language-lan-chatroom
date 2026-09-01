@@ -10,6 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -47,7 +48,8 @@ type Account struct {
 }
 
 type AuthStore struct {
-	db *sql.DB
+	db           *sql.DB
+	attachmentMu sync.Mutex
 }
 
 type HistoryQuery struct {
@@ -218,6 +220,9 @@ CREATE TABLE IF NOT EXISTS mls_group_members (
 	}
 	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_offline_messages_message_id ON offline_messages(message_id)`); err != nil {
 		return fmt.Errorf("index offline message id: %w", err)
+	}
+	if err := s.initializeAttachmentSchema(); err != nil {
+		return err
 	}
 	return nil
 }
