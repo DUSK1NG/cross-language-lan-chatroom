@@ -515,6 +515,7 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
     GuiChatController member;
     QSignalSpy memberConnectedSpy(&member, &GuiChatController::connectedChanged);
     QSignalSpy memberFailedSpy(&member, &GuiChatController::connectionFailed);
+    QSignalSpy memberGroupSpy(&member, &GuiChatController::mlsGroupState);
     member.connectToServerWithTlsName("127.0.0.1", 8888, "Bob", "B001", hostPaths.certFile, "localhost");
     QVariantMap memberRequest;
     QTRY_VERIFY_WITH_TIMEOUT([&]() {
@@ -543,6 +544,10 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
     QTRY_VERIFY_WITH_TIMEOUT(hostMlsResultSpy.count() > 1, 8000);
     QVERIFY2(hostMlsResultSpy.at(1).at(1).toBool(), qPrintable(QStringLiteral("add-bob failed: %1")
                                                                  .arg(hostMlsResultSpy.at(1).at(3).toString())));
+    member.inspectMlsGroup(QStringLiteral("group-e2e"), QStringLiteral("raw-bob-ready"));
+    QTRY_VERIFY_WITH_TIMEOUT(memberGroupSpy.count() > 0, 5000);
+    QVERIFY2(memberGroupSpy.back().at(1).toBool(), "Bob did not complete the welcome before raw takeover");
+    QCOMPARE(memberGroupSpy.back().at(3).toULongLong(), quint64(1));
 
     GuiChatController newMember;
     QSignalSpy newMemberConnectedSpy(&newMember, &GuiChatController::connectedChanged);
