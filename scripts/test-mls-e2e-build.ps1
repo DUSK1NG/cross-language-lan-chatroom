@@ -285,7 +285,28 @@ foreach ($testName in @('mlsControlRoundTripUsesProposalCommitWelcomeOrder', 'au
             # Run each fixture in a fresh process. Repeating inside one QtTest
             # process can retain a just-stopped local server between rounds.
             $testOutput = Invoke-VsCommand $vsDevCmd $testExe @('-repeat', '1', $testName, '-o', "$resultPath,txt") $runtimePath
-            if ($script:LastVsExitCode -ne 0) { throw "Focused $testName iteration $iteration failed with exit $($script:LastVsExitCode): $($testOutput -join [Environment]::NewLine)" }
+            if ($script:LastVsExitCode -ne 0) {
+                # Preserve the native process output and QtTest result before
+                # the per-iteration temporary result is removed below. This
+                # is failure-only diagnostics; successful runs remain clean.
+                $failurePath = Join-Path $OutputRoot ("focused-$testName-$iteration-failure.txt")
+                $failureLines = @(
+                    "test=$testName"
+                    "iteration=$iteration"
+                    "exit=$script:LastVsExitCode"
+                    "command=$testExe -repeat 1 $testName -o $resultPath,txt"
+                    '--- process-output ---'
+                    ($testOutput | Out-String)
+                    '--- qttest-result ---'
+                )
+                if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+                    $failureLines += Get-Content -LiteralPath $resultPath
+                } else {
+                    $failureLines += '(QtTest result file was not created)'
+                }
+                Set-Content -LiteralPath $failurePath -Value $failureLines -Encoding UTF8
+                throw "Focused $testName iteration $iteration failed with exit $($script:LastVsExitCode): $($testOutput -join [Environment]::NewLine)"
+            }
             $resultText = ''
             if (Test-Path -LiteralPath $resultPath -PathType Leaf) { $resultText = Get-Content -LiteralPath $resultPath -Raw }
             $combined = ($testOutput -join [Environment]::NewLine) + "`n" + $resultText
