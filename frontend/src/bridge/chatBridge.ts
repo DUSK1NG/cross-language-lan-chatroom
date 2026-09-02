@@ -1,4 +1,4 @@
-import type { BridgeCommand, BridgeError, BridgeState, ChatBridgeClient, CommandResult } from './types';
+import type { AttachmentEvent, BridgeCommand, BridgeError, BridgeState, ChatBridgeClient, CommandResult } from './types';
 
 export type QtBridgeProxy = {
   currentStateJson(callback: (json: string) => void): void | string;
@@ -22,6 +22,7 @@ export class FakeChatBridge implements ChatBridgeClient {
   private readonly listeners = new Set<(state: BridgeState) => void>();
   private readonly resultListeners = new Set<(result: CommandResult) => void>();
   private readonly errorListeners = new Set<(error: BridgeError) => void>();
+  private readonly attachmentListeners = new Set<(event: AttachmentEvent) => void>();
   readonly commands: BridgeCommand[] = [];
 
   constructor(initialState: BridgeState) {
@@ -47,6 +48,11 @@ export class FakeChatBridge implements ChatBridgeClient {
     return () => this.resultListeners.delete(listener);
   }
 
+  subscribeAttachmentEvents(listener: (event: AttachmentEvent) => void): () => void {
+    this.attachmentListeners.add(listener);
+    return () => this.attachmentListeners.delete(listener);
+  }
+
   subscribeBridgeError(listener: (error: BridgeError) => void): () => void {
     this.errorListeners.add(listener);
     return () => this.errorListeners.delete(listener);
@@ -55,6 +61,10 @@ export class FakeChatBridge implements ChatBridgeClient {
   publish(state: BridgeState): void {
     this.state = state;
     this.listeners.forEach((listener) => listener(state));
+  }
+
+  publishAttachmentEvent(event: AttachmentEvent): void {
+    this.attachmentListeners.forEach((listener) => listener(event));
   }
 }
 
@@ -87,6 +97,7 @@ class QtChatBridge implements ChatBridgeClient {
   private readonly listeners = new Set<(state: BridgeState) => void>();
   private readonly resultListeners = new Set<(result: CommandResult) => void>();
   private readonly errorListeners = new Set<(error: BridgeError) => void>();
+  private readonly attachmentListeners = new Set<(event: AttachmentEvent) => void>();
 
   constructor(private readonly proxy: QtBridgeProxy, private state: BridgeState) {
     proxy.stateChanged.connect((json) => {
@@ -95,8 +106,12 @@ class QtChatBridge implements ChatBridgeClient {
       this.listeners.forEach((listener) => listener(nextState));
     });
     proxy.commandResult.connect((json) => {
-      const result = JSON.parse(json) as CommandResult;
-      this.resultListeners.forEach((listener) => listener(result));
+      const message = JSON.parse(json) as CommandResult | AttachmentEvent;
+      if ('type' in message && message.type === 'attachment.event') {
+        this.attachmentListeners.forEach((listener) => listener(message));
+        return;
+      }
+      this.resultListeners.forEach((listener) => listener(message as CommandResult));
     });
     proxy.bridgeError.connect((json) => {
       const error = JSON.parse(json) as BridgeError;
@@ -120,6 +135,11 @@ class QtChatBridge implements ChatBridgeClient {
   subscribeCommandResult(listener: (result: CommandResult) => void): () => void {
     this.resultListeners.add(listener);
     return () => this.resultListeners.delete(listener);
+  }
+
+  subscribeAttachmentEvents(listener: (event: AttachmentEvent) => void): () => void {
+    this.attachmentListeners.add(listener);
+    return () => this.attachmentListeners.delete(listener);
   }
 
   subscribeBridgeError(listener: (error: BridgeError) => void): () => void {

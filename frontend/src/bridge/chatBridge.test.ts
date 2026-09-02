@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createQtBridge, createWebChannelBridge } from './chatBridge';
-import type { BridgeState } from './types';
+import type { AttachmentEvent, BridgeState } from './types';
 
 const state: BridgeState = {
   schemaVersion: 1,
@@ -102,5 +102,48 @@ describe('createQtBridge', () => {
     resultListener?.('{"id":"web-1","ok":false,"error":{"code":"rejected","message":"no","retryable":false,"source":"controller"}}');
 
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ id: 'web-1', ok: false }));
+  });
+
+  it('routes attachment events to the attachment subscription, not command results', async () => {
+    let resultListener: ((json: string) => void) | undefined;
+    const proxy = {
+      currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
+      dispatch: vi.fn(),
+      stateChanged: { connect: vi.fn() },
+      commandResult: { connect: (listener: (json: string) => void) => { resultListener = listener; } },
+      bridgeError: { connect: vi.fn() }
+    };
+    const bridge = await createQtBridge(proxy);
+    const resultListenerFn = vi.fn();
+    const attachmentListener = vi.fn();
+    bridge.subscribeCommandResult(resultListenerFn);
+    bridge.subscribeAttachmentEvents(attachmentListener);
+
+    resultListener?.('{"type":"attachment.event","id":"web-9","payload":{"type":"attachment.init","attachmentId":"att-1","uploadId":"up-1","chunkSize":48128,"chunkIndex":0,"receivedIndexes":[],"expiresAt":"2026-09-03T00:00:00Z","content":""}}');
+
+    expect(attachmentListener).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'attachment.event',
+      id: 'web-9',
+      payload: expect.objectContaining({ type: 'attachment.init' })
+    }));
+    expect(resultListenerFn).not.toHaveBeenCalled();
+  });
+
+  it('keeps routing plain command results away from the attachment subscription', async () => {
+    let resultListener: ((json: string) => void) | undefined;
+    const proxy = {
+      currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
+      dispatch: vi.fn(),
+      stateChanged: { connect: vi.fn() },
+      commandResult: { connect: (listener: (json: string) => void) => { resultListener = listener; } },
+      bridgeError: { connect: vi.fn() }
+    };
+    const bridge = await createQtBridge(proxy);
+    const attachmentListener = vi.fn();
+    bridge.subscribeAttachmentEvents(attachmentListener);
+
+    resultListener?.('{"id":"web-1","ok":true}');
+
+    expect(attachmentListener).not.toHaveBeenCalled();
   });
 });

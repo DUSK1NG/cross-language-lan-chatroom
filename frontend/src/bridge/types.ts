@@ -1,8 +1,8 @@
 export type ConnectionPhase = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 export type ConversationRef =
-  | { kind: 'room'; id: string; title: string }
-  | { kind: 'dm'; id: string; title: string; userCode: string };
+  | { kind: 'room'; id: string; title: string; mls?: boolean }
+  | { kind: 'dm'; id: string; title: string; userCode: string; mls?: boolean };
 
 export type BridgeError = {
   code: string;
@@ -19,12 +19,23 @@ export type RoomSummary = {
   ownerCode?: string;
   private?: boolean;
   canManage?: boolean;
+  mls?: boolean;
 };
 
 export type DirectMessageSummary = {
   displayName: string;
   userCode: string;
   unreadCount: number;
+  mls?: boolean;
+};
+
+export type MessageAttachment = {
+  attachmentId: string;
+  fileName: string;
+  logicalSize: number;
+  status?: 'available' | 'downloading' | 'verified-failed' | 'expired';
+  receivedChunks?: number;
+  totalChunks?: number;
 };
 
 export type MessageItem = {
@@ -36,6 +47,7 @@ export type MessageItem = {
   selfMessage: boolean;
   systemMessage: boolean;
   deliveryState?: 'queued' | 'sent' | 'delivered' | 'failed';
+  attachment?: MessageAttachment;
 };
 
 export type MemberSummary = {
@@ -155,10 +167,28 @@ export type CommandResult = {
   error?: BridgeError;
 };
 
+export type AttachmentEventPayload =
+  | { type: 'attachment.init'; attachmentId: string; uploadId: string;
+      chunkSize: number; chunkIndex: number; receivedIndexes: number[];
+      expiresAt: string; content: string;
+      logicalSize?: number }
+  | { type: 'attachment.chunk'; attachmentId: string; chunkIndex: number;
+      content: string }
+  | { type: 'attachment.resume'; attachmentId: string;
+      receivedIndexes: number[] }
+  | { type: 'error'; code: string; message: string };
+
+export type AttachmentEvent = {
+  type: 'attachment.event';
+  id: string;
+  payload: AttachmentEventPayload;
+};
+
 export interface ChatBridgeClient {
   currentStateJson(): string;
   dispatch(command: BridgeCommand): void;
   subscribe(listener: (state: BridgeState) => void): () => void;
   subscribeCommandResult(listener: (result: CommandResult) => void): () => void;
+  subscribeAttachmentEvents(listener: (event: AttachmentEvent) => void): () => void;
   subscribeBridgeError(listener: (error: BridgeError) => void): () => void;
 }

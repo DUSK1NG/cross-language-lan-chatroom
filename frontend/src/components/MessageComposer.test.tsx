@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { BridgeCommand, BridgeError, BridgeState, ChatBridgeClient, CommandResult } from '../bridge/types';
+import type { AttachmentEvent, BridgeCommand, BridgeError, BridgeState, ChatBridgeClient, CommandResult } from '../bridge/types';
 import { MessageComposer } from './MessageComposer';
 
 const connectedRoomState: BridgeState = {
@@ -21,6 +21,7 @@ const rejectedError: BridgeError = {
 class ControllableBridge implements ChatBridgeClient {
   readonly commands: BridgeCommand[] = [];
   private readonly resultListeners = new Set<(result: CommandResult) => void>();
+  private readonly attachmentListeners = new Set<(event: AttachmentEvent) => void>();
 
   currentStateJson() { return JSON.stringify(connectedRoomState); }
   dispatch(command: BridgeCommand) { this.commands.push(command); }
@@ -29,8 +30,13 @@ class ControllableBridge implements ChatBridgeClient {
     this.resultListeners.add(listener);
     return () => this.resultListeners.delete(listener);
   }
+  subscribeAttachmentEvents(listener: (event: AttachmentEvent) => void) {
+    this.attachmentListeners.add(listener);
+    return () => this.attachmentListeners.delete(listener);
+  }
   subscribeBridgeError() { return () => undefined; }
   publishCommandResult(result: CommandResult) { this.resultListeners.forEach((listener) => listener(result)); }
+  publishAttachmentEvent(event: AttachmentEvent) { this.attachmentListeners.forEach((listener) => listener(event)); }
 }
 
 describe('MessageComposer', () => {
