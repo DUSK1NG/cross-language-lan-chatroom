@@ -1,7 +1,7 @@
 # Telegram Air（T3）前端重设计 — 设计文档
 
 - 日期：2026-09-02
-- 状态：已经用户确认（视觉稿逐段评审通过）
+- 状态：视觉稿已确认；规格按 2026-09-02 Codex 提供的附件命令/回执契约修订（§7.2）
 - 视觉稿（本地文件，`.superpowers/` 不入库，双击浏览器打开）：
   - `telegram-t3-detail.html` — 整体布局、会话列表、气泡、成员抽屉、加载态演示
   - `telegram-t3-attachments.html` — 附件卡、上传进度、加密标识、错误映射
@@ -92,20 +92,19 @@
 ### 5.4 MessageComposer
 
 - 输入区：`--t-chip` 圆角容器、`--t-accent` 圆形发送按钮、➕ 附件按钮（触发选件，见 7.2）。
-- 上传预览卡（选中文件后出现在输入区上方）状态文案与 `AttachmentTransferStatus` 一一对应：
+- 上传预览卡（选中文件后出现在输入区上方）。UI 状态由 `commandResult` 事件流归一、按命令 id 关联（§7.2）：
 
-| 状态 | 文案 / 行为 |
-|---|---|
-| `idle` | 不显示卡片 |
-| `initializing` | 「正在加密并建立上传…」 |
-| `uploading` | 「上传中 {received}/{total} 块 · {MiB}」+ 进度条 + 取消 ✕ |
-| `resuming` | 「⚡ 连接中断，已保存 {n} 块，正在续传…」→「续传中 {received}/{total} 块」（`--t-warn`） |
-| `completed` | 「已完成 · 端到端加密」（`--t-online`），卡片随即折叠 |
-| `cancelled` | 卡片移除 |
-| `failed` | 红字错误文案（按 7.3 映射）+ 重试 / 移除 |
+| UI 状态 | 触发 | 文案 / 行为 |
+|---|---|---|
+| 选择中 | `chooseUpload` 已发、init 未归 | 「选择中…」（等待文件选择器与建传） |
+| 上传中 | `attachment.init`（`receivedIndexes` 空）后逐块 `attachment.chunk` | 「上传中 {received}/{total} 块 · {MiB}」+ 进度条 + 取消 ✕ |
+| 续传中 | init 带非空 `receivedIndexes`，或 `attachment.resume` 回执 | 「⚡ 连接中断，已保存 {n} 块，正在续传…」→「续传中 …」（`--t-warn`） |
+| 已完成 | 已确认块数 == 总块数 | 「已完成 · 端到端加密」（`--t-online`），卡片随即折叠 |
+| 失败 | `error` 回执 | 红字错误文案（按 7.3 映射）+ 重试 / 移除 |
+| 取消 | 用户点 ✕ | 卡片移除（取消命令形态待对齐，§11） |
 
-- 卡片常显信息：文件名、大小（MiB）、`{total} 块（47 KiB/块）`、🔒 端到端加密。
-- 客户端预检：选择文件即检查 500 MiB 上限，超限直接进入 `failed` 面并显示对应文案（不发 init）。
+- 卡片常显信息：文件名、大小（MiB）、`{total} 块（47 KiB/块）`、🔒 端到端加密。**依赖 init 载荷补充 `fileName`/`logicalSize`（§11）**；未补充前降级为：attachmentId 前 8 位 + 不定态进度条（`scaleX` 往复）+ 已收块数。
+- 客户端预检（500 MiB）由 C++ 在读文件时执行；React 不接触文件，超限以 `error` 回执到达，展示对应文案。
 
 ### 5.5 MemberPanel（抽屉内容）
 
@@ -145,60 +144,65 @@
 ### 7.1 现状契约（Codex 已实现/在建，UI 只消费不发明）
 
 - 客户端状态机 `AttachmentTransferState`：`Idle|Initializing|Uploading|Resuming|Completed|Cancelled|Failed`，`MaxChunkRetries=3`，`ChunkSize=47 KiB`。
+- 命令/回执契约 2026-09-02 由 Codex 确认（§7.2）：React 发 `attachment.chooseUpload`，经 `commandResult` 收 `attachment.event`。
 - 每块 AEAD（key 32B / nonce 12B / tag 16B），nonce 由 `ChunkContext{attachment_id, room, group_id, logical_size, chunk_size, chunk_index}` 派生；每块带密文 sha256。
 - 协议：`attachment.init`（服务器返回 `attachment_id/upload_id/chunk_size/expires_at`，24h）+ `attachment.chunk`。
 - 限额：500 MiB/文件、20 GiB/房间配额（原子预留）、24h 过期。
 - 服务器错误哨兵 10 个（`server-go/attachment_store.go:31-40`）。
 
-### 7.2 前端桥接契约（新增于 `frontend/src/bridge/types.ts`）
+### 7.2 前端桥接契约（Codex 定稿，2026-09-02）
 
-字段名照抄 C++ 侧，避免翻译损耗：
+**命令**（React → C++，经 bridge dispatch）。附件按钮唯一动作：
 
-```ts
-export type AttachmentTransferStatus =
-  | 'idle' | 'initializing' | 'uploading' | 'resuming'
-  | 'completed' | 'cancelled' | 'failed';
-
-export type AttachmentErrorCode =
-  | 'too_large' | 'quota_exceeded' | 'invalid_size'
-  | 'upload_not_found' | 'unauthorized' | 'upload_expired'
-  | 'chunk_out_of_range' | 'chunk_too_large'
-  | 'chunk_hash_mismatch' | 'chunk_conflict';
-
-export type AttachmentInfo = {
-  attachmentId: string;
-  fileName: string;
-  logicalSize: number;          // 字节
-  chunkSize: number;            // 默认 47 KiB
-  expiresAt: string;            // ISO 时间戳
-};
-
-export type AttachmentProgress = {
-  attachmentId: string;
-  status: AttachmentTransferStatus;
-  direction: 'up' | 'down';     // 'down' 接收侧待与 Codex 对齐（见 §11）
-  receivedChunks: number;
-  totalChunks: number;
-  failedAttempts?: number;      // ≤ 3
-  errorCode?: AttachmentErrorCode;
-};
-
-// MessageItem 增加可选字段：
-attachment?: AttachmentInfo;
+```json
+{ "type": "attachment.chooseUpload", "id": "<命令id>", "payload": { "room": "<房间>" } }
 ```
 
-命令面（名称须与 Codex 的 C++ 命令分发对齐后定稿，见 §11）：
+- React 生成命令 id、发送命令、记录该 id 用于关联回执，然后进入「选择中」。
+- C++ 弹出 Windows 文件选择器，本地生成独立 AES-256 密钥，读取文件并按 47 KiB（48128 字节）分块做 AES-256-GCM 加密、自动上传。**React 不接触本地路径、明文内容、密钥或 nonce，不自行读文件、不实现加密。**
 
-- `attachment.send { path }` — 选定文件后发起加密上传；
-- `attachment.cancel { attachmentId }` — 对应 `state.cancel()`；
-- `attachment.retry { attachmentId }` — Failed 后手动重试；
-- 进度经 bridge 状态推送 `AttachmentProgress`（挂 BridgeState 或独立通道，随实现定）。
+**回执**（C++ → React，出现在 `commandResult`，外层 `type: "attachment.event"`，以 `id` 关联发起命令）：
+
+| `payload.type` | 含义 | 关键字段 |
+|---|---|---|
+| `attachment.init` | 建传确认（含续传基线） | `attachmentId` `uploadId` `chunkSize`(48128) `chunkIndex` `receivedIndexes[]` `expiresAt` `content:""` |
+| `attachment.chunk` | 分块回执 | 按命令 id 累计已确认块数 |
+| `attachment.resume` | 续传回执 | 中断后续传 |
+| `error` | 失败 | 错误码 → §7.3 映射 |
+
+TypeScript（新增于 `frontend/src/bridge/types.ts`，字段名照抄载荷）：
+
+```ts
+export type AttachmentEventPayload =
+  | { type: 'attachment.init'; attachmentId: string; uploadId: string;
+      chunkSize: number; chunkIndex: number; receivedIndexes: number[];
+      expiresAt: string; content: string }
+  | { type: 'attachment.chunk'; attachmentId: string; chunkIndex: number;
+      content: string }
+  | { type: 'attachment.resume'; attachmentId: string;
+      receivedIndexes: number[] }
+  | { type: 'error'; code: string; message: string };
+
+export type AttachmentEvent = {
+  type: 'attachment.event';
+  id: string;                    // 关联发起的 chooseUpload 命令 id
+  payload: AttachmentEventPayload;
+};
+```
+
+（`attachment.chunk`/`attachment.resume` 的确切字段以 Codex 实现为准；UI 不依赖上表未列出的字段。）
+
+- 一次 `chooseUpload` 命令 = 一次上传；预览卡按命令 id 建立，`completed`/`cancelled`/`failed` 终态后折叠或移除，支持并发多卡。
+- UI 内部把事件流归一为 `选择中|上传中|续传中|已完成|失败` 渲染态（§5.4）；不再假设 bridge 直接推送状态机枚举。
+- 取消与失败重试的命令形态待定（§11）；接收侧 `MessageItem.attachment` 元数据来源同待对齐。
 
 ### 7.3 服务器错误 → UI 文案（10 条全覆盖）
 
+错误以 `error` 回执经 `commandResult` 到达；`code` 字符串与哨兵的对应待对齐（§11），下表按哨兵列出。
+
 | 哨兵 | 文案 | 处理 |
 |---|---|---|
-| `ErrAttachmentTooLarge` | 文件超过 500 MiB 上限 | 预检同样拦截；卡片标红 + 移除 |
+| `ErrAttachmentTooLarge` | 文件超过 500 MiB 上限 | C++ 读文件时拦截，React 展示；卡片标红 + 移除 |
 | `ErrRoomQuotaExceeded` | 房间附件配额已满（20 GiB） | 卡片标红 |
 | `ErrInvalidAttachmentSize` | 文件大小无效 | 卡片标红 + 移除 |
 | `ErrAttachmentUploadNotFound` | 传输异常，请重试 | 自动重试 ≤3 次 |
@@ -216,7 +220,7 @@ attachment?: AttachmentInfo;
 - 结构：类型贴片（PDF/DOC/ZIP 等，按扩展名映射底色）+ 文件名（溢出省略）+ 大小 + 🔒 端到端加密 + 右侧操作按钮。
 - 发出完成态：卡下 meta 行 ✓✓（`--t-accent`）。
 - 不做图片/视频缩略图（本阶段协议无缩略图管道），一律文件卡。
-- 上传中消息即出现在时间线（气泡含预览卡 + 进度），完成后自动转为完成态。
+- 上传与消息发送的编排（上传完成后消息才进时间线，或消息先行带附件引用）待对齐（§11）；确认前按「完成后出消息」设计。
 
 ### 7.5 加密标识
 
@@ -263,8 +267,10 @@ attachment?: AttachmentInfo;
 
 ## 11. 需与 Codex 对齐的问题（不阻塞 UI 开发，阻塞联调）
 
-1. 附件命令的确切名称与载荷（`attachment.send/cancel/retry` 为我方拟定）。
-2. 接收侧（下载）是否已有/何时有状态机——UI 按上传侧对称设计，`direction:'down'` 事件名待定。
-3. 非 MLS 会话是否允许发附件（决定锁 chip 语义与预检）。
-4. 进度推送的通道形态：挂 BridgeState 轮询 vs 独立事件推送。
-5. `expiresAt` 的确切格式（ISO 8601 假设）。
+1. **init 载荷补充 `fileName` 与 `logicalSize`**——C++ 侧 `begin(logicalSize, chunkSize)` 已持有；缺失时 UI 无文件名/大小/总块数，进度只能是不定态条（已提出请求）。
+2. 取消（预览卡 ✕）与失败重试的命令形态：`attachment.cancelUpload {attachmentId}`？重试是重发 `chooseUpload` 还是恢复原上传？
+3. 用户在文件选择器点「取消」时是否回执（`error` 还是静默——静默则 UI 需要超时兜底收卡）。
+4. 接收侧（下载）状态机与消息内附件元数据（`MessageItem.attachment`）来源；上传与消息发送的编排（完成后出消息 or 消息先行）。
+5. `error.code` 的字符串集合与服务器哨兵的对应关系。
+6. 非 MLS 会话是否允许发附件（决定锁 chip 语义）。
+7. `expiresAt` 的确切格式（ISO 8601 假设）。
