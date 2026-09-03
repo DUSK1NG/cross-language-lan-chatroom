@@ -15,12 +15,17 @@ export function ChatHeader({ state, onMembers, membersOpen, canManage = false, o
   const conversation = state.navigation.activeConversation;
   const onlineCount = state.members.filter((member) => member.online).length;
   const approvalCount = state.connectionApprovals?.length ?? 0;
+  const connecting = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
+  const reconnectAttempt = state.connection.reconnectAttempt;
   return (
     <header className="chat-header">
-      <div>
-        <p className="eyebrow">当前会话</p>
+      <div className="chat-header__title">
         <h1>{conversation?.kind === 'room' ? `# ${conversation.title}` : conversation?.title ?? '会话'}</h1>
-        <p className="header-status"><span className="status-dot" />{state.connection.statusText}</p>
+        <p className="header-status">
+          <span className={`status-dot${connecting ? ' status-dot--busy' : ''}`} aria-hidden="true" />
+          <span>{state.connection.statusText}{connecting && reconnectAttempt ? ` · 第 ${reconnectAttempt} 次重连` : ''}</span>
+          {conversation?.mls && <span className="e2ee-chip" title="该会话通过 MLS 端到端加密">🔒 端到端加密</span>}
+        </p>
       </div>
       <div className="chat-header__actions">
         {onHistoryQueryChange && <label className="history-search">
