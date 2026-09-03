@@ -189,6 +189,7 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
         </section>}
         {guest && (
           <section className="lan-discovery" aria-label="lan-host-discovery">
+            {discovery.scanning && <div className="lan-scan-bar" aria-hidden="true"><span className="lan-scan-bar__fill" /></div>}
             <div className="lan-discovery__header">
               <div>
                 <strong>附近聊天室</strong>

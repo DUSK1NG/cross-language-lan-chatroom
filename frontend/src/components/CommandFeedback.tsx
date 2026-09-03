@@ -12,7 +12,8 @@ export function CommandFeedback({ status, message }: CommandFeedbackProps) {
       role={status === 'error' ? 'alert' : 'status'}
       aria-live="polite"
     >
-      {message}
+      {status === 'pending' && <span className="command-feedback__spinner" aria-hidden="true" />}
+      <span>{message}</span>
     </p>
   );
 }

@@ -74,6 +74,9 @@
   font-size: 12.5px; cursor: pointer; padding: 0; margin-bottom: 12px;
 }
 .manual-entry-button:hover { text-decoration: underline; }
+.lan-host-card:disabled { opacity: 0.55; cursor: not-allowed; }
+.lan-host-card:disabled:hover { background: transparent; }
+.manual-entry-button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .lan-scan-bar { position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--t-accent-soft); }
 .lan-scan-bar__fill {
