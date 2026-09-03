@@ -17,7 +17,7 @@ function normalizeChunkEnvelope(event: AttachmentEvent): AttachmentEvent {
 
 export function useAttachmentUploads(bridge: ChatBridgeClient): {
   uploads: AttachmentUploadMap;
-  beginUpload(commandId: string): void;
+  beginUpload(commandId: string, room: string): void;
   dismissUpload(commandId: string): void;
 } {
   const [uploads, setUploads] = useState<AttachmentUploadMap>({});
@@ -26,8 +26,8 @@ export function useAttachmentUploads(bridge: ChatBridgeClient): {
     setUploads((current) => reduceAttachmentEvent(current, normalizeChunkEnvelope(event)));
   }), [bridge]);
 
-  const beginUpload = useCallback((commandId: string) => {
-    setUploads((current) => beginAttachmentUpload(current, commandId));
+  const beginUpload = useCallback((commandId: string, room: string) => {
+    setUploads((current) => beginAttachmentUpload(current, commandId, room));
   }, []);
 
   const dismissUpload = useCallback((commandId: string) => {

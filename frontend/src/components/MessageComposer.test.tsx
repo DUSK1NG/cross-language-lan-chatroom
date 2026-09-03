@@ -314,4 +314,51 @@ describe('MessageComposer', () => {
 
     expect(screen.getByTestId(`attachment-card-${commandId}`)).toHaveTextContent('1 块 / 2 块');
   });
+
+  it('hides upload cards that belong to other conversations', () => {
+    const bridge = new ControllableBridge();
+    const otherRoomState: BridgeState = {
+      ...connectedRoomState,
+      navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'general', title: 'General' } }
+    };
+    const view = render(<MessageComposer state={connectedRoomState} bridge={bridge} draft="" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加附件' }));
+    const commandId = bridge.commands[0].id;
+    act(() => bridge.publishAttachmentEvent({
+      type: 'attachment.event', id: commandId,
+      payload: { type: 'attachment.init', attachmentId: 'att-1', uploadId: 'up-1', chunkSize: 48128, chunkIndex: 0, receivedIndexes: [], expiresAt: '2026-09-03T00:00:00Z', content: '' }
+    }));
+    expect(screen.getByTestId(`attachment-card-${commandId}`)).toBeInTheDocument();
+
+    view.rerender(<MessageComposer state={otherRoomState} bridge={bridge} draft="" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
+    expect(screen.queryByTestId(`attachment-card-${commandId}`)).not.toBeInTheDocument();
+
+    view.rerender(<MessageComposer state={connectedRoomState} bridge={bridge} draft="" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
+    expect(screen.getByTestId(`attachment-card-${commandId}`)).toBeInTheDocument();
+  });
+
+  it('retries a failed upload into its original room after switching back', () => {
+    const bridge = new ControllableBridge();
+    const otherRoomState: BridgeState = {
+      ...connectedRoomState,
+      navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'general', title: 'General' } }
+    };
+    const view = render(<MessageComposer state={connectedRoomState} bridge={bridge} draft="" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加附件' }));
+    const commandId = bridge.commands[0].id;
+    act(() => bridge.publishAttachmentEvent({
+      type: 'attachment.event', id: commandId,
+      payload: { type: 'error', code: 'ErrRoomQuotaExceeded', message: 'quota' }
+    }));
+
+    view.rerender(<MessageComposer state={otherRoomState} bridge={bridge} draft="" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
+    expect(screen.queryByTestId(`attachment-card-${commandId}`)).not.toBeInTheDocument();
+
+    view.rerender(<MessageComposer state={connectedRoomState} bridge={bridge} draft="" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
+    fireEvent.click(within(screen.getByTestId(`attachment-card-${commandId}`)).getByRole('button', { name: '重试' }));
+
+    expect(bridge.commands).toHaveLength(2);
+    expect(bridge.commands[1]).toMatchObject({ type: 'attachment.chooseUpload', payload: { room: 'lobby' } });
+    expect(bridge.commands[1].id).not.toBe(commandId);
+  });
 });

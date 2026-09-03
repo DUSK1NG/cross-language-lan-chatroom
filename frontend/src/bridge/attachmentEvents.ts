@@ -4,6 +4,7 @@ export type AttachmentUploadPhase = 'choosing' | 'uploading' | 'resuming' | 'com
 
 export type AttachmentUploadState = {
   phase: AttachmentUploadPhase;
+  room?: string;
   attachmentId?: string;
   uploadId?: string;
   chunkSize?: number;
@@ -16,8 +17,8 @@ export type AttachmentUploadState = {
 
 export type AttachmentUploadMap = Record<string, AttachmentUploadState>;
 
-export function beginAttachmentUpload(map: AttachmentUploadMap, commandId: string): AttachmentUploadMap {
-  return { ...map, [commandId]: { phase: 'choosing', receivedChunks: 0, lastChunkIndex: -1 } };
+export function beginAttachmentUpload(map: AttachmentUploadMap, commandId: string, room: string): AttachmentUploadMap {
+  return { ...map, [commandId]: { phase: 'choosing', receivedChunks: 0, lastChunkIndex: -1, room } };
 }
 
 export function dismissAttachmentUpload(map: AttachmentUploadMap, commandId: string): AttachmentUploadMap {
@@ -48,7 +49,8 @@ export function reduceAttachmentEvent(map: AttachmentUploadMap, event: Attachmen
       chunkSize: payload.chunkSize,
       receivedChunks: payload.receivedIndexes.length,
       lastChunkIndex: payload.chunkIndex,
-      expiresAt: payload.expiresAt
+      expiresAt: payload.expiresAt,
+      room: map[event.id]?.room
     };
     return { ...map, [event.id]: withTotalChunks(baseline, payload.chunkSize, payload.logicalSize) };
   }

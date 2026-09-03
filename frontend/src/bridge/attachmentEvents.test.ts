@@ -30,7 +30,7 @@ function chunkEvent(id: string, chunkIndex: number): AttachmentEvent {
 
 describe('beginAttachmentUpload', () => {
   it('registers a choosing card keyed by the chooseUpload command id', () => {
-    const next = beginAttachmentUpload({}, 'web-1');
+    const next = beginAttachmentUpload({}, 'web-1', 'lobby');
     expect(next['web-1']).toMatchObject({ phase: 'choosing', receivedChunks: 0, lastChunkIndex: -1 });
   });
 });
@@ -104,12 +104,18 @@ describe('reduceAttachmentEvent', () => {
     map = reduceAttachmentEvent(map, chunkEvent('web-1', 5));
     expect(map['web-1'].phase).toBe('failed');
   });
+
+  it('preserves the room assigned at begin when attachment.init arrives', () => {
+    let map = beginAttachmentUpload({}, 'web-1', 'lobby');
+    map = reduceAttachmentEvent(map, initEvent('web-1'));
+    expect(map['web-1'].room).toBe('lobby');
+  });
 });
 
 describe('dismissAttachmentUpload', () => {
   it('removes the card without touching other concurrent uploads', () => {
-    let map = beginAttachmentUpload({}, 'web-1');
-    map = beginAttachmentUpload(map, 'web-2');
+    let map = beginAttachmentUpload({}, 'web-1', 'lobby');
+    map = beginAttachmentUpload(map, 'web-2', 'general');
     map = dismissAttachmentUpload(map, 'web-1');
     expect(Object.keys(map)).toEqual(['web-2']);
   });

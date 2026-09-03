@@ -32,6 +32,7 @@ export function MessageComposer({ state, bridge, quote = null, onClearQuote, dra
   const pendingUnsubscribeRef = useRef<(() => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const active = state.navigation.activeConversation;
+  const activeRoomId = active?.kind === 'room' ? active.id : undefined;
   latestDraftRef.current = draft;
 
   useEffect(() => {
@@ -106,12 +107,13 @@ export function MessageComposer({ state, bridge, quote = null, onClearQuote, dra
   function chooseUpload() {
     if (!active || active.kind !== 'room') return;
     const command = createCommand('attachment.chooseUpload', { room: active.id });
-    beginUpload(command.id);
+    beginUpload(command.id, active.id);
     bridge.dispatch(command);
   }
 
   function retryUpload(commandId: string) {
-    if (!active || active.kind !== 'room') return;
+    const upload = uploads[commandId];
+    if (!upload || !active || active.kind !== 'room' || upload.room !== active.id) return;
     dismissUpload(commandId);
     chooseUpload();
   }
@@ -121,7 +123,7 @@ export function MessageComposer({ state, bridge, quote = null, onClearQuote, dra
       <CommandFeedback {...feedback} />
       <div className="upload-cards" data-testid="upload-cards">
         {Object.entries(uploads)
-          .filter(([, upload]) => upload.phase !== 'completed')
+          .filter(([, upload]) => upload.phase !== 'completed' && upload.room === activeRoomId)
           .map(([commandId, upload]) => (
             <UploadCard key={commandId} commandId={commandId} upload={upload}
               onRemove={() => dismissUpload(commandId)} onRetry={() => retryUpload(commandId)} />
