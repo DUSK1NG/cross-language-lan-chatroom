@@ -151,7 +151,7 @@ input.conversation-search {
   font-size: 11px; color: var(--t-ink-3); margin-top: 2px;
 }
 .message-delivery { letter-spacing: 0; font-size: 12px; color: var(--t-ink-3); }
-.message-delivery--delivered { color: var(--t-accent); }
+.message-delivery--delivered { color: var(--t-accent); letter-spacing: -2px; }
 .message-delivery--failed { color: var(--t-danger); letter-spacing: 0; }
 .message-delivery--queued { animation: t-pulse 1.4s ease-in-out infinite; letter-spacing: 0; }
 .message-quote {

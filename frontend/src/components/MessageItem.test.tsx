@@ -142,4 +142,67 @@ describe('MessageItem', () => {
     }));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('已在本地删除完成。'));
   });
+
+  it('shows delivery ticks for each delivery state', () => {
+    const bridge = createFakeBridge(state);
+    const { rerender } = render(<MessageItem message={{ ...message, deliveryState: 'queued' }} bridge={bridge} />);
+
+    let delivery = screen.getByLabelText('投递状态：queued');
+    expect(delivery).toHaveClass('message-delivery--queued');
+    expect(delivery).toHaveTextContent('⏱ 发送中');
+
+    rerender(<MessageItem message={{ ...message, deliveryState: 'delivered' }} bridge={bridge} />);
+    delivery = screen.getByLabelText('投递状态：delivered');
+    expect(delivery).toHaveTextContent('✓✓');
+    expect(delivery).toHaveClass('message-delivery--delivered');
+
+    rerender(<MessageItem message={{ ...message, deliveryState: 'failed' }} bridge={bridge} />);
+    expect(screen.getByLabelText('投递状态：failed')).toHaveTextContent('⚠');
+  });
+
+  it('marks consecutive grouped messages and hides the author line', () => {
+    const bridge = createFakeBridge(state);
+
+    const { rerender } = render(<MessageItem message={peerMessage} bridge={bridge} />);
+    expect(screen.getByText('Bob')).toBeInTheDocument();
+
+    rerender(<MessageItem message={peerMessage} bridge={bridge} grouped />);
+
+    expect(screen.getByTestId('message-m-2')).toHaveClass('message--grouped');
+    expect(screen.queryByText('Bob')).not.toBeInTheDocument();
+  });
+
+  it('renders an attachment card with name, size, lock and a disabled download', () => {
+    const bridge = createFakeBridge(state);
+    const attachmentMessage: MessageItemData = {
+      ...peerMessage,
+      messageId: 'm-file',
+      attachment: {
+        attachmentId: 'att-1', fileName: 'design.pdf', logicalSize: 3 * 1024 * 1024,
+        status: 'available', receivedChunks: 3, totalChunks: 3
+      }
+    };
+
+    render(<MessageItem message={attachmentMessage} bridge={bridge} />);
+
+    const card = screen.getByTestId('message-attachment-att-1');
+    expect(card).toHaveTextContent('design.pdf');
+    expect(card).toHaveTextContent('3.0 MiB');
+    expect(card).toHaveTextContent('🔒 端到端加密');
+    expect(screen.getByRole('button', { name: '下载 design.pdf' })).toBeDisabled();
+  });
+
+  it('marks expired attachments and explains the expiry', () => {
+    const bridge = createFakeBridge(state);
+    const expiredMessage: MessageItemData = {
+      ...peerMessage,
+      messageId: 'm-expired',
+      attachment: { attachmentId: 'att-2', fileName: 'notes.txt', logicalSize: 1024, status: 'expired' }
+    };
+
+    render(<MessageItem message={expiredMessage} bridge={bridge} />);
+
+    expect(screen.getByTestId('message-attachment-att-2')).toHaveClass('message-attachment--expired');
+    expect(screen.getByText('文件已过期（超过 24 小时），请让发送者重新发送')).toBeInTheDocument();
+  });
 });
