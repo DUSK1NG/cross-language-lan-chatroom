@@ -127,7 +127,7 @@ input[type='checkbox'] { accent-color: var(--t-accent); }
   padding: 14px 16px 16px;
   animation: t-pop-in var(--t-fast) ease-out both;
 }
-.sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; padding: 0 12px; }
 .sidebar-heading h2 { font-size: 15px; }
 .sidebar-actions { display: flex; gap: 4px; }
 
