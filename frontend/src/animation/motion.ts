@@ -5,8 +5,13 @@ function prefersReducedMotion() {
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+export function motionAllowed(): boolean {
+  if (prefersReducedMotion()) return false;
+  return typeof document === 'undefined' || document.documentElement.dataset.effects !== 'off';
+}
+
 export function animateWorkspacePanels(root: Element) {
-  if (prefersReducedMotion()) return () => undefined;
+  if (!motionAllowed()) return () => undefined;
   const context = gsap.context(() => {
     gsap.fromTo(root,
       { opacity: 0, transform: 'translateY(4px)' },
@@ -25,7 +30,7 @@ export function animateWorkspacePanels(root: Element) {
 }
 
 export function animateMessage(element: HTMLElement | null) {
-  if (!element || prefersReducedMotion()) return () => undefined;
+  if (!element || !motionAllowed()) return () => undefined;
   const tween = gsap.fromTo(element,
     { opacity: 0, transform: 'translateY(6px)' },
     { opacity: 1, transform: 'translateY(0px)', duration: 0.18, ease: 'power3.out', clearProps: 'transform,opacity' }
@@ -34,7 +39,7 @@ export function animateMessage(element: HTMLElement | null) {
 }
 
 export function animatePopover(element: HTMLElement | null) {
-  if (!element || prefersReducedMotion()) return () => undefined;
+  if (!element || !motionAllowed()) return () => undefined;
   const tween = gsap.fromTo(element,
     { opacity: 0, transform: 'translateY(4px) scale(0.96)', transformOrigin: 'bottom right' },
     { opacity: 1, transform: 'translateY(0px) scale(1)', duration: 0.18, ease: 'power3.out', clearProps: 'transform,opacity,transformOrigin' }

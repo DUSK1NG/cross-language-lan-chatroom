@@ -27,6 +27,12 @@ export function App({ bridge }: AppProps) {
     document.documentElement.dataset.theme = settings.darkTheme ? 'dark' : 'light';
   }, [settings.darkTheme]);
 
+  const effectsEnabled = state.performance?.effectsEnabled !== false;
+
+  useEffect(() => {
+    document.documentElement.dataset.effects = effectsEnabled ? 'on' : 'off';
+  }, [effectsEnabled]);
+
   useEffect(() => {
     if (state.connection.phase === 'connected' && page !== 'settings') setPage('workspace');
   }, [state.connection.phase]);

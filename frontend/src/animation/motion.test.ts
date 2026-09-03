@@ -10,7 +10,7 @@ const { context, fromTo } = vi.hoisted(() => ({
 
 vi.mock('gsap', () => ({ gsap: { context, fromTo } }));
 
-import { animateWorkspacePanels } from './motion';
+import { animateMessage, animateWorkspacePanels, motionAllowed } from './motion';
 
 describe('workspace return motion budget', () => {
   afterEach(() => {
@@ -43,5 +43,21 @@ describe('workspace return motion budget', () => {
     );
     const animationVars = (fromTo.mock.calls[0] as unknown[] | undefined)?.[2];
     expect(animationVars).not.toHaveProperty('stagger');
+  });
+
+  it('reports motion as allowed while the effects gate is unset', () => {
+    delete document.documentElement.dataset.effects;
+    expect(motionAllowed()).toBe(true);
+  });
+
+  it('skips tweens and reports blocked motion when data-effects is off', () => {
+    document.documentElement.dataset.effects = 'off';
+    expect(motionAllowed()).toBe(false);
+
+    const root = document.createElement('main');
+    animateWorkspacePanels(root);
+    animateMessage(root);
+    expect(fromTo).not.toHaveBeenCalled();
+    delete document.documentElement.dataset.effects;
   });
 });
