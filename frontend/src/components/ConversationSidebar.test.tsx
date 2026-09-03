@@ -36,15 +36,15 @@ describe('ConversationSidebar', () => {
     expect(screen.getByRole('button', { name: 'room-lobby' })).toBeInTheDocument();
   });
 
-  it('switches sections through the segmented control with aria-selected', () => {
+  it('switches sections through the segmented control as pressed buttons', () => {
     const bridge = createFakeBridge(sidebarState);
     const onSectionChange = vi.fn();
 
     render(<ConversationSidebar state={sidebarState} bridge={bridge} section="rooms" onSectionChange={onSectionChange} onCreateRoom={vi.fn()} />);
 
-    expect(screen.getByRole('tab', { name: '群' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: '私' })).toHaveAttribute('aria-selected', 'false');
-    fireEvent.click(screen.getByRole('tab', { name: '私' }));
+    expect(screen.getByRole('button', { name: '群' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '私' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: '私' }));
     expect(onSectionChange).toHaveBeenCalledWith('direct');
   });
 

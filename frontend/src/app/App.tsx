@@ -5,7 +5,6 @@ import type { BridgeState, ChatBridgeClient } from '../bridge/types';
 import { useBridgeState } from '../state/useBridgeState';
 import { WorkspacePage } from './WorkspacePage';
 import { SettingsPage } from './SettingsPage';
-import { useAppSettings } from '../state/appSettings';
 import { inferPrivateKeyPath } from './hostPaths';
 import { useFrameTelemetry } from '../performance/useFrameTelemetry';
 import '../styles/global.css';
@@ -19,13 +18,8 @@ export function App({ bridge }: AppProps) {
   useFrameTelemetry(bridge);
   const [page, setPage] = useState(state.navigation.page);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('remote');
-  const settings = useAppSettings();
   const hostAvailable = state.hostDefaults?.available !== false;
   const hostUnavailableReason = state.hostDefaults?.unavailableReason || '此安装包不包含本地服务端';
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = settings.darkTheme ? 'dark' : 'light';
-  }, [settings.darkTheme]);
 
   const effectsEnabled = state.performance?.effectsEnabled !== false;
 

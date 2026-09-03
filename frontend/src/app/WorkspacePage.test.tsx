@@ -44,7 +44,7 @@ describe('WorkspacePage', () => {
 
     expect(screen.getByTestId('conversation-sidebar')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'LAN Chat 猫咪标识' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '群' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: '群' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('message-timeline')).toBeInTheDocument();
     expect(screen.getByTestId('member-panel')).toBeInTheDocument();
     expect(screen.getByTestId('identity-card')).toHaveClass('identity-card--fixed');
@@ -78,7 +78,7 @@ describe('WorkspacePage', () => {
 
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
     fireEvent.click(screen.getByRole('button', { name: 'room-study' }));
-    fireEvent.click(screen.getByRole('tab', { name: '私' }));
+    fireEvent.click(screen.getByRole('button', { name: '私' }));
     fireEvent.click(screen.getByRole('button', { name: 'direct-bob' }));
 
     expect(bridge.commands.map(({ type, payload }) => ({ type, payload }))).toEqual([
@@ -95,7 +95,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByRole('button', { name: 'room-lobby' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: 'direct-bob' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: '私' }));
+    fireEvent.click(screen.getByRole('button', { name: '私' }));
 
     expect(screen.getByRole('button', { name: 'direct-bob' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'direct-bob' }));
@@ -106,7 +106,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByRole('button', { name: 'direct-bob' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: 'room-study' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: '群' }));
+    fireEvent.click(screen.getByRole('button', { name: '群' }));
     expect(screen.getByRole('button', { name: 'room-study' })).toBeInTheDocument();
   });
 

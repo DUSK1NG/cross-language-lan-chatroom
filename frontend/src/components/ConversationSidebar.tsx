@@ -27,9 +27,9 @@ export function ConversationSidebar({ state, bridge, section, onSectionChange, o
     <aside className="conversation-sidebar" data-testid="conversation-sidebar">
       <div className="sidebar-top">
         <img className="brand-mark" src={catBrandMark} alt="LAN Chat 猫咪标识" />
-        <div className="section-seg" role="tablist" aria-label="会话分区">
-          <button type="button" role="tab" aria-label="群" title="群聊" aria-selected={showRooms} onClick={() => onSectionChange?.('rooms')}>群</button>
-          <button type="button" role="tab" aria-label="私" title="私信" aria-selected={!showRooms} onClick={() => onSectionChange?.('direct')}>私</button>
+        <div className="section-seg" aria-label="会话分区">
+          <button type="button" aria-label="群" title="群聊" aria-pressed={showRooms} onClick={() => onSectionChange?.('rooms')}>群</button>
+          <button type="button" aria-label="私" title="私信" aria-pressed={!showRooms} onClick={() => onSectionChange?.('direct')}>私</button>
         </div>
         {onOpenSidebar && <button className="icon-button rail-button--sidebar" type="button" aria-label="打开导航" title="打开导航" onClick={onOpenSidebar}>☰</button>}
         {onSettings && <button className="icon-button" type="button" aria-label="设置" title="设置" onClick={onSettings}>⚙</button>}

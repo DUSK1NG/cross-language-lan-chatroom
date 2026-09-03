@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
 
 export type AppSettings = {
-  darkTheme: boolean;
   showSendTime: boolean;
 };
 
 const STORAGE_KEY = 'lan-chat.settings';
 const SETTINGS_EVENT = 'lan-chat-settings-changed';
-const defaults: AppSettings = { darkTheme: true, showSendTime: true };
+const defaults: AppSettings = { showSendTime: true };
 
 export function getAppSettings(): AppSettings {
   try {

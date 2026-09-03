@@ -24,7 +24,6 @@ export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
         </header>
         <section className="settings-group">
           <h2>界面</h2>
-          <label className="settings-row settings-toggle"><span>深色主题</span><input type="checkbox" aria-label="深色主题" checked={settings.darkTheme} onChange={(event) => update('darkTheme', event.target.checked)} /></label>
           <label className="settings-row settings-toggle"><span>显示发送时间</span><input type="checkbox" aria-label="显示发送时间" checked={settings.showSendTime} onChange={(event) => update('showSendTime', event.target.checked)} /></label>
         </section>
         <section className="settings-group">

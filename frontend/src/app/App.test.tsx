@@ -201,6 +201,22 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument();
   });
 
+  it('offers no dark-theme toggle and never writes data-theme', async () => {
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
+    const bridge = createFakeBridge({
+      ...disconnectedState,
+      connection: { phase: 'connected', statusText: '已连接', retryable: false },
+      navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } }
+    });
+    render(<App bridge={bridge} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+
+    expect(screen.queryByLabelText('深色主题')).not.toBeInTheDocument();
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+  });
+
   it('persists the send-time setting from the settings page', async () => {
     localStorage.clear();
     const bridge = createFakeBridge({
