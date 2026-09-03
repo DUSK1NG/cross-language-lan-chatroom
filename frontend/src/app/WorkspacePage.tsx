@@ -4,13 +4,12 @@ import { createCommand } from '../bridge/chatBridge';
 import type { BridgeState, ChatBridgeClient, MemberSummary } from '../bridge/types';
 import { ChatHeader } from '../components/ChatHeader';
 import { ConversationSidebar } from '../components/ConversationSidebar';
+import type { WorkspaceSection } from '../components/ConversationSidebar';
 import { IdentityCard } from '../components/IdentityCard';
 import { MemberPanel } from '../components/MemberPanel';
 import { MessageComposer, type QuoteDraft } from '../components/MessageComposer';
 import { MessageTimeline } from '../components/MessageTimeline';
 import { ModalSurface } from '../components/ModalSurface';
-import { WorkspaceRail } from '../components/WorkspaceRail';
-import type { WorkspaceSection } from '../components/WorkspaceRail';
 import { CommandFeedback, type CommandFeedbackProps } from '../components/CommandFeedback';
 import { animateWorkspacePanels } from '../animation/motion';
 
@@ -206,8 +205,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
 
   return (
     <main ref={workspaceRef} className="app-shell workspace-shell">
-      <WorkspaceRail section={section} onSectionChange={setSection} onSettings={onSettings} onOpenSidebar={() => setSidebarOpen(true)} />
-      <ConversationSidebar bridge={bridge} state={state} section={section} onCreateRoom={openCreateRoom} />
+      <ConversationSidebar bridge={bridge} state={state} section={section} onSectionChange={setSection} onCreateRoom={openCreateRoom} onSettings={onSettings} onOpenSidebar={() => setSidebarOpen(true)} />
       <section className="chat-region" data-motion="workspace-panel">
         <ChatHeader state={state} onMembers={() => setMemberDrawerOpen(true)} canManage={canManageRoom} onManageRoom={openRoomManage} onConnectionApprovals={() => setConnectionApprovalOpen(true)} historyQuery={historyQuery} onHistoryQueryChange={updateHistoryQuery} />
         <MessageTimeline bridge={bridge} state={state} onQuote={quoteMessage} canRecall={(message) => state.identity.admin || message.userCode === state.identity.userCode} />
@@ -215,7 +213,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
       </section>
       <MemberPanel state={state} localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} />
       <IdentityCard state={state} />
-      {sidebarOpen && <ModalSurface title={section === 'rooms' ? '群聊导航' : '私信导航'} onClose={() => setSidebarOpen(false)}><ConversationSidebar bridge={bridge} state={state} section={section} onCreateRoom={openCreateRoom} /></ModalSurface>}
+      {sidebarOpen && <ModalSurface title={section === 'rooms' ? '群聊导航' : '私信导航'} onClose={() => setSidebarOpen(false)}><ConversationSidebar bridge={bridge} state={state} section={section} onSectionChange={setSection} onCreateRoom={openCreateRoom} /></ModalSurface>}
       {memberDrawerOpen && <ModalSurface title="成员" onClose={() => setMemberDrawerOpen(false)}><MemberPanel state={state} className="member-panel--modal" localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} /></ModalSurface>}
       {memberProfile && <ModalSurface title="成员资料" onClose={() => setMemberProfile(null)}>
         <div className="admin-profile">
