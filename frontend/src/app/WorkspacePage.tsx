@@ -207,11 +207,11 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
     <main ref={workspaceRef} className="app-shell workspace-shell">
       <ConversationSidebar bridge={bridge} state={state} section={section} onSectionChange={setSection} onCreateRoom={openCreateRoom} onSettings={onSettings} onOpenSidebar={() => setSidebarOpen(true)} />
       <section className="chat-region" data-motion="workspace-panel">
-        <ChatHeader state={state} onMembers={() => setMemberDrawerOpen(true)} canManage={canManageRoom} onManageRoom={openRoomManage} onConnectionApprovals={() => setConnectionApprovalOpen(true)} historyQuery={historyQuery} onHistoryQueryChange={updateHistoryQuery} />
+        <ChatHeader state={state} onMembers={() => setMemberDrawerOpen((open) => !open)} membersOpen={memberDrawerOpen} canManage={canManageRoom} onManageRoom={openRoomManage} onConnectionApprovals={() => setConnectionApprovalOpen(true)} historyQuery={historyQuery} onHistoryQueryChange={updateHistoryQuery} />
         <MessageTimeline bridge={bridge} state={state} onQuote={quoteMessage} canRecall={(message) => state.identity.admin || message.userCode === state.identity.userCode} />
         <MessageComposer bridge={bridge} state={state} quote={quote} onClearQuote={() => setQuote(null)} draft={draft} onDraftChange={setDraft} onCommandResult={() => undefined} focusAtEndToken={focusComposerAtEndToken} />
       </section>
-      <MemberPanel state={state} className={`member-drawer${memberDrawerOpen ? ' member-drawer--open' : ''}`} localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} />
+      <MemberPanel state={state} className={`member-drawer${memberDrawerOpen ? ' member-drawer--open' : ''}`} localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onClose={() => setMemberDrawerOpen(false)} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} />
       <IdentityCard state={state} />
       {sidebarOpen && <ModalSurface title={section === 'rooms' ? '群聊导航' : '私信导航'} onClose={() => setSidebarOpen(false)}><ConversationSidebar bridge={bridge} state={state} section={section} onSectionChange={setSection} onCreateRoom={openCreateRoom} /></ModalSurface>}
       {memberProfile && <ModalSurface title="成员资料" onClose={() => setMemberProfile(null)}>

@@ -297,10 +297,11 @@ input.conversation-search {
   background: var(--t-surface); border-left: 1px solid var(--t-line);
   box-shadow: var(--t-drawer-shadow);
   transform: translateX(102%);
-  transition: transform 180ms ease-out;
+  visibility: hidden;
+  transition: transform 180ms ease-out, visibility 0s linear 180ms;
   padding: 12px 10px;
 }
-.member-panel.member-drawer--open { transform: translateX(0); }
+.member-panel.member-drawer--open { transform: translateX(0); visibility: visible; }
 .member-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .member-row { display: flex; align-items: center; gap: 9px; padding: 5px 8px; border-radius: 8px; }
 .member-row:hover { background: var(--t-chip); }

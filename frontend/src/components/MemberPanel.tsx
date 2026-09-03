@@ -8,14 +8,15 @@ type MemberPanelProps = {
   onViewProfile?: (member: MemberSummary) => void;
   canManage?: boolean;
   onManageMember?: (member: MemberSummary) => void;
+  onClose?: () => void;
 };
 
-export function MemberPanel({ state, className = '', localUserCode, onStartDirect, onViewProfile, canManage = false, onManageMember }: MemberPanelProps) {
+export function MemberPanel({ state, className = '', localUserCode, onStartDirect, onViewProfile, canManage = false, onManageMember, onClose }: MemberPanelProps) {
   const onlineCount = state.members.filter((member) => member.online).length;
 
   return (
     <aside className={`member-panel ${className}`.trim()} data-testid="member-panel" data-motion="workspace-panel" aria-label="成员">
-      <div className="sidebar-heading"><div><p className="eyebrow">成员</p><h2>成员</h2></div><span className="member-count" aria-label="在线成员数量">{onlineCount}</span></div>
+      <div className="sidebar-heading"><div><p className="eyebrow">成员</p><h2>成员</h2></div><span className="member-count" aria-label="在线成员数量">{onlineCount}</span>{onClose && <button type="button" className="icon-button" aria-label="关闭成员列表" onClick={onClose}>×</button>}</div>
       <div className="member-list">
         {state.members.map((member) => (
           <div className="member-row" key={member.userCode}>

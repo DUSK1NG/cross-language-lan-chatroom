@@ -209,6 +209,34 @@ describe('WorkspacePage', () => {
     expect(screen.getByTestId('member-panel')).not.toHaveClass('member-drawer--open');
   });
 
+  it('toggles the member drawer from the header action', () => {
+    const bridge = createFakeBridge(workspaceState);
+
+    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    const toggle = screen.getByRole('button', { name: 'members-toggle' });
+    fireEvent.click(toggle);
+
+    expect(screen.getByTestId('member-panel')).toHaveClass('member-drawer--open');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByTestId('member-panel')).not.toHaveClass('member-drawer--open');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('closes the member drawer with its close button', () => {
+    const bridge = createFakeBridge(workspaceState);
+
+    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    fireEvent.click(screen.getByRole('button', { name: 'members-toggle' }));
+
+    const drawer = screen.getByTestId('member-panel');
+    fireEvent.click(within(drawer).getByRole('button', { name: '关闭成员列表' }));
+
+    expect(drawer).not.toHaveClass('member-drawer--open');
+  });
+
   it('creates a private room then refreshes rooms on success', async () => {
     const bridge = createFakeBridge(workspaceState);
 
