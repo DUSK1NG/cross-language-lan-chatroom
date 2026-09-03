@@ -2,6 +2,7 @@
 .workspace-shell {
   display: grid;
   grid-template-columns: 292px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   background: var(--t-surface);
   position: relative;
@@ -71,7 +72,7 @@ input.conversation-search {
 }
 .chat-header__title { min-width: 0; }
 .chat-header h1 { font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.header-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--t-ink-2); flex-wrap: wrap; }
+.header-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--t-ink-2); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--t-online); flex: none; }
 .status-dot--busy {
   width: 12px; height: 12px; background: transparent;
@@ -83,15 +84,15 @@ input.conversation-search {
   background: var(--t-accent-soft); color: var(--t-accent);
   font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px;
 }
-.chat-header__actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.chat-header__actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
 .history-search { display: flex; align-items: center; gap: 4px; }
 .history-search input { background: var(--t-chip); border: 0; border-radius: 999px; padding: 6px 12px; font-size: 12.5px; width: 150px; }
 .history-search button { border: 0; background: transparent; color: var(--t-ink-2); cursor: pointer; font-size: 12px; }
-.header-action-button { padding: 6px 11px; font-size: 12.5px; font-weight: 500; }
+.header-action-button { padding: 6px 11px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 .member-toggle {
   display: inline-flex; align-items: center; gap: 7px;
   border: 1px solid var(--t-line); background: var(--t-surface); border-radius: 8px;
-  padding: 6px 10px; font-size: 12.5px; cursor: pointer;
+  padding: 6px 10px; font-size: 12.5px; cursor: pointer; white-space: nowrap;
   transition: background-color var(--t-fast) ease-out;
 }
 .member-toggle:hover { background: var(--t-chip); }
@@ -188,7 +189,7 @@ input.conversation-search {
 .message-attachment {
   display: flex; align-items: center; gap: 9px;
   background: var(--t-accent-soft); border-radius: 10px;
-  padding: 8px 10px; margin: 2px 0 4px; min-width: 220px;
+  padding: 8px 10px; margin: 2px 0 4px; min-width: 0;
 }
 .message-attachment__badge {
   width: 34px; height: 34px; border-radius: 8px; flex: none;
@@ -327,8 +328,19 @@ input.conversation-search {
 .identity-card .avatar { width: 26px; height: 26px; font-size: 12px; }
 .identity-status { width: 8px; height: 8px; border-radius: 50%; background: var(--t-online); }
 
-/* ---- 响应式：窄屏侧栏收窄；成员抽屉本来就覆盖，不占网格 ---- */
+/* ---- 响应式：窄屏侧栏收窄 + 头部紧凑化（标签隐藏不破坏 aria-label 可达名）；成员抽屉本来就覆盖，不占网格 ---- */
 @media (max-width: 960px) {
   .workspace-shell { grid-template-columns: 260px minmax(0, 1fr); }
   .rail-button--sidebar { display: inline-flex; }
+  .chat-header { flex-wrap: wrap; row-gap: 4px; padding: 8px; }
+  .chat-header__title { flex: 1 1 100%; }
+  .chat-header__actions { margin-left: 0; flex-wrap: wrap; gap: 5px; }
+  .history-search { display: none; }
+  .header-status { gap: 4px; }
+  .header-status__label { display: none; }
+  .e2ee-chip { padding: 1px 6px; }
+  .e2ee-chip__label { display: none; }
+  .header-action-button { padding: 4px 5px; font-size: 11px; }
+  .member-toggle { padding: 3px 5px; gap: 4px; }
+  .member-toggle__count { display: none; }
 }

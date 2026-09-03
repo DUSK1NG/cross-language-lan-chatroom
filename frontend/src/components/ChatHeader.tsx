@@ -23,8 +23,8 @@ export function ChatHeader({ state, onMembers, membersOpen, canManage = false, o
         <h1>{conversation?.kind === 'room' ? `# ${conversation.title}` : conversation?.title ?? '会话'}</h1>
         <p className="header-status">
           <span className={`status-dot${connecting ? ' status-dot--busy' : ''}`} aria-hidden="true" />
-          <span>{state.connection.statusText}{connecting && reconnectAttempt ? ` · 第 ${reconnectAttempt} 次重连` : ''}</span>
-          {conversation?.mls && <span className="e2ee-chip" title="该会话通过 MLS 端到端加密">🔒 端到端加密</span>}
+          <span className="header-status__label">{state.connection.statusText}{connecting && reconnectAttempt ? ` · 第 ${reconnectAttempt} 次重连` : ''}</span>
+          {conversation?.mls && <span className="e2ee-chip" title="该会话通过 MLS 端到端加密">🔒<span className="e2ee-chip__label">端到端加密</span></span>}
         </p>
       </div>
       <div className="chat-header__actions">
@@ -36,7 +36,7 @@ export function ChatHeader({ state, onMembers, membersOpen, canManage = false, o
         {state.identity.admin && <button className="secondary-button header-action-button" type="button" aria-label="连接审批" onClick={onConnectionApprovals}>连接审批{approvalCount > 0 ? ` (${approvalCount})` : ''}</button>}
         <button className="member-toggle" type="button" aria-label="members-toggle" aria-expanded={membersOpen} onClick={onMembers}>
           <span className="avatar-stack"><span className="avatar avatar--tiny">A</span><span className="avatar avatar--tiny avatar--offset">B</span></span>
-          <span>{onlineCount} 名在线成员</span>
+          <span className="member-toggle__count">{onlineCount} 名在线成员</span>
         </button>
       </div>
     </header>
