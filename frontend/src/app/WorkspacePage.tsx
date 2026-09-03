@@ -211,10 +211,9 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
         <MessageTimeline bridge={bridge} state={state} onQuote={quoteMessage} canRecall={(message) => state.identity.admin || message.userCode === state.identity.userCode} />
         <MessageComposer bridge={bridge} state={state} quote={quote} onClearQuote={() => setQuote(null)} draft={draft} onDraftChange={setDraft} onCommandResult={() => undefined} focusAtEndToken={focusComposerAtEndToken} />
       </section>
-      <MemberPanel state={state} localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} />
+      <MemberPanel state={state} className={`member-drawer${memberDrawerOpen ? ' member-drawer--open' : ''}`} localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} />
       <IdentityCard state={state} />
       {sidebarOpen && <ModalSurface title={section === 'rooms' ? '群聊导航' : '私信导航'} onClose={() => setSidebarOpen(false)}><ConversationSidebar bridge={bridge} state={state} section={section} onSectionChange={setSection} onCreateRoom={openCreateRoom} /></ModalSurface>}
-      {memberDrawerOpen && <ModalSurface title="成员" onClose={() => setMemberDrawerOpen(false)}><MemberPanel state={state} className="member-panel--modal" localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} /></ModalSurface>}
       {memberProfile && <ModalSurface title="成员资料" onClose={() => setMemberProfile(null)}>
         <div className="admin-profile">
           <strong>{memberProfile.displayName}#{memberProfile.userCode}</strong>

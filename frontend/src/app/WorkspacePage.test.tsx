@@ -126,9 +126,9 @@ describe('WorkspacePage', () => {
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
     fireEvent.click(screen.getByRole('button', { name: 'members-toggle' }));
 
-    const dialog = screen.getByRole('dialog', { name: '成员' });
-    expect(dialog).toBeInTheDocument();
-    expect(within(dialog).getByText('Bob')).toBeInTheDocument();
+    const drawer = screen.getByTestId('member-panel');
+    expect(drawer).toHaveClass('member-drawer--open');
+    expect(within(drawer).getByText('Bob')).toBeInTheDocument();
   });
 
   it('opens a private conversation for another member but not the local member', () => {
@@ -137,9 +137,9 @@ describe('WorkspacePage', () => {
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
     fireEvent.click(screen.getByRole('button', { name: 'members-toggle' }));
 
-    const dialog = screen.getByRole('dialog', { name: '成员' });
-    expect(within(dialog).queryByRole('button', { name: 'direct-Alice' })).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'direct-Bob' }));
+    const drawer = screen.getByTestId('member-panel');
+    expect(within(drawer).queryByRole('button', { name: 'direct-Alice' })).not.toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'direct-Bob' }));
     expect(bridge.commands).toContainEqual(expect.objectContaining({
       type: 'conversation.openPrivate',
       payload: { displayName: 'Bob', userCode: 'B002' }
@@ -203,9 +203,10 @@ describe('WorkspacePage', () => {
 
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
     fireEvent.click(screen.getByRole('button', { name: 'members-toggle' }));
+    expect(screen.getByTestId('member-panel')).toHaveClass('member-drawer--open');
     fireEvent.keyDown(window, { key: 'Escape' });
 
-    expect(screen.queryByRole('dialog', { name: '成员' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('member-panel')).not.toHaveClass('member-drawer--open');
   });
 
   it('creates a private room then refreshes rooms on success', async () => {
