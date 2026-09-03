@@ -35,6 +35,7 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
   const pendingJumpToLatestRef = useRef(false);
   const atBottomRef = useRef(true);
   const [newMessageCount, setNewMessageCount] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const knownMessageIds = knownMessageIdsRef.current;
   const enteringMessageIds = knownMessageIds
     ? new Set(messages.filter((message) => !knownMessageIds.has(message.messageId)).map((message) => message.messageId))
@@ -61,6 +62,7 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
     if (!timeline) return;
     if (timeline.scrollTop <= 0 && visibleWindowStart > 0) {
       pendingHistoryPageRef.current = true;
+      setHistoryLoading(true);
       setWindowStart(Math.max(0, visibleWindowStart - historyWindowSize));
       return;
     }
@@ -108,6 +110,7 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
         if (timeline) timeline.scrollTop = timeline.scrollHeight;
         atBottomRef.current = true;
         setNewMessageCount(0);
+        setHistoryLoading(false);
       } else {
         scrollToLatest();
       }
@@ -137,7 +140,17 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
       <section ref={timelineRef} className="message-timeline" data-testid="message-timeline" aria-label="消息时间线" onScroll={handleScroll}>
         {messages.length === 0 ? (
           <div className="empty-state"><span className="empty-glyph">✦</span><p>暂无消息，开始聊天吧。</p></div>
-        ) : messages.map((message) => <MessageItem key={message.messageId} message={message} bridge={bridge} onQuote={onQuote} canRecall={canRecall?.(message)} showTime={settings.showSendTime} animateEntry={enteringMessageIds.has(message.messageId)} />)}
+        ) : <>
+          <div className="date-pill" aria-hidden="true">今天</div>
+          {historyLoading && <div className="history-loading" role="status">正在加载更早的消息…</div>}
+          {messages.map((message, index) => {
+            const previous = index > 0 ? messages[index - 1] : undefined;
+            const grouped = !!previous && !previous.systemMessage && !message.systemMessage
+              && previous.userCode === message.userCode
+              && previous.selfMessage === message.selfMessage;
+            return <MessageItem key={message.messageId} message={message} bridge={bridge} onQuote={onQuote} canRecall={canRecall?.(message)} showTime={settings.showSendTime} animateEntry={enteringMessageIds.has(message.messageId)} grouped={grouped} />;
+          })}
+        </>}
       </section>
       {newMessageCount > 0 && <button className="timeline-new-messages" type="button" onClick={scrollToLatest} aria-label={`查看 ${newMessageCount} 条新消息`}>↓ {newMessageCount} 条新消息</button>}
     </div>

@@ -123,4 +123,39 @@ describe('MessageTimeline motion budget', () => {
 
     expect(timeline.scrollTop).toBe(1000);
   });
+
+  it('groups consecutive messages from the same author', () => {
+    const state = {
+      ...baseState,
+      activeMessages: [receivedMessage('history-1'), { ...receivedMessage('history-2'), time: '10:02' }]
+    };
+
+    render(<MessageTimeline bridge={createFakeBridge(state)} state={state} />);
+
+    expect(screen.getByTestId('message-history-1')).not.toHaveClass('message--grouped');
+    expect(screen.getByTestId('message-history-2')).toHaveClass('message--grouped');
+  });
+
+  it('shows the date pill above the history window', () => {
+    const state = { ...baseState, activeMessages: [message('history-1')] };
+
+    render(<MessageTimeline bridge={createFakeBridge(state)} state={state} />);
+
+    expect(document.querySelector('.date-pill')).not.toBeNull();
+  });
+
+  it('clears the history loading hint once the older page renders', () => {
+    const state = {
+      ...baseState,
+      activeMessages: Array.from({ length: 600 }, (_, index) => message(`history-${index}`))
+    };
+    render(<MessageTimeline bridge={createFakeBridge(state)} state={state} />);
+    const timeline = screen.getByTestId('message-timeline');
+    setScrollableGeometry(timeline, 0);
+
+    fireEvent.scroll(timeline);
+
+    expect(screen.getByTestId('message-history-499')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
 });

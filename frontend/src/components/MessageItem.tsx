@@ -8,6 +8,7 @@ import { animateMessage } from '../animation/motion';
 type MessageItemProps = {
   message: MessageItemData;
   bridge: ChatBridgeClient;
+  grouped?: boolean;
   onCopy?: (message: MessageItemData) => void;
   onQuote?: (message: MessageItemData) => void;
   onLocalDelete?: (message: MessageItemData) => void;
@@ -17,7 +18,7 @@ type MessageItemProps = {
   animateEntry?: boolean;
 };
 
-export const MessageItem = memo(function MessageItem({ message, bridge, onCopy, onQuote, onLocalDelete, onRecall, canRecall = false, showTime = true, animateEntry = true }: MessageItemProps) {
+export const MessageItem = memo(function MessageItem({ message, bridge, grouped = false, onCopy, onQuote, onLocalDelete, onRecall, canRecall = false, showTime = true, animateEntry = true }: MessageItemProps) {
   const [feedback, setFeedback] = useState<{ status: 'idle' | 'pending' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
   const pendingCommandIdRef = useRef<string | null>(null);
   const pendingUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -50,7 +51,7 @@ export const MessageItem = memo(function MessageItem({ message, bridge, onCopy, 
   };
 
   return (
-    <article ref={messageRef} className={`message ${message.selfMessage ? 'message--self' : 'message--peer'} ${message.systemMessage ? 'message--system' : ''}`} data-testid={`message-${message.messageId}`}>
+    <article ref={messageRef} className={`message ${message.selfMessage ? 'message--self' : 'message--peer'} ${message.systemMessage ? 'message--system' : ''}${grouped ? ' message--grouped' : ''}`} data-testid={`message-${message.messageId}`}>
       <div className="message-cluster">
         {message.systemMessage ? <p className="message-system-text" data-testid={`message-content-${message.messageId}`}>{message.content}</p> : <>
           <div className="message-meta"><strong>{message.displayName}</strong><span>#{message.userCode}{showTime ? ` · ${message.time}` : ''}</span></div>
@@ -88,6 +89,7 @@ function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemP
     && previous.canRecall === next.canRecall
     && previous.showTime === next.showTime
     && previous.animateEntry === next.animateEntry
+    && previous.grouped === next.grouped
     && previousMessage.messageId === nextMessage.messageId
     && previousMessage.displayName === nextMessage.displayName
     && previousMessage.userCode === nextMessage.userCode
