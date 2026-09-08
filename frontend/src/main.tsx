@@ -5,7 +5,7 @@ import { App } from './app/App';
 import { BridgeUnavailablePage } from './app/BridgeUnavailablePage';
 import { resolveRuntimeBridge } from './app/runtimeBridge';
 import { createFakeBridge, createWebChannelBridge } from './bridge/chatBridge';
-import type { BridgeState, ChatBridgeClient } from './bridge/types';
+import type { BridgeState } from './bridge/types';
 
 const initialState: BridgeState = {
   schemaVersion: 1,

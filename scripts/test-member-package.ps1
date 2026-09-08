@@ -75,10 +75,20 @@ if (@(Get-ChildItem -LiteralPath $localesDirectory -Filter '*.pak' -File -ErrorA
     throw 'Runtime package is missing Qt WebEngine locales.'
 }
 
-foreach ($forbiddenDirectory in @('.git', 'frontend', 'client-cpp', 'scripts', 'tools')) {
+foreach ($forbiddenDirectory in @('.git', 'frontend', 'client-cpp', 'scripts', 'tools', '.tools', 'out', 'release',
+                                  'logs', 'log', 'test-results', 'test-output', 'coverage', 'attachments',
+                                  'attachment-cache', '__host-data', '.cache')) {
     if (Test-Path -LiteralPath (Join-Path $PackageDirectory $forbiddenDirectory)) {
         throw "Runtime package contains forbidden directory: $forbiddenDirectory"
     }
+}
+$nestedForbiddenDirectories = @(Get-ChildItem -LiteralPath $PackageDirectory -Recurse -Directory -Force |
+    Where-Object {
+        $_.Name -in @('logs', 'log', 'test-results', 'test-output', 'coverage', 'attachments',
+                      'attachment-cache', '__host-data', '.cache')
+    })
+if ($nestedForbiddenDirectories.Count -gt 0) {
+    throw "Runtime package contains forbidden data directories: $($nestedForbiddenDirectories.FullName -join '; ')"
 }
 if (-not $AllowLocalHost.IsPresent -and (Test-Path -LiteralPath (Join-Path $PackageDirectory 'server-go'))) {
     throw 'Member package contains forbidden directory: server-go'
@@ -89,8 +99,8 @@ if ($AllowLocalHost.IsPresent -and (Test-Path -LiteralPath (Join-Path $PackageDi
 
 $forbiddenFiles = @(Get-ChildItem -LiteralPath $PackageDirectory -Recurse -File |
     Where-Object {
-        $_.Name -like '*.key' -or $_.Name -like '*.pem' -or $_.Name -like '*.crt' -or
-        $_.Name -like '*.db' -or ($_.Name -eq 'chat-server.exe' -and -not $AllowLocalHost.IsPresent) -or
+        $_.Name -match '(?i)(\.key$|\.pem$|\.crt$|\.cer$|\.der$|\.pfx$|\.p12$|\.db(?:[-.]|$)|\.sqlite(?:[-.]|$)|\.sqlite3(?:[-.]|$)|\.log(?:[-.]|$)|\.test$|\.tap$|\.trx$|\.junit$)' -or
+        ($_.Name -eq 'chat-server.exe' -and -not $AllowLocalHost.IsPresent) -or
         $_.Name -eq 'LANChat-Launcher.exe' -or
         $_.Name -eq 'node.exe' -or $_.Name -eq 'npm.cmd' -or $_.Name -eq 'pnpm.cmd' -or $_.Name -eq 'go.exe'
     })

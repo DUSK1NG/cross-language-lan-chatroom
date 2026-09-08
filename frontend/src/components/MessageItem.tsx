@@ -64,7 +64,7 @@ export const MessageItem = memo(function MessageItem({ message, bridge, grouped 
         {message.systemMessage ? <p className="message-system-text" data-testid={`message-content-${message.messageId}`}>{message.content}</p> : <>
           {!grouped && <div className="message-who">{message.displayName}</div>}
           <div className="message-bubble">
-            {message.attachment && <AttachmentCard attachment={message.attachment} />}
+            {message.attachment && <AttachmentCard attachment={message.attachment} bridge={bridge} />}
             {isQuotedMessage && <blockquote className="message-quote message-content--wrap" data-testid={`message-quote-${message.messageId}`}>{quotedText}</blockquote>}
             {(!isQuotedMessage || messageText) && <p className="message-content message-content--wrap" data-testid={`message-content-${message.messageId}`}>{messageText}</p>}
             <div className="message-meta">
@@ -90,7 +90,7 @@ export const MessageItem = memo(function MessageItem({ message, bridge, grouped 
   );
 }, areMessageItemPropsEqual);
 
-function AttachmentCard({ attachment }: { attachment: MessageAttachment }) {
+function AttachmentCard({ attachment, bridge }: { attachment: MessageAttachment; bridge: ChatBridgeClient }) {
   const expired = attachment.status === 'expired';
   const invalid = attachment.status === 'verified-failed';
   const extension = attachment.fileName.includes('.')
@@ -116,8 +116,9 @@ function AttachmentCard({ attachment }: { attachment: MessageAttachment }) {
         </span>
       </span>
       <button className="message-attachment__download" type="button" aria-label={`下载 ${attachment.fileName}`}
-        disabled
-        title="下载通道联调中（待对齐）">↓</button>
+        disabled={expired || invalid}
+        onClick={() => bridge.dispatch(createCommand('attachment.download', { attachmentId: attachment.attachmentId, chunkIndex: 0 }))}
+        title={expired || invalid ? statusCopy : '下载附件'}>↓</button>
     </div>
   );
 }

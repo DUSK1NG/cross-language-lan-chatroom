@@ -149,6 +149,12 @@ export function MessageComposer({ state, bridge, quote = null, onClearQuote, dra
   );
 }
 
+function formatTransferBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+  return `${(bytes / 1024).toFixed(1)} KiB`;
+}
+
 function UploadCard({ commandId, upload, onRemove, onRetry }: {
   commandId: string;
   upload: AttachmentUploadState;
@@ -157,9 +163,20 @@ function UploadCard({ commandId, upload, onRemove, onRetry }: {
 }) {
   const failed = upload.phase === 'failed';
   const choosing = upload.phase === 'choosing';
-  const inFlight = upload.phase === 'uploading' || upload.phase === 'resuming';
+  const finalizing = upload.phase === 'finalizing';
+  const inFlight = upload.phase === 'uploading' || upload.phase === 'resuming' || finalizing;
   const totalChunks = upload.totalChunks;
   const progress = totalChunks && totalChunks > 0 ? Math.min(1, upload.receivedChunks / totalChunks) : undefined;
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!inFlight) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [inFlight]);
+  const elapsed = ((upload.lastProgressAt ?? 0) - (upload.startedAt ?? 0)) / 1000;
+  const speed = !finalizing && elapsed > 0 && now - (upload.lastProgressAt ?? 0) < 3000
+    ? Math.max(0, (upload.receivedBytes ?? 0) - (upload.initialReceivedBytes ?? 0)) / elapsed : 0;
+  const percent = progress === undefined ? undefined : `${(progress * 100).toFixed(progress > 0 && progress < 0.01 ? 2 : 1)}%`;
   return (
     <div className={`upload-card${failed ? ' upload-card--failed' : ''}`} data-testid={`attachment-card-${commandId}`}>
       <span className="upload-card__badge" aria-hidden="true">📎</span>
@@ -174,15 +191,23 @@ function UploadCard({ commandId, upload, onRemove, onRetry }: {
         </>}
         {choosing && <>
           <span className="upload-card__title">选择中…</span>
-          <span className="upload-card__meta">正在等待系统文件对话框；文件不会离开本机，之后按 47 KiB 分块加密上传</span>
+          <span className="upload-card__meta">请选择要发送的文件</span>
         </>}
         {inFlight && <>
-          <span className="upload-card__title">{upload.attachmentId ? `${upload.attachmentId.slice(0, 8)} · ` : ''}{upload.phase === 'resuming' ? '续传中' : '上传中'}</span>
+          <span className="upload-card__heading">
+            <span className="upload-card__title">{finalizing ? '上传完成，正在校验…' : upload.phase === 'resuming' ? '续传中' : '上传中'}</span>
+            <strong className="upload-card__percent">{percent ?? '准备中'}</strong>
+          </span>
+          {upload.logicalSize !== undefined && <span className="upload-card__meta">
+            {formatTransferBytes(upload.receivedBytes ?? 0)} / {formatTransferBytes(upload.logicalSize)}
+            {!finalizing && <span> · {formatTransferBytes(speed)}/s</span>}
+          </span>}
           <span className={`upload-card__meta${upload.phase === 'resuming' ? ' upload-card__meta--warn' : ''}`}>
             {upload.phase === 'resuming' ? `⚡ 连接中断，已保存 ${upload.receivedChunks} 块` : `${upload.receivedChunks} 块`}{totalChunks ? ` / ${totalChunks} 块` : ''} · 🔒 端到端加密
           </span>
           <div className="progress-track" role="progressbar" aria-label={`附件上传进度 ${commandId}`}
-            aria-valuemin={0} aria-valuemax={totalChunks ?? 0} aria-valuenow={upload.receivedChunks}>
+            aria-valuemin={0} aria-valuemax={totalChunks ?? 0} aria-valuenow={upload.receivedChunks}
+            aria-valuetext={percent}>
             <span className={`progress-fill${progress === undefined ? ' progress-fill--indeterminate' : ''}`}
               style={progress === undefined ? undefined : { transform: `scaleX(${progress})` }} />
           </div>

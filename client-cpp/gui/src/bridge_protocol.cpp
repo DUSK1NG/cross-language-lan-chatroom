@@ -1,4 +1,5 @@
 #include "bridge_protocol.hpp"
+#include "../../include/attachment_limits.hpp"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -122,6 +123,33 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
     }
     if (type == QStringLiteral("mls.group.add") || type == QStringLiteral("mls.group.remove")) {
         return hasRequiredStrings(payload, {"room", "groupId", "targetUserCode"});
+    }
+    if (type == QStringLiteral("attachment.init")) {
+        const QJsonValue size = payload.value(QStringLiteral("logicalSize"));
+        return hasRequiredStrings(payload, {"room"}) && size.isDouble() &&
+               size.toDouble() > 0 && size.toDouble() <= attachments::MaxLogicalBytes &&
+               std::floor(size.toDouble()) == size.toDouble();
+    }
+    if (type == QStringLiteral("attachment.chooseUpload")) {
+        return hasRequiredStrings(payload, {"room"});
+    }
+    if (type == QStringLiteral("attachment.chunk")) {
+        const QJsonValue index = payload.value(QStringLiteral("chunkIndex"));
+        const QString hash = payload.value(QStringLiteral("cipherSha256")).toString();
+        return hasRequiredStrings(payload, {"uploadId", "ciphertext", "cipherSha256"}) &&
+               index.isDouble() && index.toDouble() >= 0 && index.toDouble() < attachments::MaxChunkCount &&
+               std::floor(index.toDouble()) == index.toDouble() &&
+               hash.size() == 64 && hash == hash.toLower();
+    }
+    if (type == QStringLiteral("attachment.resume")) {
+        return hasRequiredStrings(payload, {"uploadId"});
+    }
+    if (type == QStringLiteral("attachment.commit")) {
+        return hasRequiredStrings(payload, {"uploadId"});
+    }
+    if (type == QStringLiteral("attachment.download")) {
+        const QJsonValue index = payload.value(QStringLiteral("chunkIndex"));
+        return hasRequiredStrings(payload, {"attachmentId"}) && index.isDouble() && index.toDouble() >= 0;
     }
     if (type == QStringLiteral("history.search")) {
         return payload.value(QStringLiteral("query")).isString();

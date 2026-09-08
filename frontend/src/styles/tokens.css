@@ -155,8 +155,6 @@ input[type='checkbox'] { accent-color: var(--t-accent); }
   transition: transform var(--t-fast) ease-out;
 }
 .progress-fill--indeterminate { animation: t-indeterminate 1.1s ease-in-out infinite alternate; }
-.progress-fill--warn { background: var(--t-warn); }
-.progress-fill--done { background: var(--t-online); }
 
 /* keyframes：0.8s linear infinite 的 spinner 是过渡预算的显式例外（规格 §6.2） */
 @keyframes t-spin { to { transform: rotate(360deg); } }

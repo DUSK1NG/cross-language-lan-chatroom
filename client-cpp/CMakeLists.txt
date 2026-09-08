@@ -62,6 +62,9 @@ target_include_directories(protocol-tests PRIVATE
 
 find_package(Threads REQUIRED)
 target_link_libraries(protocol-tests PRIVATE ws2_32 Threads::Threads OpenSSL::SSL OpenSSL::Crypto)
+if(MSVC)
+    target_compile_options(protocol-tests PRIVATE /EHsc /utf-8)
+endif()
 
 add_executable(connection-tests
     tests/connection_tests.cpp

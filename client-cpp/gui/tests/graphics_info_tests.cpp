@@ -13,7 +13,7 @@ private slots:
 void GraphicsInfoTests::exposesSafeDefaultsWithoutWindow() {
     GraphicsInfo info;
 
-    info.attachWindow(nullptr);
+    info.refresh();
 
     QCOMPARE(info.graphicsApi(), QStringLiteral("Unknown"));
     QCOMPARE(info.renderer(), QStringLiteral("Unknown"));

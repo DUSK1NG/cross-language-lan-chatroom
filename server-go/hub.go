@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"log"
@@ -114,6 +115,34 @@ type AttachmentInitHubRequest struct {
 	Room        string
 	LogicalSize int64
 	CommandID   string
+}
+
+type AttachmentChunkHubRequest struct {
+	Sender       *Client
+	UploadID     string
+	Index        int64
+	Ciphertext   string
+	CipherSHA256 string
+	CommandID    string
+}
+
+type AttachmentResumeHubRequest struct {
+	Sender    *Client
+	UploadID  string
+	CommandID string
+}
+
+type AttachmentCommitHubRequest struct {
+	Sender    *Client
+	UploadID  string
+	CommandID string
+}
+
+type AttachmentDownloadHubRequest struct {
+	Sender       *Client
+	AttachmentID string
+	Index        int64
+	CommandID    string
 }
 
 type RoomRequest struct {
@@ -287,6 +316,10 @@ type Hub struct {
 	MLSGroupWelcome            chan MLSGroupWelcomeRequest
 	MLSGroupWelcomeAccept      chan MLSGroupWelcomeAcceptRequest
 	AttachmentInit             chan AttachmentInitHubRequest
+	AttachmentChunk            chan AttachmentChunkHubRequest
+	AttachmentResume           chan AttachmentResumeHubRequest
+	AttachmentCommit           chan AttachmentCommitHubRequest
+	AttachmentDownload         chan AttachmentDownloadHubRequest
 	RoomJoin                   chan RoomRequest
 	RoomCreate                 chan RoomCreateRequest
 	RoomAction                 chan RoomActionRequest
@@ -327,6 +360,10 @@ func NewHub() *Hub {
 		MLSGroupWelcome:          make(chan MLSGroupWelcomeRequest),
 		MLSGroupWelcomeAccept:    make(chan MLSGroupWelcomeAcceptRequest),
 		AttachmentInit:           make(chan AttachmentInitHubRequest),
+		AttachmentChunk:          make(chan AttachmentChunkHubRequest),
+		AttachmentResume:         make(chan AttachmentResumeHubRequest),
+		AttachmentCommit:         make(chan AttachmentCommitHubRequest),
+		AttachmentDownload:       make(chan AttachmentDownloadHubRequest),
 		RoomJoin:                 make(chan RoomRequest),
 		RoomCreate:               make(chan RoomCreateRequest),
 		RoomAction:               make(chan RoomActionRequest),
@@ -402,6 +439,14 @@ func (h *Hub) Run() {
 			h.handleMLSGroupWelcomeAccept(request)
 		case request := <-h.AttachmentInit:
 			h.handleAttachmentInit(request)
+		case request := <-h.AttachmentChunk:
+			h.handleAttachmentChunk(request)
+		case request := <-h.AttachmentResume:
+			h.handleAttachmentResume(request)
+		case request := <-h.AttachmentCommit:
+			h.handleAttachmentCommit(request)
+		case request := <-h.AttachmentDownload:
+			h.handleAttachmentDownload(request)
 
 		case request := <-h.RoomJoin:
 			h.handleRoomJoin(request)
@@ -709,7 +754,7 @@ func (h *Hub) broadcastMessage(message Message) {
 			inserted, err := h.OfflineStore.SaveChatMessageIfNew(persisted)
 			if err != nil {
 				if sender, ok := h.ActiveCodes[strings.ToLower(message.UserCode)]; ok {
-					h.deliverError(sender, "Failed to save message history")
+					h.deliverError(sender, "Failed to save message history", message.MessageID)
 				}
 				return
 			}
@@ -717,7 +762,7 @@ func (h *Hub) broadcastMessage(message Message) {
 				if sender != nil && deliveryTracking {
 					stored, err := h.OfflineStore.GetStoredMessageForMessage(persisted)
 					if err != nil {
-						h.deliverError(sender, "Failed to load delivery receipt")
+						h.deliverError(sender, "Failed to load delivery receipt", message.MessageID)
 						return
 					}
 					h.deliver(sender, Message{Type: "delivery_receipt", MessageID: message.MessageID,
@@ -748,7 +793,7 @@ func (h *Hub) broadcastMessage(message Message) {
 			state = "delivered"
 			if h.OfflineStore != nil {
 				if err := h.OfflineStore.UpdateChatMessageDeliveryStateForMessage(message, state); err != nil {
-					h.deliverError(sender, "Failed to update delivery state")
+					h.deliverError(sender, "Failed to update delivery state", message.MessageID)
 					return
 				}
 			}
@@ -1054,15 +1099,15 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 
 	targetCode, err := normalizeUserCode(request.TargetCode)
 	if err != nil {
-		h.deliverError(sender, "Invalid target user code")
+		h.deliverError(sender, "Invalid target user code", request.MessageID)
 		return
 	}
 	if err := validateTextContent("private chat", request.Content); err != nil {
-		h.deliverError(sender, "Invalid private chat content")
+		h.deliverError(sender, "Invalid private chat content", request.MessageID)
 		return
 	}
 	if targetCode == sender.NormalizedCode {
-		h.deliverError(sender, "Cannot send private message to yourself")
+		h.deliverError(sender, "Cannot send private message to yourself", request.MessageID)
 		return
 	}
 
@@ -1081,7 +1126,7 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 		persisted.Private = true
 		inserted, err := h.OfflineStore.SaveChatMessageIfNew(persisted)
 		if err != nil {
-			h.deliverError(sender, "Failed to save message history")
+			h.deliverError(sender, "Failed to save message history", message.MessageID)
 			return
 		}
 		if !inserted {
@@ -1090,7 +1135,7 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 			}
 			stored, err := h.OfflineStore.GetStoredMessageForMessage(persisted)
 			if err != nil {
-				h.deliverError(sender, "Failed to load delivery receipt")
+				h.deliverError(sender, "Failed to load delivery receipt", message.MessageID)
 				return
 			}
 			h.deliver(sender, Message{Type: "delivery_receipt", MessageID: message.MessageID,
@@ -1104,17 +1149,17 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 	target, ok := h.ActiveCodes[targetCode]
 	if !ok {
 		if h.OfflineStore == nil {
-			h.deliverError(sender, "Target user not found")
+			h.deliverError(sender, "Target user not found", message.MessageID)
 			return
 		}
 		exists, err := h.OfflineStore.HasUserCode(targetCode)
 		if err != nil || !exists {
-			h.deliverError(sender, "Target user not found")
+			h.deliverError(sender, "Target user not found", message.MessageID)
 			return
 		}
 		h.recordMessage(message, map[string]bool{sender.NormalizedCode: true, targetCode: true}, message.MessageID)
 		if err := h.OfflineStore.SaveOfflineMessage(targetCode, message); err != nil {
-			h.deliverError(sender, "Failed to save offline message")
+			h.deliverError(sender, "Failed to save offline message", message.MessageID)
 			return
 		}
 		wireMessage := message
@@ -1147,7 +1192,7 @@ func (h *Hub) handlePrivateMessage(request PrivateMessageRequest) {
 			storedMessage := message
 			storedMessage.Private = true
 			if err := h.OfflineStore.UpdateChatMessageDeliveryStateForMessage(storedMessage, state); err != nil {
-				h.deliverError(sender, "Failed to update delivery state")
+				h.deliverError(sender, "Failed to update delivery state", message.MessageID)
 				return
 			}
 		}
@@ -1638,7 +1683,9 @@ func (h *Hub) handleAttachmentInit(request AttachmentInitHubRequest) {
 	})
 	if err != nil {
 		content := "Attachment initialization failed"
-		if errors.Is(err, ErrAttachmentTooLarge) || errors.Is(err, ErrInvalidAttachmentSize) {
+		if errors.Is(err, ErrAttachmentTooLarge) {
+			content = ErrAttachmentTooLarge.Error()
+		} else if errors.Is(err, ErrInvalidAttachmentSize) {
 			content = "Invalid attachment size"
 		} else if errors.Is(err, ErrRoomQuotaExceeded) {
 			content = "Room attachment quota exceeded"
@@ -1649,6 +1696,137 @@ func (h *Hub) handleAttachmentInit(request AttachmentInitHubRequest) {
 	h.deliver(sender, Message{Type: "attachment.init", Room: request.Room,
 		AttachmentID: upload.AttachmentID, UploadID: upload.UploadID, ChunkSize: upload.ChunkSize,
 		ExpiresAt: upload.ExpiresAt.Format(time.RFC3339Nano), CommandID: request.CommandID})
+}
+
+func (h *Hub) attachmentUploadAccess(sender *Client, uploadID, commandID string) (attachmentUploadRow, bool) {
+	if sender == nil || !h.Clients[sender] || h.OfflineStore == nil {
+		if sender != nil {
+			h.deliverError(sender, "Attachment service unavailable", "", commandID)
+		}
+		return attachmentUploadRow{}, false
+	}
+	upload, err := h.OfflineStore.loadAttachmentUpload(uploadID, sender.NormalizedCode)
+	if err != nil {
+		content := "Attachment upload not found"
+		if errors.Is(err, ErrAttachmentUploadUnauthorized) {
+			content = "Attachment upload access denied"
+		} else if errors.Is(err, ErrAttachmentUploadExpired) {
+			content = "Attachment upload expired"
+		}
+		h.deliverError(sender, content, "", commandID)
+		return attachmentUploadRow{}, false
+	}
+	if !h.Rooms[upload.room][sender] {
+		h.deliverError(sender, "Attachment upload access denied", "", commandID)
+		return attachmentUploadRow{}, false
+	}
+	return upload, true
+}
+
+func (h *Hub) handleAttachmentChunk(request AttachmentChunkHubRequest) {
+	if _, ok := h.attachmentUploadAccess(request.Sender, request.UploadID, request.CommandID); !ok {
+		return
+	}
+	ciphertext, err := base64.StdEncoding.DecodeString(request.Ciphertext)
+	if err != nil {
+		h.deliverError(request.Sender, "Invalid attachment chunk", "", request.CommandID)
+		return
+	}
+	duplicate, err := h.OfflineStore.StoreAttachmentChunk(AttachmentChunkRequest{
+		UploadID: request.UploadID, AuthorCode: request.Sender.NormalizedCode, Index: request.Index,
+		Ciphertext: ciphertext, CipherSHA256: request.CipherSHA256,
+	})
+	if err != nil {
+		content := "Attachment chunk rejected"
+		if errors.Is(err, ErrAttachmentChunkHashMismatch) {
+			content = "Attachment chunk hash mismatch"
+		} else if errors.Is(err, ErrAttachmentChunkOutOfRange) || errors.Is(err, ErrAttachmentChunkTooLarge) {
+			content = "Invalid attachment chunk"
+		}
+		h.deliverError(request.Sender, content, "", request.CommandID)
+		return
+	}
+	content := "stored"
+	if duplicate {
+		content = "duplicate"
+	}
+	h.deliver(request.Sender, Message{Type: "attachment.chunk", UploadID: request.UploadID,
+		ChunkIndex: request.Index, Content: content, CommandID: request.CommandID})
+}
+
+func (h *Hub) handleAttachmentResume(request AttachmentResumeHubRequest) {
+	if _, ok := h.attachmentUploadAccess(request.Sender, request.UploadID, request.CommandID); !ok {
+		return
+	}
+	resume, err := h.OfflineStore.ResumeAttachmentUpload(request.UploadID, request.Sender.NormalizedCode)
+	if err != nil {
+		h.deliverError(request.Sender, "Attachment resume failed", "", request.CommandID)
+		return
+	}
+	h.deliver(request.Sender, attachmentResumeMessage(request.UploadID, request.CommandID, resume.ReceivedIndexes))
+}
+
+func attachmentResumeMessage(uploadID, commandID string, indexes []int64) Message {
+	response := Message{Type: "attachment.resume", UploadID: uploadID, CommandID: commandID}
+	if len(indexes) <= 8192 {
+		response.ReceivedIndexes = indexes
+		return response
+	}
+	// A 5 GiB upload has 111551 chunks. Hex-encoded, LSB-first bits keep its
+	// complete resume response below 28 KiB, within the 64 KiB frame cap.
+	var highest int64
+	for _, index := range indexes {
+		if index > highest {
+			highest = index
+		}
+	}
+	bitmap := make([]byte, highest/8+1)
+	for _, index := range indexes {
+		bitmap[index/8] |= 1 << uint(index%8)
+	}
+	response.ReceivedBitmap = hex.EncodeToString(bitmap)
+	return response
+}
+
+func (h *Hub) handleAttachmentCommit(request AttachmentCommitHubRequest) {
+	if _, ok := h.attachmentUploadAccess(request.Sender, request.UploadID, request.CommandID); !ok {
+		return
+	}
+	committed, err := h.OfflineStore.CommitAttachmentUpload(request.UploadID, request.Sender.NormalizedCode)
+	if err != nil {
+		content := "Attachment commit failed"
+		if errors.Is(err, ErrAttachmentChunksIncomplete) {
+			content = "Attachment chunks are incomplete"
+		}
+		h.deliverError(request.Sender, content, "", request.CommandID)
+		return
+	}
+	h.deliver(request.Sender, Message{Type: "attachment.commit", AttachmentID: committed.AttachmentID,
+		LogicalSize: committed.LogicalSize, WholeSha256: committed.WholeCipherSHA256, Content: "committed",
+		CommandID: request.CommandID})
+}
+
+func (h *Hub) handleAttachmentDownload(request AttachmentDownloadHubRequest) {
+	if request.Sender == nil || !h.Clients[request.Sender] || h.OfflineStore == nil {
+		return
+	}
+	var room string
+	if err := h.OfflineStore.db.QueryRow(`SELECT room FROM attachments WHERE attachment_id=?`, request.AttachmentID).Scan(&room); err != nil || !h.Rooms[room][request.Sender] {
+		h.deliverError(request.Sender, "Attachment download access denied", "", request.CommandID)
+		return
+	}
+	chunk, err := h.OfflineStore.ReadAttachmentChunk(request.AttachmentID, request.Index)
+	if err != nil {
+		h.deliverError(request.Sender, "Attachment download failed", "", request.CommandID)
+		return
+	}
+	content := "chunk"
+	if chunk.Last {
+		content = "last"
+	}
+	h.deliver(request.Sender, Message{Type: "attachment.download", AttachmentID: chunk.AttachmentID,
+		ChunkIndex: chunk.Index, Ciphertext: base64.StdEncoding.EncodeToString(chunk.Ciphertext),
+		CipherSHA256: chunk.CipherSHA256, Content: content, CommandID: request.CommandID})
 }
 
 func (h *Hub) deliverRecall(record MessageRecord, message Message) {

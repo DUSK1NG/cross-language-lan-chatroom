@@ -56,8 +56,8 @@ function Test-UnifiedArchive([string]$Archive) {
             }
         }
         $forbidden = @($entries | Where-Object {
-            $_ -match '(^|/)(\.git|\.tools|out|release|frontend|client-cpp|scripts|tools|server-go/certs)/' -or
-            $_ -match '(?i)(\.key$|\.pem$|\.crt$|\.db$|(^|/)LANChat-Launcher\.exe$|(^|/)(node|go)\.exe$|(^|/)(pnpm|npm)\.cmd$)'
+            $_ -match '(^|/)(\.git|\.tools|out|release|frontend|client-cpp|scripts|tools|server-go/certs|logs?|test-results|test-output|coverage|attachments|attachment-cache|__host-data|\.cache)/' -or
+            $_ -match '(?i)(\.key$|\.pem$|\.crt$|\.cer$|\.der$|\.pfx$|\.p12$|\.db(?:[-.]|$)|\.sqlite(?:[-.]|$)|\.sqlite3(?:[-.]|$)|\.log(?:[-.]|$)|\.test$|\.tap$|\.trx$|\.junit$|(^|/)LANChat-Launcher\.exe$|(^|/)(node|go)\.exe$|(^|/)(pnpm|npm)\.cmd$)'
         })
         if ($forbidden.Count -gt 0) {
             throw "Unified ZIP contains forbidden paths: $($forbidden -join '; ')"

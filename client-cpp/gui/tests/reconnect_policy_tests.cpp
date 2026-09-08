@@ -9,6 +9,7 @@ private slots:
     void schedulesBoundedExponentialDelays();
     void resetsAfterSuccessfulLogin();
     void stopsAfterExplicitDisconnect();
+    void invalidatesPendingReconnectsAfterStateChange();
 };
 
 void ReconnectPolicyTests::schedulesBoundedExponentialDelays() {
@@ -42,6 +43,16 @@ void ReconnectPolicyTests::stopsAfterExplicitDisconnect() {
 
     QVERIFY(!policy.isActive());
     QCOMPARE(policy.scheduleNextAttempt(), -1);
+}
+
+void ReconnectPolicyTests::invalidatesPendingReconnectsAfterStateChange() {
+    ReconnectPolicy policy;
+    const int pendingGeneration = policy.generation();
+    policy.scheduleNextAttempt();
+
+    policy.markConnected();
+
+    QVERIFY(policy.generation() != pendingGeneration);
 }
 
 QTEST_GUILESS_MAIN(ReconnectPolicyTests)

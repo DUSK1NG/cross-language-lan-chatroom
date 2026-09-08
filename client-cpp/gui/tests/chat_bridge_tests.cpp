@@ -6,7 +6,9 @@
 #include "performance_profile.hpp"
 
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
+#include <QBuffer>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -16,10 +18,12 @@
 #include <QThread>
 #include <QSignalSpy>
 #include <QScopeGuard>
-#include <QSslSocket>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 
 #include <array>
 
@@ -38,7 +42,172 @@ private:
     int result_ = SOCKET_ERROR;
 };
 
-bool sendRawTlsFrame(QSslSocket& socket, const QJsonObject& object) {
+QString opensslError(const char* operation) {
+    std::array<char, 256> buffer{};
+    const unsigned long errorCode = ERR_get_error();
+    if (errorCode == 0) return QString::fromLatin1(operation);
+    ERR_error_string_n(errorCode, buffer.data(), buffer.size());
+    return QString::fromLatin1(operation) + QStringLiteral(": ") + QString::fromLatin1(buffer.data());
+}
+
+class RawTlsClient final {
+public:
+    RawTlsClient() {
+        OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, nullptr);
+    }
+
+    ~RawTlsClient() { close(); }
+
+    RawTlsClient(const RawTlsClient&) = delete;
+    RawTlsClient& operator=(const RawTlsClient&) = delete;
+
+    bool connectToHost(const QString& address, const quint16 port,
+                       const QString& trustedCertificate, const QString& serverName) {
+        close();
+        error_.clear();
+
+        sockaddr_in endpoint{};
+        endpoint.sin_family = AF_INET;
+        endpoint.sin_port = htons(port);
+        if (InetPtonW(AF_INET, reinterpret_cast<const wchar_t*>(address.utf16()), &endpoint.sin_addr) != 1) {
+            error_ = QStringLiteral("invalid raw TLS test address");
+            return false;
+        }
+
+        socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (socket_ == INVALID_SOCKET) {
+            error_ = QStringLiteral("raw TLS socket creation failed");
+            return false;
+        }
+        const int timeoutMs = 10000;
+        setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO,
+                   reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+        setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO,
+                   reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+        if (connect(socket_, reinterpret_cast<const sockaddr*>(&endpoint), sizeof(endpoint)) == SOCKET_ERROR) {
+            error_ = QStringLiteral("raw TLS TCP connection failed");
+            close();
+            return false;
+        }
+
+        context_ = SSL_CTX_new(TLS_client_method());
+        if (context_ == nullptr) {
+            error_ = opensslError("raw TLS context creation failed");
+            close();
+            return false;
+        }
+        SSL_CTX_set_min_proto_version(context_, TLS1_2_VERSION);
+        SSL_CTX_set_verify(context_, SSL_VERIFY_PEER, nullptr);
+        const QByteArray certificatePath = trustedCertificate.toUtf8();
+        if (certificatePath.isEmpty() ||
+            SSL_CTX_load_verify_locations(context_, certificatePath.constData(), nullptr) != 1) {
+            error_ = opensslError("raw TLS trust setup failed");
+            close();
+            return false;
+        }
+
+        ssl_ = SSL_new(context_);
+        const QByteArray tlsName = serverName.toUtf8();
+        if (ssl_ == nullptr || SSL_set_fd(ssl_, static_cast<int>(socket_)) != 1 ||
+            tlsName.isEmpty() || SSL_set1_host(ssl_, tlsName.constData()) != 1 ||
+            SSL_set_tlsext_host_name(ssl_, tlsName.constData()) != 1) {
+            error_ = opensslError("raw TLS setup failed");
+            close();
+            return false;
+        }
+        if (SSL_connect(ssl_) != 1) {
+            error_ = opensslError("raw TLS handshake failed");
+            close();
+            return false;
+        }
+        if (SSL_get_verify_result(ssl_) != X509_V_OK) {
+            error_ = QStringLiteral("raw TLS certificate verification failed");
+            close();
+            return false;
+        }
+        return true;
+    }
+
+    bool writeAll(const QByteArray& bytes, const int timeoutMs) {
+        qsizetype offset = 0;
+        while (offset < bytes.size()) {
+            size_t written = 0;
+            if (SSL_write_ex(ssl_, bytes.constData() + offset,
+                             static_cast<size_t>(bytes.size() - offset), &written) == 1) {
+                offset += static_cast<qsizetype>(written);
+                continue;
+            }
+            if (!waitForSslRetry(SSL_get_error(ssl_, 0), timeoutMs, QStringLiteral("write"))) return false;
+        }
+        return true;
+    }
+
+    bool readExact(const qsizetype size, QByteArray* result, const int timeoutMs) {
+        if (result == nullptr || size < 0) return false;
+        result->clear();
+        result->resize(size);
+        qsizetype offset = 0;
+        while (offset < size) {
+            size_t read = 0;
+            if (SSL_read_ex(ssl_, result->data() + offset,
+                            static_cast<size_t>(size - offset), &read) == 1) {
+                offset += static_cast<qsizetype>(read);
+                continue;
+            }
+            if (!waitForSslRetry(SSL_get_error(ssl_, 0), timeoutMs, QStringLiteral("read"))) return false;
+        }
+        return true;
+    }
+
+    void disconnect() { close(); }
+
+    QString errorString() const { return error_; }
+
+private:
+    bool waitForSslRetry(const int sslError, const int timeoutMs, const QString& operation) {
+        if (sslError != SSL_ERROR_WANT_READ && sslError != SSL_ERROR_WANT_WRITE) {
+            error_ = opensslError(qPrintable(QStringLiteral("raw TLS %1 failed").arg(operation)));
+            return false;
+        }
+        fd_set sockets;
+        FD_ZERO(&sockets);
+        FD_SET(socket_, &sockets);
+        timeval timeout{timeoutMs / 1000, (timeoutMs % 1000) * 1000};
+        const int result = select(0,
+                                  sslError == SSL_ERROR_WANT_READ ? &sockets : nullptr,
+                                  sslError == SSL_ERROR_WANT_WRITE ? &sockets : nullptr,
+                                  nullptr, &timeout);
+        if (result > 0) return true;
+        error_ = result == 0
+            ? QStringLiteral("raw TLS %1 timed out").arg(operation)
+            : QStringLiteral("raw TLS %1 socket wait failed").arg(operation);
+        return false;
+    }
+
+    void close() {
+        if (ssl_ != nullptr) {
+            SSL_shutdown(ssl_);
+            SSL_free(ssl_);
+            ssl_ = nullptr;
+        }
+        if (context_ != nullptr) {
+            SSL_CTX_free(context_);
+            context_ = nullptr;
+        }
+        if (socket_ != INVALID_SOCKET) {
+            shutdown(socket_, SD_BOTH);
+            closesocket(socket_);
+            socket_ = INVALID_SOCKET;
+        }
+    }
+
+    SOCKET socket_ = INVALID_SOCKET;
+    SSL_CTX* context_ = nullptr;
+    SSL* ssl_ = nullptr;
+    QString error_;
+};
+
+bool sendRawTlsFrame(RawTlsClient& socket, const QJsonObject& object) {
     const QByteArray payload = QJsonDocument(object).toJson(QJsonDocument::Compact);
     if (payload.isEmpty() || payload.size() > 64 * 1024) return false;
     QByteArray frame(4, Qt::Uninitialized);
@@ -48,38 +217,26 @@ bool sendRawTlsFrame(QSslSocket& socket, const QJsonObject& object) {
     frame[2] = static_cast<char>((size >> 8) & 0xff);
     frame[3] = static_cast<char>(size & 0xff);
     frame.append(payload);
-    return socket.write(frame) == frame.size() && socket.waitForBytesWritten(2000);
+    return socket.writeAll(frame, 2000);
 }
 
-bool readRawTlsFrame(QSslSocket& socket, QJsonObject* object, int timeoutMs) {
-    std::array<char, 4> header{};
-    int offset = 0;
-    while (offset < static_cast<int>(header.size())) {
-        if (socket.bytesAvailable() == 0 && !socket.waitForReadyRead(timeoutMs)) return false;
-        const qint64 read = socket.read(header.data() + offset, header.size() - offset);
-        if (read <= 0) return false;
-        offset += static_cast<int>(read);
-    }
+bool readRawTlsFrame(RawTlsClient& socket, QJsonObject* object, int timeoutMs) {
+    QByteArray header;
+    if (!socket.readExact(4, &header, timeoutMs)) return false;
     const auto size = (static_cast<quint32>(static_cast<unsigned char>(header[0])) << 24) |
                       (static_cast<quint32>(static_cast<unsigned char>(header[1])) << 16) |
                       (static_cast<quint32>(static_cast<unsigned char>(header[2])) << 8) |
                       static_cast<quint32>(static_cast<unsigned char>(header[3]));
     if (size == 0 || size > 64 * 1024) return false;
     QByteArray payload;
-    payload.reserve(static_cast<int>(size));
-    while (payload.size() < static_cast<int>(size)) {
-        if (socket.bytesAvailable() == 0 && !socket.waitForReadyRead(timeoutMs)) return false;
-        const QByteArray chunk = socket.read(static_cast<qint64>(size) - payload.size());
-        if (chunk.isEmpty()) return false;
-        payload.append(chunk);
-    }
+    if (!socket.readExact(static_cast<qsizetype>(size), &payload, timeoutMs)) return false;
     const QJsonDocument document = QJsonDocument::fromJson(payload);
     if (!document.isObject()) return false;
     *object = document.object();
     return true;
 }
 
-bool receiveRawTlsType(QSslSocket& socket, const QString& type, QJsonObject* object, int timeoutMs) {
+bool receiveRawTlsType(RawTlsClient& socket, const QString& type, QJsonObject* object, int timeoutMs) {
     QElapsedTimer timer;
     timer.start();
     while (timer.elapsed() < timeoutMs) {
@@ -113,6 +270,8 @@ class ChatBridgeTests final : public QObject {
     Q_OBJECT
 
 private slots:
+    void attachmentPipelineTransfersPastChatBurstLimit();
+    void oversizedAttachmentFailsBeforeConnectionSetup();
     void controllerConstructs();
     void initialSnapshotHasSchemaAndDisconnectedState();
     void snapshotMarksMemberPackageHostAsUnavailable();
@@ -129,6 +288,7 @@ private slots:
     void burstModelChangesDoNotPushStateAtFrameRate();
     void stateSamplingReportsDirtyModelCount();
     void workerDisconnectRunsOnWorkerThread();
+    void attachmentUploadEventsCarrySizeAndAcknowledgedIndexes();
     void serverConnectionCompletesWithoutMessageLifetimeCorruption();
     void localHostConnectionCompletesWithoutMessageLifetimeCorruption();
     void approvedLanMemberConnectionCompletesAfterLoginPending();
@@ -139,6 +299,8 @@ private slots:
     void connectionApprovalStateIsExposedAndCleared();
     void successfulConnectionClearsPreviousError();
     void reconnectingSnapshotPreservesTimelineAndReportsRecovery();
+    void serverRejectionMarksOriginalMessageFailedWithoutTimelineError();
+    void searchHistoryMergesWithoutDiscardingRealtimeRows();
     void recallRejectsAnUnrelatedMessageBeforeReportingSuccess();
     void recallReportsServerAcceptanceOrRejectionInsteadOfDispatchSuccess();
 };
@@ -389,31 +551,268 @@ void ChatBridgeTests::workerDisconnectRunsOnWorkerThread() {
     QVERIFY(workerThread.wait(1000));
 }
 
-void ChatBridgeTests::serverConnectionCompletesWithoutMessageLifetimeCorruption() {
+void ChatBridgeTests::attachmentPipelineTransfersPastChatBurstLimit() {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    QSKIP("Attachment encryption support is disabled for this build");
+#else
+    QTcpSocket portProbe;
+    portProbe.connectToHost(QStringLiteral("127.0.0.1"), 8888);
+    if (portProbe.waitForConnected(100)) QSKIP("Local port 8888 is occupied by an interactive host");
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto paths = HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
+    if (!paths.available()) QSKIP("Local Host executable is unavailable");
+    WinsockScope winsock;
+    QVERIFY(winsock.result() == 0);
+    GuiChatController host;
+    QSignalSpy hostEvents(&host, &GuiChatController::attachmentEvent);
+    host.connectToLocalHost(paths.serverExe, temporary.filePath("server.crt"),
+        temporary.filePath("server.key"), temporary.filePath("chat.db"), "Alice", "A001");
+    QTRY_VERIFY_WITH_TIMEOUT(host.connected(), 12000);
+
+    GuiChatController sender;
+    QSignalSpy senderConnected(&sender, &GuiChatController::connectedChanged);
+    QSignalSpy senderFailed(&sender, &GuiChatController::connectionFailed);
+    QSignalSpy senderEvents(&sender, &GuiChatController::attachmentEvent);
+    const auto cleanup = qScopeGuard([&] {
+        sender.disconnectFromServer();
+        host.disconnectFromServer();
+        waitForLocalHostPortClosed();
+    });
+    sender.connectToServerWithTlsName("127.0.0.1", 8888, "Bob", "B001",
+                                      temporary.filePath("server.crt"), "localhost");
+    QVariantMap approval;
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const QVariant& pending : host.pendingConnectionApprovals()) {
+            const QVariantMap candidate = pending.toMap();
+            if (candidate.value("userCode").toString() == QStringLiteral("B001")) {
+                approval = candidate;
+                return true;
+            }
+        }
+        return false;
+    }(), 5000);
+    host.sendAdminAction("approve_connection", approval.value("userCode").toString(), approval.value("id").toString());
+    QTRY_VERIFY_WITH_TIMEOUT(senderConnected.count() > 0 || senderFailed.count() > 0, 12000);
+    QVERIFY2(sender.connected(), qPrintable(sender.statusText()));
+
+    const QByteArray plaintext(static_cast<int>(attachments::TransferClient::ChunkSize * 128 + 17), 'x');
+    const QString filePath = temporary.filePath("pipeline.bin");
+    QFile file(filePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(plaintext), plaintext.size());
+    file.close();
+    QElapsedTimer elapsed;
+    elapsed.start();
+    sender.startAttachmentUpload("lobby", filePath, {"A001"}, "pipeline");
+    const auto terminal = [&]() {
+        for (const auto& event : senderEvents) {
+            if (event.at(0).toString() == "attachment.commit" || event.at(0).toString() == "error") return true;
+        }
+        return false;
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(terminal(), 30000);
+    int acknowledgements = 0;
+    bool committed = false;
+    for (const auto& event : senderEvents) {
+        QVERIFY2(event.at(0).toString() != "error", qPrintable(event.at(10).toString()));
+        if (event.at(0).toString() == "attachment.chunk") ++acknowledgements;
+        if (event.at(0).toString() == "attachment.commit") {
+            QCOMPARE(acknowledgements, 129);
+            committed = true;
+        }
+    }
+    QVERIFY(committed);
+    qInfo("Pipeline uploaded %lld bytes in %lld ms (129 acknowledgements)",
+          static_cast<long long>(plaintext.size()), static_cast<long long>(elapsed.elapsed()));
+    const auto attachmentCard = [](ChatListModel* model) {
+        for (int row = 0; row < model->rowCount(); ++row) {
+            const QVariantMap attachment = model->valueAt(row, "attachment").toMap();
+            if (!attachment.value("attachmentId").toString().isEmpty()) return attachment;
+        }
+        return QVariantMap{};
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(!attachmentCard(sender.messageModel()).isEmpty(), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!attachmentCard(host.messageModel()).isEmpty(), 5000);
+    const QVariantMap senderCard = attachmentCard(sender.messageModel());
+    const QVariantMap hostCard = attachmentCard(host.messageModel());
+    QCOMPARE(senderCard.value("attachmentId"), hostCard.value("attachmentId"));
+    QCOMPARE(hostCard.value("fileName").toString(), QStringLiteral("pipeline.bin"));
+    QCOMPARE(hostCard.value("logicalSize").toLongLong(), static_cast<qint64>(plaintext.size()));
+    QCOMPARE(hostCard.value("status").toString(), QStringLiteral("available"));
+
+    const QString downloadPath = temporary.filePath("downloaded-pipeline.bin");
+    host.startAttachmentDownload(hostCard.value("attachmentId").toString(), downloadPath,
+                                 QStringLiteral("pipeline-download"));
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const auto& event : hostEvents) {
+            if (event.at(0).toString() == QStringLiteral("completed") &&
+                event.at(3).toString() == QStringLiteral("pipeline-download")) return true;
+        }
+        return false;
+    }(), 30000);
+    QFile downloaded(downloadPath);
+    QVERIFY(downloaded.open(QIODevice::ReadOnly));
+    const QByteArray downloadedHash = QCryptographicHash::hash(downloaded.readAll(), QCryptographicHash::Sha256);
+    QCOMPARE(downloadedHash, QCryptographicHash::hash(plaintext, QCryptographicHash::Sha256));
+#endif
+}
+
+void ChatBridgeTests::oversizedAttachmentFailsBeforeConnectionSetup() {
+    GuiConnectionWorker worker;
+    QSignalSpy events(&worker, &GuiConnectionWorker::attachmentEvent);
+    worker.sendAttachmentInit(QStringLiteral("lobby"), 5LL * 1024 * 1024 * 1024 + 1,
+                              QStringLiteral("too-large"));
+    QCOMPARE(events.count(), 1);
+    QCOMPARE(events.first().at(3).toString(), QStringLiteral("too-large"));
+    QCOMPARE(events.first().at(10).toString(), QStringLiteral("文件超过 5 GiB 上限"));
+}
+
+void ChatBridgeTests::attachmentUploadEventsCarrySizeAndAcknowledgedIndexes() {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    QSKIP("Attachment encryption support is disabled for this build");
+#else
+    QTcpSocket portProbe;
+    portProbe.connectToHost(QStringLiteral("127.0.0.1"), 8888);
+    if (portProbe.waitForConnected(100)) QSKIP("Local port 8888 is occupied by an interactive host");
+
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto hostPaths = HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
+    if (!hostPaths.available()) QSKIP("Local Host executable is not available in this checkout");
     WinsockScope winsock;
     QVERIFY2(winsock.result() == 0, "WSAStartup failed");
+    GuiChatController controller;
+    ChatBridge bridge(&controller);
+    QSignalSpy resultSpy(&bridge, &ChatBridge::commandResult);
+    QSignalSpy failedSpy(&controller, &GuiChatController::connectionFailed);
+    controller.connectToLocalHost(hostPaths.serverExe, temporary.filePath("server.crt"),
+                                  temporary.filePath("server.key"), temporary.filePath("chat.db"),
+                                  "Progress Test", "PROGRESS001");
+    QTRY_VERIFY_WITH_TIMEOUT(controller.connected() || !failedSpy.isEmpty(), 12000);
+    QVERIFY2(controller.connected(), qPrintable(controller.statusText()));
+
+    const auto eventPayload = [&](const QString& type, const QString& id) {
+        for (const auto& arguments : resultSpy) {
+            const auto event = QJsonDocument::fromJson(arguments.at(0).toString().toUtf8()).object();
+            const auto payload = event.value("payload").toObject();
+            if (event.value("type").toString() == "attachment.event" &&
+                event.value("id").toString() == id && payload.value("type").toString() == type) {
+                return payload;
+            }
+        }
+        return QJsonObject{};
+    };
+    const QString commandId = QStringLiteral("progress-upload");
+    const qint64 chunkSize = attachments::TransferClient::ChunkSize;
+    const qint64 logicalSize = chunkSize * 5 + 17;
+    controller.sendAttachmentInit("lobby", logicalSize, commandId);
+    QTRY_VERIFY_WITH_TIMEOUT(!eventPayload("attachment.init", commandId).isEmpty(), 5000);
+    const auto init = eventPayload("attachment.init", commandId);
+    QCOMPARE(init.value("logicalSize").toInteger(), logicalSize);
+    QCOMPARE(init.value("chunkSize").toInteger(), chunkSize);
+    QCOMPARE((init.value("logicalSize").toInteger() + chunkSize - 1) / chunkSize, 6);
+
+    // Exercise real TLS chunk acknowledgements with generated plaintext and a
+    // test-only key; no user file or recipient MLS session is involved.
+    const QString uploadId = init.value("uploadId").toString();
+    QBuffer input;
+    input.setData(QByteArray(static_cast<int>(logicalSize), 'p'));
+    QVERIFY(input.open(QIODevice::ReadOnly));
+    attachments::AttachmentCrypto::Key key{};
+    QVERIFY(attachments::AttachmentCrypto::generate_key(key));
+    attachments::ChunkContext context{init.value("attachmentId").toString().toStdString(),
+                                      "lobby", "progress-test-group", logicalSize, chunkSize, 0};
+    for (qint64 index = 0; index < 6; ++index) {
+        context.chunk_index = index;
+        attachments::TransferChunk chunk;
+        bool endOfFile = false;
+        QString error;
+        QVERIFY2(attachments::TransferClient::encrypt_next_chunk(input, key, context, chunk, endOfFile, &error),
+                 qPrintable(error));
+        QCOMPARE(endOfFile, index == 5);
+        const QString chunkCommand = commandId + QStringLiteral("-chunk-%1").arg(index);
+        controller.sendAttachmentChunk(uploadId, index, chunk.ciphertext, chunk.cipher_sha256, chunkCommand);
+        QTRY_VERIFY_WITH_TIMEOUT(!eventPayload("attachment.chunk", chunkCommand).isEmpty(), 5000);
+        QCOMPARE(eventPayload("attachment.chunk", chunkCommand).value("chunkIndex").toInteger(), index);
+        if (index == 4) {
+            const QString resumeCommand = commandId + QStringLiteral("-resume");
+            controller.resumeAttachment(uploadId, resumeCommand);
+            QTRY_VERIFY_WITH_TIMEOUT(!eventPayload("attachment.resume", resumeCommand).isEmpty(), 5000);
+            QCOMPARE(eventPayload("attachment.resume", resumeCommand).value("receivedIndexes").toArray(),
+                     QJsonArray({0, 1, 2, 3, 4}));
+        }
+    }
+    const QString commitCommand = commandId + QStringLiteral("-commit");
+    controller.sendAttachmentCommit(uploadId, commitCommand);
+    QTRY_VERIFY_WITH_TIMEOUT(!eventPayload("attachment.commit", commitCommand).isEmpty(), 5000);
+    controller.disconnectFromServer();
+    QVERIFY2(waitForLocalHostPortClosed(), "test host remained listening after disconnect");
+#endif
+}
+
+void ChatBridgeTests::serverConnectionCompletesWithoutMessageLifetimeCorruption() {
+    QTcpSocket portProbe;
+    portProbe.connectToHost(QStringLiteral("127.0.0.1"), 8888);
+    if (portProbe.waitForConnected(100)) {
+        QSKIP("Local port 8888 is occupied by an interactive host");
+    }
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
     const HostPathResolver::HostPaths hostPaths =
         HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
-    if (!hostPaths.available() || !QFileInfo::exists(hostPaths.certFile)) {
-        QSKIP("TLS integration certificate is not available in this checkout");
+    if (!hostPaths.available()) {
+        QSKIP("Local Host executable is not available in this checkout");
     }
+    WinsockScope winsock;
+    QVERIFY2(winsock.result() == 0, "WSAStartup failed");
+    const QString certFile = temporary.filePath(QStringLiteral("certs/server-lan.crt"));
+    const QString keyFile = temporary.filePath(QStringLiteral("certs/server-lan.key"));
+    const QString dbFile = temporary.filePath(QStringLiteral("chat.db"));
+    GuiChatController host;
+    QSignalSpy hostConnectedSpy(&host, &GuiChatController::connectedChanged);
+    QSignalSpy hostFailedSpy(&host, &GuiChatController::connectionFailed);
+    host.connectToLocalHost(hostPaths.serverExe, certFile, keyFile, dbFile, "Alice", "A001");
+    QTRY_VERIFY_WITH_TIMEOUT(hostConnectedSpy.count() > 0 || hostFailedSpy.count() > 0, 12000);
+    QVERIFY2(host.connected(), qPrintable(host.statusText()));
 
     GuiChatController controller;
     QSignalSpy connectedSpy(&controller, &GuiChatController::connectedChanged);
     QSignalSpy failedSpy(&controller, &GuiChatController::connectionFailed);
-    controller.connectToServer("127.0.0.1", 8888, "Alice", "A001", hostPaths.certFile);
+    controller.connectToServerWithTlsName("127.0.0.1", 8888, "Bob", "B001", certFile, "localhost");
+
+    QVariantMap approval;
+    QTRY_VERIFY_WITH_TIMEOUT([&] {
+        for (const QVariant& pending : host.pendingConnectionApprovals()) {
+            const QVariantMap candidate = pending.toMap();
+            if (candidate.value("userCode").toString() == QStringLiteral("B001")) {
+                approval = candidate;
+                return true;
+            }
+        }
+        return false;
+    }(), 5000);
+    host.sendAdminAction("approve_connection", approval.value("userCode").toString(), approval.value("id").toString());
 
     QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() > 0 || failedSpy.count() > 0, 10000);
-    QVERIFY2(connectedSpy.count() > 0, "local Host connection did not succeed");
+    QVERIFY2(controller.connected(), qPrintable(controller.statusText()));
     controller.disconnectFromServer();
-    QTest::qWait(100);
+    host.disconnectFromServer();
+    QVERIFY2(waitForLocalHostPortClosed(), "test host remained listening after disconnect");
 }
 
 void ChatBridgeTests::localHostConnectionCompletesWithoutMessageLifetimeCorruption() {
+    QTcpSocket portProbe;
+    portProbe.connectToHost(QStringLiteral("127.0.0.1"), 8888);
+    if (portProbe.waitForConnected(100)) {
+        QSKIP("Local port 8888 is occupied by an interactive host");
+    }
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
     const HostPathResolver::HostPaths hostPaths =
         HostPathResolver::resolveHostPaths(QCoreApplication::applicationDirPath());
-    if (!hostPaths.available() || !QFileInfo::exists(hostPaths.dbFile)) {
-        QSKIP("Local Host integration files are not available in this checkout");
+    if (!hostPaths.available()) {
+        QSKIP("Local Host executable is not available in this checkout");
     }
 
     WinsockScope winsock;
@@ -421,13 +820,14 @@ void ChatBridgeTests::localHostConnectionCompletesWithoutMessageLifetimeCorrupti
     GuiChatController controller;
     QSignalSpy connectedSpy(&controller, &GuiChatController::connectedChanged);
     QSignalSpy failedSpy(&controller, &GuiChatController::connectionFailed);
-    controller.connectToLocalHost(hostPaths.serverExe, hostPaths.certFile, hostPaths.keyFile,
-                                  hostPaths.dbFile, "Alice", "A001");
+    controller.connectToLocalHost(hostPaths.serverExe, temporary.filePath(QStringLiteral("certs/server-lan.crt")),
+                                  temporary.filePath(QStringLiteral("certs/server-lan.key")),
+                                  temporary.filePath(QStringLiteral("chat.db")), "Alice", "A001");
 
     QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() > 0 || failedSpy.count() > 0, 12000);
-    QVERIFY2(connectedSpy.count() > 0, "local Host connection did not succeed");
+    QVERIFY2(controller.connected(), qPrintable(controller.statusText()));
     controller.disconnectFromServer();
-    QTest::qWait(100);
+    QVERIFY2(waitForLocalHostPortClosed(), "test host remained listening after disconnect");
 }
 
 void ChatBridgeTests::approvedLanMemberConnectionCompletesAfterLoginPending() {
@@ -615,7 +1015,7 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
         }
         return codes.join(QLatin1Char(','));
     };
-    auto expectRawError = [&](QSslSocket& socket, const QJsonObject& frame,
+    auto expectRawError = [&](RawTlsClient& socket, const QJsonObject& frame,
                               const QString& commandId, const QString& content) {
         if (!sendRawTlsFrame(socket, frame)) return false;
         QJsonObject response;
@@ -623,7 +1023,7 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
         return response.value(QStringLiteral("command_id")).toString() == commandId &&
                response.value(QStringLiteral("content")).toString() == content;
     };
-    auto expectRawAck = [&](QSslSocket& socket, const QJsonObject& frame,
+    auto expectRawAck = [&](RawTlsClient& socket, const QJsonObject& frame,
                             const QString& type, const QString& commandId,
                             const QString& content) {
         if (!sendRawTlsFrame(socket, frame)) return false;
@@ -634,10 +1034,10 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
         return true;
     };
 
-    QSslSocket mallory;
-    mallory.setPeerVerifyMode(QSslSocket::VerifyNone);
-    mallory.connectToHostEncrypted(QStringLiteral("127.0.0.1"), 8888);
-    QVERIFY2(mallory.waitForEncrypted(10000), qPrintable(mallory.errorString()));
+    RawTlsClient mallory;
+    QVERIFY2(mallory.connectToHost(QStringLiteral("127.0.0.1"), 8888, hostPaths.certFile,
+                                   QStringLiteral("localhost")),
+             qPrintable(mallory.errorString()));
     QVERIFY(sendRawTlsFrame(mallory, QJsonObject{{"type", "login"}, {"username", "Mallory"}, {"user_code", "M001"}}));
     QJsonObject malloryPending;
     QVERIFY(receiveRawTlsType(mallory, QStringLiteral("login_pending"), &malloryPending, 5000));
@@ -669,12 +1069,12 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
                          QStringLiteral("raw-publish-1"), QStringLiteral("stored")));
     QVERIFY(expectRawAck(mallory, publishMallory, QStringLiteral("mls.key_package.publish"),
                          QStringLiteral("raw-publish-1"), QStringLiteral("stored")));
-    mallory.disconnectFromHost();
+    mallory.disconnect();
 
-    QSslSocket rawBob;
-    rawBob.setPeerVerifyMode(QSslSocket::VerifyNone);
-    rawBob.connectToHostEncrypted(QStringLiteral("127.0.0.1"), 8888);
-    QVERIFY2(rawBob.waitForEncrypted(10000), qPrintable(rawBob.errorString()));
+    RawTlsClient rawBob;
+    QVERIFY2(rawBob.connectToHost(QStringLiteral("127.0.0.1"), 8888, hostPaths.certFile,
+                                  QStringLiteral("localhost")),
+             qPrintable(rawBob.errorString()));
     QVERIFY(sendRawTlsFrame(rawBob, QJsonObject{{"type", "login"}, {"username", "Bob"}, {"user_code", "B001"}}));
     QJsonObject bobPending;
     QVERIFY(receiveRawTlsType(rawBob, QStringLiteral("login_pending"), &bobPending, 5000));
@@ -743,7 +1143,7 @@ void ChatBridgeTests::authenticatedRawTlsMLSFramesAreRejected() {
     // to the submitting member, even though Bob is still authenticated.
     QJsonObject leakedWelcome;
     QVERIFY(!receiveRawTlsType(rawBob, QStringLiteral("mls.group.welcome"), &leakedWelcome, 300));
-    rawBob.disconnectFromHost();
+    rawBob.disconnect();
 
     // The opaque tampered commit is intentionally persisted by the server;
     // cryptographic rejection is a client responsibility. Alice's real MLS
@@ -1178,6 +1578,50 @@ void ChatBridgeTests::reconnectingSnapshotPreservesTimelineAndReportsRecovery() 
                      .object().value("connection").toObject().value("phase").toString(),
                  QStringLiteral("reconnecting"));
     QCOMPARE(controller.messageModel()->rowCount(), messageCount);
+}
+
+void ChatBridgeTests::serverRejectionMarksOriginalMessageFailedWithoutTimelineError() {
+    GuiChatController controller;
+    controller.messageModel()->append({{"messageId", "queued-chat"}, {"displayName", "Alice"},
+                                       {"userCode", "A001"}, {"content", "pending"},
+                                       {"selfMessage", true}, {"systemMessage", false},
+                                       {"deliveryState", "queued"}});
+
+    QVERIFY(QMetaObject::invokeMethod(&controller, "handleMessage", Qt::DirectConnection,
+                                      Q_ARG(QString, QStringLiteral("error")), Q_ARG(QString, QStringLiteral("queued-chat")),
+                                      Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
+                                      Q_ARG(QString, QStringLiteral("Rate limit exceeded; please slow down")),
+                                      Q_ARG(QString, QString()), Q_ARG(QString, QString()), Q_ARG(QString, QString()),
+                                      Q_ARG(QStringList, QStringList()), Q_ARG(QStringList, QStringList()),
+                                      Q_ARG(QVariantList, QVariantList()), Q_ARG(QVariantList, QVariantList()),
+                                      Q_ARG(bool, false)));
+
+    QCOMPARE(controller.messageModel()->rowCount(), 1);
+    QCOMPARE(controller.messageModel()->valueAt(0, "deliveryState").toString(), QStringLiteral("failed"));
+    QVERIFY(!controller.messageModel()->valueAt(0, "systemMessage").toBool());
+}
+
+void ChatBridgeTests::searchHistoryMergesWithoutDiscardingRealtimeRows() {
+    GuiChatController controller;
+    controller.messageModel()->append({{"messageId", "live-message"}, {"displayName", "Alice"},
+                                       {"userCode", "A001"}, {"content", "latest realtime"},
+                                       {"selfMessage", true}, {"systemMessage", false},
+                                       {"deliveryState", "delivered"}});
+    controller.searchActiveHistory(QStringLiteral("match"));
+    const QVariantList history = {
+        QVariantMap{{"messageId", "history-message"}, {"displayName", "Bob"}, {"userCode", "B001"},
+                    {"content", "matching historical message"}, {"createdAt", "2026-09-08T10:00:00Z"},
+                    {"deliveryState", "sent"}}
+    };
+
+    QVERIFY(QMetaObject::invokeMethod(&controller, "handleHistory", Qt::DirectConnection,
+                                      Q_ARG(QString, QStringLiteral("lobby")), Q_ARG(QString, QString()),
+                                      Q_ARG(bool, false), Q_ARG(QVariantList, history), Q_ARG(bool, false),
+                                      Q_ARG(QString, QStringLiteral("match"))));
+
+    QCOMPARE(controller.messageModel()->rowCount(), 2);
+    QCOMPARE(controller.messageModel()->valueAt(0, "messageId").toString(), QStringLiteral("history-message"));
+    QCOMPARE(controller.messageModel()->valueAt(1, "messageId").toString(), QStringLiteral("live-message"));
 }
 
 void ChatBridgeTests::recallRejectsAnUnrelatedMessageBeforeReportingSuccess() {

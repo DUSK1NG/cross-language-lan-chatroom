@@ -233,8 +233,14 @@ if (-not (Test-DependencyMarker $dependencyInput $dependencyMarker)) {
     if ($LASTEXITCODE -ne 0) { throw "pnpm install failed with exit code $LASTEXITCODE." }
     Set-DependencyMarker $dependencyInput $dependencyMarker
 }
-Write-Step 'Build React interface (pnpm run build)'
-& $pnpm --dir $FrontendDirectory run build
+Write-Step 'Build React interface (release diagnostics disabled)'
+$previousPerfDiagnostics = $env:VITE_ENABLE_PERFORMANCE_DIAGNOSTICS
+$env:VITE_ENABLE_PERFORMANCE_DIAGNOSTICS = 'false'
+try {
+    & $pnpm --dir $FrontendDirectory run build
+} finally {
+    $env:VITE_ENABLE_PERFORMANCE_DIAGNOSTICS = $previousPerfDiagnostics
+}
 if ($LASTEXITCODE -ne 0) { throw "pnpm run build failed with exit code $LASTEXITCODE." }
 
 Write-Step 'Build Go server'
@@ -257,6 +263,8 @@ try {
 
 New-Item -ItemType Directory -Force -Path $BuildDirectory | Out-Null
 $guiSource = Join-Path $Root 'client-cpp\gui'
+$mlsppSource = Join-Path $Root '.tools\mlspp'
+$nlohmannJsonConfig = Join-Path $Root 'client-cpp\third_party'
 $configureArguments = @(
     '-S', $guiSource,
     '-B', $BuildDirectory,
@@ -267,9 +275,18 @@ $configureArguments = @(
     "-DCMAKE_PREFIX_PATH=$resolvedQtPrefix",
     "-DOPENSSL_ROOT_DIR=$resolvedOpenSslRoot",
     '-DOPENSSL_USE_STATIC_LIBS=FALSE',
-    '-DLAN_CHAT_ENABLE_WEB_UI=ON',
-    '-DLAN_CHAT_ENABLE_PERF_OVERLAY=OFF'
+    "-Dnlohmann_json_DIR=$nlohmannJsonConfig"
 )
+if (Test-Path -LiteralPath (Join-Path $mlsppSource 'CMakeLists.txt') -PathType Leaf) {
+    $configureArguments += '-DLAN_CHAT_ENABLE_MLSPP=ON'
+    $configureArguments += "-DMLSPP_SOURCE_DIR=$mlsppSource"
+    Write-Step "Enable locked MLS++ source: $mlsppSource"
+} else {
+    Write-Step 'MLS++ source is unavailable; attachment encryption remains disabled'
+}
+if ($Action -eq 'Test') {
+    $configureArguments += '-DLAN_CHAT_ENABLE_TEST_HOOKS=ON'
+}
 Write-Step "Configure modern Qt WebEngine client: $BuildDirectory"
 Invoke-VsCmake $vsDevCmd $cmake $configureArguments
 
@@ -289,6 +306,20 @@ if ($Action -eq 'Test') {
     $testCommand = ('set VSLANG=1033 && call {0} -arch=x64 -host_arch=x64 && {1} {2}' -f (Quote-CmdArgument $vsDevCmd), (Quote-CmdArgument $ctest), $quotedArguments)
     & cmd.exe /d /s /c $testCommand
     if ($LASTEXITCODE -ne 0) { throw "CTest failed with exit code $LASTEXITCODE." }
+}
+
+$deployTool = Join-Path $resolvedQtPrefix 'bin\windeployqt.exe'
+$guiExe = Join-Path $BuildDirectory 'lan-chat-gui.exe'
+$launcherExe = Join-Path $BuildDirectory 'lan-chat-launcher.exe'
+if ((Test-Path -LiteralPath $deployTool -PathType Leaf) -and
+    (Test-Path -LiteralPath $guiExe -PathType Leaf) -and
+    (Test-Path -LiteralPath $launcherExe -PathType Leaf)) {
+    Write-Step 'Deploy Qt runtime and WebEngine resources'
+    # The React UI has no QML imports; ignore old QML copies in reused build directories.
+    & $deployTool --release --compiler-runtime --no-quick-import --force $guiExe
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for lan-chat-gui.exe with exit code $LASTEXITCODE." }
+    & $deployTool --release --compiler-runtime --force $launcherExe
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for lan-chat-launcher.exe with exit code $LASTEXITCODE." }
 }
 
 $manifest = [ordered]@{

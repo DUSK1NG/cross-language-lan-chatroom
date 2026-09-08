@@ -4,17 +4,20 @@
 #include "host_path_resolver.hpp"
 
 #include <QDateTime>
+#include <QFileDialog>
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QFileInfo>
 #include <QSettings>
 #include <QUuid>
 #include <QVariantMap>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <limits>
 
 namespace {
-const QStringList kMessageRoles = {"messageId", "displayName", "userCode", "time", "content", "selfMessage", "systemMessage", "deliveryState"};
+const QStringList kMessageRoles = {"messageId", "displayName", "userCode", "time", "content", "selfMessage", "systemMessage", "deliveryState", "attachment"};
 constexpr auto kConnectionGroup = "connection";
 constexpr auto kServerIpKey = "serverIp";
 constexpr auto kServerPortKey = "serverPort";
@@ -34,26 +37,10 @@ GuiChatController::GuiChatController(QObject* parent)
       directMessageModel_(new ChatListModel({"displayName", "userCode", "unreadCount"}, this)),
       messageModel_(new ChatListModel(kMessageRoles, this)),
       memberModel_(new ChatListModel({"displayName", "userCode", "online", "admin"}, this)),
-      roomFilterModel_(new ConversationFilterModel(this)),
-      directMessageFilterModel_(new ConversationFilterModel(this)),
       worker_(new GuiConnectionWorker) {
-    roomFilterModel_->setSourceModel(roomModel_);
-    roomFilterModel_->setSearchRoles({QStringLiteral("roomName")});
-    directMessageFilterModel_->setSourceModel(directMessageModel_);
-    directMessageFilterModel_->setSearchRoles({QStringLiteral("displayName"), QStringLiteral("userCode")});
     conversationModels_.insert("room:lobby", messageModel_);
     conversationModelAccessOrder_.insert("room:lobby", ++conversationModelAccessSequence_);
 
-
-    #if 0
-    messageModel_->append({{"messageId", "legacy-1"}, {"displayName", "Alice"}, {"userCode", "A001"}, {"time", "18:24"},
-                           {"content", "今天的学习资料整理好了吗？"}, {"selfMessage", false}, {"systemMessage", false}});
-    messageModel_->append({{"messageId", "legacy-2"}, {"displayName", "Bob"}, {"userCode", "B002"}, {"time", "18:25"},
-                           {"content", "我已经完成了，可以发到这里。"}, {"selfMessage", false}, {"systemMessage", false}});
-    messageModel_->append({{"messageId", "legacy-3"}, {"displayName", "Local User"}, {"userCode", "A001"}, {"time", "18:26"},
-                           {"content", "好的，谢谢！"}, {"selfMessage", true}, {"systemMessage", false}});
-
-    #endif
     refreshTimer_.setInterval(3000);
     connect(&refreshTimer_, &QTimer::timeout, this, [this]() {
         if (connected_) {
@@ -83,6 +70,8 @@ GuiChatController::GuiChatController(QObject* parent)
     connect(worker_, &GuiConnectionWorker::mlsWelcomeEvent, this, &GuiChatController::mlsWelcomeEvent);
     connect(worker_, &GuiConnectionWorker::mlsGroupState, this, &GuiChatController::mlsGroupState);
     connect(worker_, &GuiConnectionWorker::mlsDataResult, this, &GuiChatController::mlsDataResult);
+    connect(worker_, &GuiConnectionWorker::attachmentEvent, this, &GuiChatController::attachmentEvent);
+    connect(worker_, &GuiConnectionWorker::attachmentEvent, this, &GuiChatController::handleAttachmentEvent);
     workerThread_.start();
 }
 
@@ -194,11 +183,6 @@ void GuiChatController::setBundledCaFile(const QString& path) {
     emit savedConnectionChanged();
 }
 
-QString GuiChatController::autoPrivateKeyPath(const QString& serverExe,
-                                              const QString& certFile) const {
-    return HostPathResolver::findPrivateKeyPath(serverExe, certFile);
-}
-
 void GuiChatController::saveConnectionPreferences(const QString& serverIp, int serverPort,
                                                    const QString& username, const QString& userCode,
                                                    const QString& caFile) {
@@ -291,11 +275,6 @@ void GuiChatController::searchActiveHistory(const QString& query) {
     historySearchQuery_ = query.trimmed();
     replaceHistoryOnNextResponse_ = true;
     if (!historyLoading_) requestActiveHistory({}, historySearchQuery_);
-}
-
-void GuiChatController::setSidebarQuery(const QString& query) {
-    roomFilterModel_->setQuery(query);
-    directMessageFilterModel_->setQuery(query);
 }
 
 void GuiChatController::createRoom(const QString& room, bool isPrivate) {
@@ -492,13 +471,12 @@ void GuiChatController::handleHistory(const QString& room, const QString& target
         return;
     }
 
-    const bool replaceHistory = replaceHistoryOnNextResponse_ || !searchQuery.isEmpty();
     QList<QVariantMap> rows;
     rows.reserve(messages.size());
     for (const QVariant& value : messages) {
         const QVariantMap detail = value.toMap();
         const QString messageId = detail.value("messageId").toString();
-        if (messageId.isEmpty() || (!replaceHistory && messageModel_->findRow("messageId", messageId) >= 0)) continue;
+        if (messageId.isEmpty() || messageModel_->findRow("messageId", messageId) >= 0) continue;
         const QString createdAt = detail.value("createdAt").toString();
         const QDateTime timestamp = QDateTime::fromString(createdAt, Qt::ISODate);
         const QString time = timestamp.isValid()
@@ -513,14 +491,9 @@ void GuiChatController::handleHistory(const QString& room, const QString& target
                      {"selfMessage", userCode.compare(localUserCode_, Qt::CaseInsensitive) == 0},
                      {"systemMessage", false}, {"deliveryState", detail.value("deliveryState", "sent")}});
     }
-    if (replaceHistory) {
-        messageModel_->replaceRows(rows);
-        historyHasMore_ = searchQuery.isEmpty() ? hasMore : false;
-        replaceHistoryOnNextResponse_ = false;
-        return;
-    }
     if (!rows.isEmpty()) messageModel_->prependRows(rows);
-    historyHasMore_ = hasMore;
+    historyHasMore_ = searchQuery.isEmpty() ? hasMore : false;
+    replaceHistoryOnNextResponse_ = false;
 }
 
 void GuiChatController::handleMessage(const QString& type, const QString& messageId, const QString& commandId,
@@ -705,10 +678,14 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
         const QString effectiveMessageId = messageId.isEmpty()
             ? QStringLiteral("local-%1").arg(++localMessageCounter_)
             : messageId;
-        ensureConversationModel(key)->append({{"messageId", effectiveMessageId}, {"displayName", effectiveUsername}, {"userCode", userCode},
-                                               {"time", QDateTime::currentDateTime().toString("HH:mm")},
-                                               {"content", content}, {"selfMessage", isSelf}, {"systemMessage", false},
-                                               {"deliveryState", deliveryState.isEmpty() ? QStringLiteral("sent") : deliveryState}});
+        QVariantMap messageRow{{"messageId", effectiveMessageId}, {"displayName", effectiveUsername}, {"userCode", userCode},
+                               {"time", QDateTime::currentDateTime().toString("HH:mm")},
+                               {"content", content}, {"selfMessage", isSelf}, {"systemMessage", false},
+                               {"deliveryState", deliveryState.isEmpty() ? QStringLiteral("sent") : deliveryState}};
+        if (pendingAttachmentMetadata_.contains(effectiveMessageId)) {
+            messageRow.insert(QStringLiteral("attachment"), pendingAttachmentMetadata_.take(effectiveMessageId));
+        }
+        ensureConversationModel(key)->append(messageRow);
         if (!isSelf && key != activeConversationKey_) {
             incrementUnreadForConversation(key, username, userCode);
         }
@@ -721,8 +698,21 @@ void GuiChatController::handleMessage(const QString& type, const QString& messag
         // 系统提示属于服务端广播时所在的房间，不能跟随当前打开的私聊窗口。
         appendSystemMessageToModel(ensureConversationModel("room:" + room), content);
     } else if (type == QStringLiteral("error")) {
+        bool associatedWithMessage = false;
+        if (!messageId.isEmpty()) {
+            for (ChatListModel* model : conversationModels_) {
+                const int row = model->findRow("messageId", messageId);
+                if (row >= 0) {
+                    model->updateRow(row, {{"deliveryState", "failed"}});
+                    associatedWithMessage = true;
+                }
+            }
+        }
         if (!commandId.isEmpty()) emit recallFailed(commandId, content);
-        appendSystemMessage(content);
+        // Attachment, protocol and rate-limit errors have an operation or
+        // message identity. Their dedicated bridge/UI paths display them; do
+        // not persist a transient transport failure into the chat timeline.
+        if (!associatedWithMessage && commandId.isEmpty()) setStatus(content);
     } else if (type == QStringLiteral("system")) {
         appendSystemMessage(content);
     }
@@ -778,6 +768,93 @@ bool GuiChatController::retryMessage(const QString& messageId) {
         return true;
     }
     return false;
+}
+
+void GuiChatController::handleAttachmentEvent(const QString& type, const QString& attachmentId,
+                                               const QString&, const QString& commandId,
+                                               qint64, qint64, const QByteArray&, const QByteArray&,
+                                               const QString&, const QList<qint64>&, const QString& content) {
+    if (type != QStringLiteral("manifest") || attachmentId.isEmpty() || commandId.isEmpty()) return;
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(content.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) return;
+    const QJsonObject metadata = document.object();
+    const QVariantMap attachment{
+        {QStringLiteral("attachmentId"), attachmentId},
+        {QStringLiteral("fileName"), metadata.value(QStringLiteral("fileName")).toString()},
+        {QStringLiteral("logicalSize"), metadata.value(QStringLiteral("logicalSize")).toVariant()},
+        {QStringLiteral("status"), QStringLiteral("available")},
+        {QStringLiteral("totalChunks"), metadata.value(QStringLiteral("totalChunks")).toVariant()}
+    };
+    for (ChatListModel* model : conversationModels_) {
+        const int row = model->findRow("messageId", commandId);
+        if (row >= 0) {
+            model->updateRow(row, {{QStringLiteral("attachment"), attachment}});
+            return;
+        }
+    }
+    pendingAttachmentMetadata_.insert(commandId, attachment);
+}
+
+void GuiChatController::sendAttachmentInit(const QString& room, const qint64 logicalSize,
+                                            const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "sendAttachmentInit", Qt::QueuedConnection,
+                              Q_ARG(QString, room), Q_ARG(qint64, logicalSize), Q_ARG(QString, commandId));
+}
+
+void GuiChatController::startAttachmentUpload(const QString& room, const QString& filePath,
+                                              const QStringList& targetUsers, const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "startAttachmentUpload", Qt::QueuedConnection,
+                              Q_ARG(QString, room), Q_ARG(QString, filePath),
+                              Q_ARG(QStringList, targetUsers), Q_ARG(QString, commandId));
+}
+
+void GuiChatController::chooseAndUploadAttachment(const QString& room, const QString& commandId) {
+    const QString filePath = QFileDialog::getOpenFileName(nullptr, QStringLiteral("选择附件"));
+    if (filePath.isEmpty()) return;
+    QStringList targetUsers;
+    for (int row = 0; row < memberModel_->rowCount(); ++row) {
+        if (!memberModel_->valueAt(row, QByteArrayLiteral("online")).toBool()) continue;
+        const QString userCode = memberModel_->valueAt(row, QByteArrayLiteral("userCode")).toString();
+        if (!userCode.isEmpty() && userCode.compare(localUserCode_, Qt::CaseInsensitive) != 0) {
+            targetUsers.append(userCode);
+        }
+    }
+    startAttachmentUpload(room, filePath, targetUsers, commandId);
+}
+
+void GuiChatController::sendAttachmentChunk(const QString& uploadId, const qint64 chunkIndex,
+                                             const QByteArray& ciphertext, const QByteArray& cipherSha256,
+                                             const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "sendAttachmentChunk", Qt::QueuedConnection,
+                              Q_ARG(QString, uploadId), Q_ARG(qint64, chunkIndex),
+                              Q_ARG(QByteArray, ciphertext), Q_ARG(QByteArray, cipherSha256),
+                              Q_ARG(QString, commandId));
+}
+
+void GuiChatController::resumeAttachment(const QString& uploadId, const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "resumeAttachment", Qt::QueuedConnection,
+                              Q_ARG(QString, uploadId), Q_ARG(QString, commandId));
+}
+
+void GuiChatController::sendAttachmentCommit(const QString& uploadId, const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "sendAttachmentCommit", Qt::QueuedConnection,
+                              Q_ARG(QString, uploadId), Q_ARG(QString, commandId));
+}
+
+void GuiChatController::sendAttachmentDownload(const QString& attachmentId, const qint64 chunkIndex,
+                                                const QString& commandId) {
+    Q_UNUSED(chunkIndex);
+    const QString outputPath = QFileDialog::getSaveFileName(nullptr, QStringLiteral("保存附件"));
+    if (outputPath.isEmpty()) return;
+    startAttachmentDownload(attachmentId, outputPath, commandId);
+}
+
+void GuiChatController::startAttachmentDownload(const QString& attachmentId, const QString& outputPath,
+                                                const QString& commandId) {
+    QMetaObject::invokeMethod(worker_, "startAttachmentDownload", Qt::QueuedConnection,
+                              Q_ARG(QString, attachmentId), Q_ARG(QString, outputPath),
+                              Q_ARG(QString, commandId));
 }
 
 void GuiChatController::fetchMlsKeyPackage(const QString& room, const QString& targetUserCode,

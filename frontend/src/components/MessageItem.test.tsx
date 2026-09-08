@@ -172,7 +172,7 @@ describe('MessageItem', () => {
     expect(screen.queryByText('Bob')).not.toBeInTheDocument();
   });
 
-  it('renders an attachment card with name, size, lock and a disabled download', () => {
+  it('dispatches a download command for an available attachment', () => {
     const bridge = createFakeBridge(state);
     const attachmentMessage: MessageItemData = {
       ...peerMessage,
@@ -189,7 +189,13 @@ describe('MessageItem', () => {
     expect(card).toHaveTextContent('design.pdf');
     expect(card).toHaveTextContent('3.0 MiB');
     expect(card).toHaveTextContent('🔒 端到端加密');
-    expect(screen.getByRole('button', { name: '下载 design.pdf' })).toBeDisabled();
+    const download = screen.getByRole('button', { name: '下载 design.pdf' });
+    expect(download).toBeEnabled();
+    fireEvent.click(download);
+    expect(bridge.commands[0]).toMatchObject({
+      type: 'attachment.download',
+      payload: { attachmentId: 'att-1', chunkIndex: 0 }
+    });
   });
 
   it('marks expired attachments and explains the expiry', () => {

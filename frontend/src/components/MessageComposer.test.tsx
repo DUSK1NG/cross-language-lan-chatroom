@@ -40,7 +40,11 @@ class ControllableBridge implements ChatBridgeClient {
 }
 
 describe('MessageComposer', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    delete document.documentElement.dataset.effects;
+  });
 
   it('disables send until the draft contains non-whitespace text', () => {
     const bridge = new ControllableBridge();
@@ -186,7 +190,8 @@ describe('MessageComposer', () => {
     expect(screen.getByTestId('upload-cards')).toHaveTextContent('选择中…');
   });
 
-  it('shows determinate upload progress as chunk acks arrive', () => {
+  it.each(['on', 'off'])('shows determinate progress with effects %s and repeated chunk acks', (effects) => {
+    document.documentElement.dataset.effects = effects;
     const bridge = new ControllableBridge();
     render(<MessageComposer state={connectedRoomState} bridge={bridge} draft="" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '添加附件' }));
@@ -200,12 +205,42 @@ describe('MessageComposer', () => {
       type: 'attachment.event', id: commandId,
       payload: { type: 'attachment.chunk', attachmentId: 'att-1234567890abcdef', chunkIndex: 0, content: '' }
     }));
+    act(() => bridge.publishAttachmentEvent({
+      type: 'attachment.event', id: `${commandId}-chunk-0`,
+      payload: { type: 'attachment.chunk', attachmentId: 'att-1234567890abcdef', chunkIndex: 0, content: '' }
+    }));
 
     const card = screen.getByTestId(`attachment-card-${commandId}`);
-    expect(card).toHaveTextContent('att-1234 · 上传中');
+    expect(card).toHaveTextContent('上传中');
+    expect(card).toHaveTextContent('50.0%');
+    expect(card).toHaveTextContent('47.0 KiB / 94.0 KiB');
     expect(card).toHaveTextContent('1 块 / 2 块');
     expect(card).toHaveTextContent('🔒 端到端加密');
     expect(card.querySelector('.progress-fill')).toHaveStyle({ transform: 'scaleX(0.5)' });
+    expect(card.querySelector('.progress-fill')).not.toHaveClass('progress-fill--indeterminate');
+    expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+    expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuemax', '2');
+  });
+
+  it('shows measurable progress and transfer speed below one percent', () => {
+    const time = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const bridge = new ControllableBridge();
+    render(<MessageComposer state={connectedRoomState} bridge={bridge} draft="" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '添加附件' }));
+    const commandId = bridge.commands[0].id;
+    act(() => bridge.publishAttachmentEvent({ type: 'attachment.event', id: commandId,
+      payload: { type: 'attachment.init', attachmentId: 'large-file', uploadId: 'up-1', chunkSize: 48128,
+        chunkIndex: 0, receivedIndexes: [], expiresAt: '', content: '', logicalSize: 977743312 } }));
+    time.mockReturnValue(2000);
+    for (let chunkIndex = 0; chunkIndex < 12; chunkIndex++) {
+      act(() => bridge.publishAttachmentEvent({ type: 'attachment.event', id: `${commandId}-chunk-${chunkIndex}`,
+        payload: { type: 'attachment.chunk', attachmentId: 'large-file', chunkIndex, content: '' } }));
+    }
+    const card = screen.getByTestId(`attachment-card-${commandId}`);
+    expect(card).toHaveTextContent('0.06%');
+    expect(card).toHaveTextContent('564.0 KiB / 932.4 MiB');
+    expect(card).toHaveTextContent('564.0 KiB/s');
+    expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuetext', '0.06%');
   });
 
   it('marks interrupted uploads as resuming with an indeterminate bar', () => {
@@ -283,6 +318,11 @@ describe('MessageComposer', () => {
       payload: { type: 'attachment.chunk', attachmentId: 'att-1', chunkIndex: 0, content: '' }
     }));
 
+    expect(screen.getByTestId(`attachment-card-${commandId}`)).toHaveTextContent('正在校验');
+    act(() => bridge.publishAttachmentEvent({
+      type: 'attachment.event', id: `${commandId}-commit`,
+      payload: { type: 'attachment.commit', attachmentId: 'att-1', content: 'committed' }
+    }));
     expect(screen.queryByTestId(`attachment-card-${commandId}`)).not.toBeInTheDocument();
     expect(screen.getByTestId('upload-cards')).toBeInTheDocument();
   });

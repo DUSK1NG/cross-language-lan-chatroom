@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -59,6 +60,122 @@ func TestValidateUserCode(t *testing.T) {
 				t.Fatalf("validateUserCode(%q) error = %v, wantErr = %v", test.code, err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateMessageRejectsOversizedCommandID(t *testing.T) {
+	message := Message{Type: "attachment.resume", UploadID: "upload-1", CommandID: strings.Repeat("x", maxCommandIDSize+1)}
+	if err := validateMessage(message); err == nil {
+		t.Fatal("oversized command id was accepted")
+	}
+}
+
+func TestValidateAttachmentCommitRequiresUploadID(t *testing.T) {
+	if err := validateMessage(Message{Type: "attachment.commit", UploadID: "upload-1"}); err != nil {
+		t.Fatalf("valid attachment commit rejected: %v", err)
+	}
+	if err := validateMessage(Message{Type: "attachment.commit"}); err == nil {
+		t.Fatal("attachment commit without upload id was accepted")
+	}
+}
+
+func TestValidateAttachmentDownloadRequiresAttachmentIDAndIndex(t *testing.T) {
+	if err := validateMessage(Message{Type: "attachment.download", AttachmentID: "attachment-1", ChunkIndex: 0}); err != nil {
+		t.Fatalf("valid attachment download rejected: %v", err)
+	}
+	if err := validateMessage(Message{Type: "attachment.download", ChunkIndex: 0}); err == nil {
+		t.Fatal("attachment download without attachment id was accepted")
+	}
+}
+
+func TestReceiveMessageRejectsOversizedCommandIDAtWireBoundary(t *testing.T) {
+	var stream bytes.Buffer
+	payload, err := json.Marshal(Message{Type: "attachment.resume", UploadID: "upload-1", CommandID: strings.Repeat("x", maxCommandIDSize+1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFrame(&stream, payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := receiveMessage(&stream); err == nil {
+		t.Fatal("oversized command id crossed the wire boundary")
+	}
+}
+
+func TestMaximumAttachmentChunkFitsMessageFrame(t *testing.T) {
+	ciphertext := base64.StdEncoding.EncodeToString(make([]byte, maxAttachmentCipherChunkBytes))
+	message := Message{
+		Type: "attachment.chunk", CommandID: strings.Repeat("x", maxCommandIDSize),
+		UploadID: "00000000-0000-0000-0000-000000000000", ChunkIndex: 10485759,
+		Ciphertext: ciphertext, CipherSHA256: strings.Repeat("0", sha256HexSize),
+	}
+	var stream bytes.Buffer
+	if err := sendMessage(&stream, message); err != nil {
+		t.Fatalf("maximum attachment chunk exceeded frame budget: %v", err)
+	}
+	if payload, err := readFrame(&stream); err != nil {
+		t.Fatal(err)
+	} else if len(payload) > maxMessageSize {
+		t.Fatalf("frame payload = %d bytes, max %d", len(payload), maxMessageSize)
+	}
+}
+
+func TestAttachmentInitFiveGiBBoundary(t *testing.T) {
+	for _, size := range []int64{977743312, 5 * 1024 * 1024 * 1024} {
+		if err := validateMessage(Message{Type: "attachment.init", Room: "lobby", LogicalSize: size}); err != nil {
+			t.Fatalf("size %d rejected: %v", size, err)
+		}
+	}
+	if err := validateMessage(Message{Type: "attachment.init", Room: "lobby", LogicalSize: 5*1024*1024*1024 + 1}); err == nil {
+		t.Fatal("size above 5 GiB accepted")
+	}
+}
+
+func TestAttachmentResumeFitsFrameAndPreservesIndexes(t *testing.T) {
+	const chunks = (5*1024*1024*1024 + attachmentChunkSize - 1) / attachmentChunkSize
+	for _, count := range []int64{0, 8192, 8193, chunks} {
+		indexes := make([]int64, count)
+		for i := range indexes {
+			indexes[i] = int64(i)
+		}
+		// Include the highest possible chunk even in a partial upload.
+		if count > 0 {
+			indexes[count-1] = chunks - 1
+		}
+		response := attachmentResumeMessage("00000000-0000-0000-0000-000000000000", strings.Repeat("x", maxCommandIDSize), indexes)
+		var stream bytes.Buffer
+		if err := sendMessage(&stream, response); err != nil {
+			t.Fatalf("resume with %d chunks exceeds frame: %v", count, err)
+		}
+		payload, err := readFrame(&stream)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire Message
+		if err := json.Unmarshal(payload, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if count <= 8192 {
+			if wire.ReceivedBitmap != "" || len(wire.ReceivedIndexes) != len(indexes) {
+				t.Fatal("small resume changed encoding")
+			}
+			continue
+		}
+		bitmap, err := hex.DecodeString(wire.ReceivedBitmap)
+		if err != nil || len(wire.ReceivedIndexes) != 0 {
+			t.Fatalf("invalid bitmap response: %v", err)
+		}
+		var decoded []int64
+		for i, bits := range bitmap {
+			for bit := 0; bit < 8; bit++ {
+				if bits&(1<<bit) != 0 {
+					decoded = append(decoded, int64(i*8+bit))
+				}
+			}
+		}
+		if !reflect.DeepEqual(decoded, indexes) {
+			t.Fatalf("resume indexes changed for count %d", count)
+		}
 	}
 }
 

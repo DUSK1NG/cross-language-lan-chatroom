@@ -234,7 +234,7 @@ finally {
 Require-Leaf $serverExe 'fresh server-go build'
 
 $prefixPath = "$QtPrefix;$jsonInstall"
-$common = @('-G', 'Ninja', "-DCMAKE_MAKE_PROGRAM=$ninja", "-DCMAKE_PREFIX_PATH=$prefixPath", "-DOPENSSL_ROOT_DIR=$OpenSslRoot", "-DOPENSSL_INCLUDE_DIR=$OpenSslRoot\include", "-DOPENSSL_SSL_LIBRARY=$OpenSslRoot\lib\libssl.lib", "-DOPENSSL_CRYPTO_LIBRARY=$OpenSslRoot\lib\libcrypto.lib", '-DOPENSSL_USE_STATIC_LIBS=FALSE', '-DLAN_CHAT_ENABLE_WEB_UI=ON', '-DLAN_CHAT_ENABLE_PERF_OVERLAY=OFF', "-DLAN_CHAT_FRONTEND_DIST_DIR=$frontendDist")
+$common = @('-G', 'Ninja', "-DCMAKE_MAKE_PROGRAM=$ninja", "-DCMAKE_PREFIX_PATH=$prefixPath", "-DOPENSSL_ROOT_DIR=$OpenSslRoot", "-DOPENSSL_INCLUDE_DIR=$OpenSslRoot\include", "-DOPENSSL_SSL_LIBRARY=$OpenSslRoot\lib\libssl.lib", "-DOPENSSL_CRYPTO_LIBRARY=$OpenSslRoot\lib\libcrypto.lib", '-DOPENSSL_USE_STATIC_LIBS=FALSE', "-DLAN_CHAT_FRONTEND_DIST_DIR=$frontendDist")
 $expected = @{ ON = 18; OFF = 17 }
 $builds = @{}
 foreach ($mode in @('ON', 'OFF')) {

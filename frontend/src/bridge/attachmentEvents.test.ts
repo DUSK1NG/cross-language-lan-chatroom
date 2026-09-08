@@ -45,9 +45,49 @@ describe('reduceAttachmentEvent', () => {
     expect(next['web-1'].totalChunks).toBeUndefined();
   });
 
-  it('derives totalChunks from logicalSize when Codex supplies it', () => {
+  it('derives totalChunks from the native plaintext logicalSize', () => {
     const next = reduceAttachmentEvent({}, initEvent('web-1', [], 48128 * 3));
     expect(next['web-1'].totalChunks).toBe(3);
+  });
+
+  it('counts a partial final chunk and keeps five of six chunks in progress', () => {
+    let map = reduceAttachmentEvent({}, initEvent('web-1', [], 48128 * 5 + 17));
+    for (let index = 0; index < 5; index++) map = reduceAttachmentEvent(map, chunkEvent('web-1', index));
+    expect(map['web-1']).toMatchObject({ phase: 'uploading', receivedChunks: 5, totalChunks: 6 });
+    expect(map['web-1'].receivedChunks / map['web-1'].totalChunks!).toBeCloseTo(5 / 6);
+  });
+
+  it('counts repeated and out-of-order chunk acks only once', () => {
+    let map = reduceAttachmentEvent({}, initEvent('web-1', [], 48128 * 3));
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 2));
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 0));
+    const beforeDuplicate = map;
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 2));
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 0));
+    expect(map).toBe(beforeDuplicate);
+    expect(map['web-1']).toMatchObject({ phase: 'uploading', receivedChunks: 2, totalChunks: 3 });
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 1));
+    expect(map['web-1']).toMatchObject({ phase: 'finalizing', receivedChunks: 3 });
+    expect(reduceAttachmentEvent(map, chunkEvent('web-1', 1))).toBe(map);
+  });
+
+  it('deduplicates init baselines and ignores already acknowledged indexes', () => {
+    let map = reduceAttachmentEvent({}, initEvent('web-1', [0, 0, 2], 48128 * 4));
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 2));
+    expect(map['web-1']).toMatchObject({ receivedChunks: 2, totalChunks: 4 });
+  });
+
+  it('replaces the ack index baseline on resume and does not double count replayed acks', () => {
+    let map = reduceAttachmentEvent({}, initEvent('web-1', [], 48128 * 4));
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 3));
+    map = reduceAttachmentEvent(map, {
+      type: 'attachment.event', id: 'web-1',
+      payload: { type: 'attachment.resume', attachmentId: 'att-1234567890abcdef', receivedIndexes: [0, 0, 2] }
+    });
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 2));
+    expect(map['web-1']).toMatchObject({ phase: 'resuming', receivedChunks: 2, totalChunks: 4 });
+    map = reduceAttachmentEvent(map, chunkEvent('web-1', 3));
+    expect(map['web-1']).toMatchObject({ phase: 'uploading', receivedChunks: 3, totalChunks: 4 });
   });
 
   it('turns an init with a non-empty baseline into a resuming card', () => {
@@ -67,11 +107,23 @@ describe('reduceAttachmentEvent', () => {
     expect(next).toEqual({});
   });
 
-  it('flips to completed when every derived chunk is acknowledged', () => {
+  it('waits for server commit after every derived chunk is acknowledged', () => {
     let map = reduceAttachmentEvent({}, initEvent('web-1', [], 48128 * 2));
     map = reduceAttachmentEvent(map, chunkEvent('web-1', 0));
     map = reduceAttachmentEvent(map, chunkEvent('web-1', 1));
+    expect(map['web-1'].phase).toBe('finalizing');
+    map = reduceAttachmentEvent(map, { type: 'attachment.event', id: 'web-1',
+      payload: { type: 'attachment.commit', attachmentId: 'att-1', content: 'committed' } });
     expect(map['web-1'].phase).toBe('completed');
+  });
+
+  it('tracks actual bytes including the short final chunk and ignores duplicate progress', () => {
+    let map = reduceAttachmentEvent({}, initEvent('bytes', [], 48128 + 17), 1000);
+    map = reduceAttachmentEvent(map, chunkEvent('bytes', 1), 2000);
+    expect(map.bytes).toMatchObject({ receivedBytes: 17, startedAt: 1000, lastProgressAt: 2000 });
+    map = reduceAttachmentEvent(map, chunkEvent('bytes', 0), 3000);
+    expect(map.bytes).toMatchObject({ receivedBytes: 48145, lastProgressAt: 3000 });
+    expect(reduceAttachmentEvent(map, chunkEvent('bytes', 0), 4000)).toBe(map);
   });
 
   it('marks a resume event as resuming with the reported baseline', () => {
@@ -123,7 +175,8 @@ describe('dismissAttachmentUpload', () => {
 
 describe('attachmentErrorCopy', () => {
   it('maps the ten server sentinels to user copy', () => {
-    expect(attachmentErrorCopy('ErrAttachmentTooLarge', '')).toBe('文件超过 500 MiB 上限');
+    expect(attachmentErrorCopy('ErrAttachmentTooLarge', '')).toBe('文件超过 5 GiB 上限');
+    expect(attachmentErrorCopy('', 'attachment exceeds the 5 GiB limit')).toBe('文件超过 5 GiB 上限');
     expect(attachmentErrorCopy('ErrRoomQuotaExceeded', '')).toBe('房间附件配额已满（20 GiB）');
     expect(attachmentErrorCopy('ErrInvalidAttachmentSize', '')).toBe('文件大小无效');
     expect(attachmentErrorCopy('ErrAttachmentUploadNotFound', '')).toBe('传输异常，请重试');

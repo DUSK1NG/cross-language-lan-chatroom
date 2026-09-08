@@ -1,6 +1,6 @@
 import type { AttachmentEvent } from './types';
 
-export type AttachmentUploadPhase = 'choosing' | 'uploading' | 'resuming' | 'completed' | 'failed';
+export type AttachmentUploadPhase = 'choosing' | 'uploading' | 'resuming' | 'finalizing' | 'completed' | 'failed';
 
 export type AttachmentUploadState = {
   phase: AttachmentUploadPhase;
@@ -9,7 +9,13 @@ export type AttachmentUploadState = {
   uploadId?: string;
   chunkSize?: number;
   totalChunks?: number;
+  logicalSize?: number;
+  receivedBytes?: number;
+  startedAt?: number;
+  lastProgressAt?: number;
+  initialReceivedBytes?: number;
   receivedChunks: number;
+  receivedIndexes: number[];
   lastChunkIndex: number;
   expiresAt?: string;
   error?: { code: string; message: string };
@@ -18,7 +24,7 @@ export type AttachmentUploadState = {
 export type AttachmentUploadMap = Record<string, AttachmentUploadState>;
 
 export function beginAttachmentUpload(map: AttachmentUploadMap, commandId: string, room: string): AttachmentUploadMap {
-  return { ...map, [commandId]: { phase: 'choosing', receivedChunks: 0, lastChunkIndex: -1, room } };
+  return { ...map, [commandId]: { phase: 'choosing', receivedChunks: 0, receivedIndexes: [], lastChunkIndex: -1, room } };
 }
 
 export function dismissAttachmentUpload(map: AttachmentUploadMap, commandId: string): AttachmentUploadMap {
@@ -34,20 +40,27 @@ function withTotalChunks(
 ): AttachmentUploadState {
   const totalChunks = logicalSize && logicalSize > 0 ? Math.ceil(logicalSize / chunkSize) : undefined;
   if (totalChunks === undefined) return state;
-  return { ...state, totalChunks, phase: state.receivedChunks >= totalChunks ? 'completed' : state.phase };
+  const receivedBytes = state.receivedIndexes.reduce((sum, index) =>
+    sum + Math.max(0, Math.min(chunkSize, logicalSize! - index * chunkSize)), 0);
+  return { ...state, logicalSize, totalChunks, receivedBytes, initialReceivedBytes: receivedBytes,
+    phase: state.receivedChunks >= totalChunks ? 'finalizing' : state.phase };
 }
 
-export function reduceAttachmentEvent(map: AttachmentUploadMap, event: AttachmentEvent): AttachmentUploadMap {
+export function reduceAttachmentEvent(map: AttachmentUploadMap, event: AttachmentEvent, now = Date.now()): AttachmentUploadMap {
   const current = map[event.id];
   const payload = event.payload;
 
   if (payload.type === 'attachment.init') {
+    const receivedIndexes = [...new Set(payload.receivedIndexes)];
     const baseline: AttachmentUploadState = {
-      phase: payload.receivedIndexes.length > 0 ? 'resuming' : 'uploading',
+      phase: receivedIndexes.length > 0 ? 'resuming' : 'uploading',
       attachmentId: payload.attachmentId,
       uploadId: payload.uploadId,
       chunkSize: payload.chunkSize,
-      receivedChunks: payload.receivedIndexes.length,
+      receivedChunks: receivedIndexes.length,
+      receivedIndexes,
+      startedAt: now,
+      lastProgressAt: now,
       lastChunkIndex: payload.chunkIndex,
       expiresAt: payload.expiresAt,
       room: map[event.id]?.room
@@ -58,33 +71,45 @@ export function reduceAttachmentEvent(map: AttachmentUploadMap, event: Attachmen
   if (!current || current.phase === 'failed') return map;
 
   if (payload.type === 'attachment.chunk') {
+    if (current.receivedIndexes.includes(payload.chunkIndex)) return map;
+    const receivedIndexes = [...current.receivedIndexes, payload.chunkIndex];
     const advanced: AttachmentUploadState = {
       ...current,
       phase: 'uploading',
-      receivedChunks: current.receivedChunks + 1,
-      lastChunkIndex: payload.chunkIndex
+      receivedChunks: receivedIndexes.length,
+      receivedIndexes,
+      lastChunkIndex: payload.chunkIndex,
+      lastProgressAt: now,
+      receivedBytes: (current.receivedBytes ?? 0) + Math.max(0, Math.min(current.chunkSize ?? 0,
+        (current.logicalSize ?? Infinity) - payload.chunkIndex * (current.chunkSize ?? 0)))
     };
     return {
       ...map,
       [event.id]: current.totalChunks !== undefined && advanced.receivedChunks >= current.totalChunks
-        ? { ...advanced, phase: 'completed' }
+        ? { ...advanced, phase: 'finalizing' }
         : advanced
     };
   }
 
   if (payload.type === 'attachment.resume') {
+    const receivedIndexes = [...new Set(payload.receivedIndexes)];
     const resumed: AttachmentUploadState = {
       ...current,
       phase: 'resuming',
-      receivedChunks: payload.receivedIndexes.length
+      receivedChunks: receivedIndexes.length,
+      receivedIndexes
     };
-    return {
-      ...map,
-      [event.id]: current.totalChunks !== undefined && resumed.receivedChunks >= current.totalChunks
-        ? { ...resumed, phase: 'completed' }
-        : resumed
-    };
+    return { ...map, [event.id]: withTotalChunks({ ...resumed, startedAt: now, lastProgressAt: now },
+      current.chunkSize ?? 0, current.logicalSize) };
   }
+
+  if (payload.type === 'attachment.commit') {
+    return { ...map, [event.id]: { ...current, phase: 'completed' } };
+  }
+
+  if (payload.type === 'manifest') return map;
+
+  if (payload.type !== 'error') return map;
 
   return {
     ...map,
@@ -93,7 +118,8 @@ export function reduceAttachmentEvent(map: AttachmentUploadMap, event: Attachmen
 }
 
 const attachmentErrorCopyTable: Record<string, string> = {
-  ErrAttachmentTooLarge: '文件超过 500 MiB 上限',
+  ErrAttachmentTooLarge: '文件超过 5 GiB 上限',
+  'attachment exceeds the 5 GiB limit': '文件超过 5 GiB 上限',
   ErrRoomQuotaExceeded: '房间附件配额已满（20 GiB）',
   ErrInvalidAttachmentSize: '文件大小无效',
   ErrAttachmentUploadNotFound: '传输异常，请重试',
@@ -106,5 +132,5 @@ const attachmentErrorCopyTable: Record<string, string> = {
 };
 
 export function attachmentErrorCopy(code: string, fallback: string): string {
-  return attachmentErrorCopyTable[code] ?? (fallback || '附件上传失败');
+  return attachmentErrorCopyTable[code] ?? attachmentErrorCopyTable[fallback] ?? (fallback || '附件上传失败');
 }

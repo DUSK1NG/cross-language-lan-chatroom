@@ -1,4 +1,5 @@
 #include "message.hpp"
+#include "attachment_limits.hpp"
 
 #include "json.hpp"
 
@@ -41,6 +42,7 @@ nlohmann::json serialize(const Message& message) {
     if (!message.created_at.empty()) object["created_at"] = message.created_at;
     if (!message.before_message_id.empty()) object["before_message_id"] = message.before_message_id;
     if (!message.search_query.empty()) object["search_query"] = message.search_query;
+    if (!message.crypto.empty()) object["crypto"] = nlohmann::json::parse(message.crypto);
     if (message.limit > 0) object["limit"] = message.limit;
     if (message.has_more) object["has_more"] = true;
     if (message.recalled) object["recalled"] = true;
@@ -80,6 +82,15 @@ nlohmann::json serialize(const Message& message) {
     if (!message.commit.empty()) object["commit"] = message.commit;
     if (!message.welcome.empty()) object["welcome"] = message.welcome;
     if (!message.welcome_digest.empty()) object["welcome_digest"] = message.welcome_digest;
+    if (!message.attachment_id.empty()) object["attachment_id"] = message.attachment_id;
+    if (!message.upload_id.empty()) object["upload_id"] = message.upload_id;
+    if (message.logical_size != 0) object["logical_size"] = message.logical_size;
+    if (message.chunk_size != 0) object["chunk_size"] = message.chunk_size;
+    if (message.chunk_index != 0 || message.type == "attachment.chunk") object["chunk_index"] = message.chunk_index;
+    if (!message.ciphertext.empty()) object["ciphertext"] = message.ciphertext;
+    if (!message.cipher_sha256.empty()) object["cipher_sha256"] = message.cipher_sha256;
+    if (!message.expires_at.empty()) object["expires_at"] = message.expires_at;
+    if (!message.received_indexes.empty()) object["received_indexes"] = message.received_indexes;
     if (!message.messages.empty()) {
         object["messages"] = nlohmann::json::array();
         for (const Message& nested : message.messages) {
@@ -130,6 +141,11 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
             !read_string("commit", parsed.commit) ||
             !read_string("welcome", parsed.welcome) ||
             !read_string("welcome_digest", parsed.welcome_digest) ||
+            !read_string("attachment_id", parsed.attachment_id) ||
+            !read_string("upload_id", parsed.upload_id) ||
+            !read_string("ciphertext", parsed.ciphertext) ||
+            !read_string("cipher_sha256", parsed.cipher_sha256) ||
+            !read_string("expires_at", parsed.expires_at) ||
             !read_string("created_at", parsed.created_at) ||
             !read_string("before_message_id", parsed.before_message_id) ||
             !read_string("search_query", parsed.search_query)) {
@@ -177,6 +193,75 @@ bool receive_message_impl(ReceiveFrame receive_frame, Message& message) {
                 return false;
             }
             parsed.epoch = object.at("epoch").get<std::uint64_t>();
+        }
+        const auto read_int64 = [&object](const char* key, std::int64_t& destination) {
+            if (!object.contains(key)) return true;
+            if (!object.at(key).is_number_integer()) return false;
+            destination = object.at(key).get<std::int64_t>();
+            return true;
+        };
+        if (!read_int64("logical_size", parsed.logical_size) ||
+            !read_int64("chunk_size", parsed.chunk_size) ||
+            !read_int64("chunk_index", parsed.chunk_index)) {
+            set_error("JSON attachment metadata has a non-integer field");
+            return false;
+        }
+        if (object.contains("crypto")) {
+            if (!object.at("crypto").is_object()) {
+                set_error("crypto is not an object");
+                return false;
+            }
+            parsed.crypto = object.at("crypto").dump();
+        }
+        if (object.contains("received_bitmap")) {
+            const auto& value = object.at("received_bitmap");
+            if (!value.is_string() || object.contains("received_indexes")) {
+                set_error("invalid or ambiguous received_bitmap");
+                return false;
+            }
+            const auto& bitmap = value.get_ref<const std::string&>();
+            if (bitmap.size() % 2 != 0 ||
+                bitmap.size() > static_cast<std::size_t>((attachments::MaxChunkCount + 7) / 8 * 2)) {
+                set_error("received_bitmap has invalid length");
+                return false;
+            }
+            const auto hex_digit = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            for (std::size_t offset = 0; offset < bitmap.size(); offset += 2) {
+                const int high = hex_digit(bitmap[offset]);
+                const int low = hex_digit(bitmap[offset + 1]);
+                if (high < 0 || low < 0) {
+                    set_error("received_bitmap is not hexadecimal");
+                    return false;
+                }
+                const int bits = high * 16 + low;
+                for (int bit = 0; bit < 8; ++bit) {
+                    if ((bits & (1 << bit)) == 0) continue;
+                    const auto index = static_cast<std::int64_t>(offset / 2 * 8 + bit);
+                    if (index >= attachments::MaxChunkCount) {
+                        set_error("received_bitmap contains an out-of-range chunk");
+                        return false;
+                    }
+                    parsed.received_indexes.push_back(index);
+                }
+            }
+        }
+        if (object.contains("received_indexes")) {
+            if (!object.at("received_indexes").is_array()) {
+                set_error("received_indexes is not an array");
+                return false;
+            }
+            for (const auto& value : object.at("received_indexes")) {
+                if (!value.is_number_integer()) {
+                    set_error("received_indexes contains a non-integer value");
+                    return false;
+                }
+                parsed.received_indexes.push_back(value.get<std::int64_t>());
+            }
         }
 
         if (object.contains("users")) {

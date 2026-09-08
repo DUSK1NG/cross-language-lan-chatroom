@@ -44,7 +44,7 @@ LAN Chat
 │   │   ├── chat_bridge.*          optional React/WebEngine state/command adapter
 │   │   └── bridge_protocol.*      optional bridge command/error contract
 │   ├── qml/                      Main、页面、控件、组件、主题和 SVG 资源
-│   ├── resources/frontend.qrc     optional bundled React release assets
+│   ├── resources/frontend.qrc.in  bundled React release resource template
 │   └── tests/                    Qt Test bridge/controller seam tests
 ├── frontend/                     optional React/Vite WebEngine UI
 ├── docs/                         protocol、架构、测试、发布和迁移文档

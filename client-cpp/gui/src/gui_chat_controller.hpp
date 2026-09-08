@@ -1,15 +1,14 @@
 #pragma once
 
 #include "chat_model.hpp"
-#include "conversation_filter_model.hpp"
 
-#include <QAbstractItemModel>
 #include <QByteArray>
 #include <QHash>
 #include <QObject>
 #include <QThread>
 #include <QTimer>
 #include <QVariantList>
+#include <QStringList>
 
 class GuiConnectionWorker;
 
@@ -20,8 +19,6 @@ class GuiChatController final : public QObject {
     Q_PROPERTY(ChatListModel* messageModel READ messageModel CONSTANT)
     Q_PROPERTY(ChatListModel* activeMessageModel READ activeMessageModel NOTIFY activeMessageModelChanged)
     Q_PROPERTY(ChatListModel* memberModel READ memberModel CONSTANT)
-    Q_PROPERTY(QAbstractItemModel* filteredRoomModel READ filteredRoomModel CONSTANT)
-    Q_PROPERTY(QAbstractItemModel* filteredDirectMessageModel READ filteredDirectMessageModel CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool reconnecting READ reconnecting NOTIFY reconnectingChanged)
     Q_PROPERTY(bool admin READ admin NOTIFY adminChanged)
@@ -45,8 +42,6 @@ public:
     ChatListModel* messageModel() const { return messageModel_; }
     ChatListModel* activeMessageModel() const { return messageModel_; }
     ChatListModel* memberModel() const { return memberModel_; }
-    QAbstractItemModel* filteredRoomModel() const { return roomFilterModel_; }
-    QAbstractItemModel* filteredDirectMessageModel() const { return directMessageFilterModel_; }
     bool connected() const { return connected_; }
     bool reconnecting() const { return reconnecting_; }
     bool admin() const { return admin_; }
@@ -64,8 +59,6 @@ public:
     QString savedCaFile() const;
     QVariantList pendingConnectionApprovals() const { return pendingConnectionApprovals_; }
     void setBundledCaFile(const QString& path);
-    Q_INVOKABLE QString autoPrivateKeyPath(const QString& serverExe,
-                                           const QString& certFile) const;
 
     Q_INVOKABLE void connectToServer(const QString& serverIp, int serverPort,
                                      const QString& username, const QString& userCode,
@@ -87,7 +80,6 @@ public:
     Q_INVOKABLE void requestRooms();
     Q_INVOKABLE void loadMoreHistory();
     Q_INVOKABLE void searchActiveHistory(const QString& query);
-    Q_INVOKABLE void setSidebarQuery(const QString& query);
     Q_INVOKABLE void createRoom(const QString& room, bool isPrivate);
     Q_INVOKABLE void sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode = {});
     Q_INVOKABLE void selectRoom(const QString& room);
@@ -98,6 +90,19 @@ public:
     Q_INVOKABLE void removeLocalMessage(const QString& messageId);
     Q_INVOKABLE bool recallMessage(const QString& messageId, const QString& commandId = {});
     Q_INVOKABLE bool retryMessage(const QString& messageId);
+    Q_INVOKABLE void sendAttachmentInit(const QString& room, qint64 logicalSize, const QString& commandId);
+    Q_INVOKABLE void startAttachmentUpload(const QString& room, const QString& filePath,
+                                           const QStringList& targetUsers, const QString& commandId);
+    Q_INVOKABLE void chooseAndUploadAttachment(const QString& room, const QString& commandId);
+    Q_INVOKABLE void sendAttachmentChunk(const QString& uploadId, qint64 chunkIndex,
+                                         const QByteArray& ciphertext, const QByteArray& cipherSha256,
+                                         const QString& commandId);
+    Q_INVOKABLE void resumeAttachment(const QString& uploadId, const QString& commandId);
+    Q_INVOKABLE void sendAttachmentCommit(const QString& uploadId, const QString& commandId);
+    Q_INVOKABLE void sendAttachmentDownload(const QString& attachmentId, qint64 chunkIndex,
+                                             const QString& commandId);
+    Q_INVOKABLE void startAttachmentDownload(const QString& attachmentId, const QString& outputPath,
+                                             const QString& commandId);
     Q_INVOKABLE void fetchMlsKeyPackage(const QString& room, const QString& targetUserCode,
                                         const QString& commandId = {});
     Q_INVOKABLE void addMlsMember(const QString& room, const QString& groupId,
@@ -134,6 +139,12 @@ signals:
                        quint64 epoch, const QString& message);
     void mlsDataResult(const QString& commandId, bool ok, const QByteArray& data,
                        const QString& message);
+    void attachmentEvent(const QString& type, const QString& attachmentId,
+                         const QString& uploadId, const QString& commandId,
+                         qint64 chunkSize, qint64 chunkIndex,
+                         const QByteArray& ciphertext, const QByteArray& cipherSha256,
+                         const QString& expiresAt, const QList<qint64>& receivedIndexes,
+                         const QString& content, qint64 logicalSize = 0);
 
 private slots:
     void handleConnected(bool isAdmin);
@@ -151,6 +162,12 @@ private slots:
                        const QStringList& users, const QStringList& rooms,
                        const QVariantList& userDetails, const QVariantList& roomDetails,
                        bool isAdmin);
+    void handleAttachmentEvent(const QString& type, const QString& attachmentId,
+                               const QString& uploadId, const QString& commandId,
+                               qint64 chunkSize, qint64 chunkIndex,
+                               const QByteArray& ciphertext, const QByteArray& cipherSha256,
+                               const QString& expiresAt, const QList<qint64>& receivedIndexes,
+                               const QString& content);
 
 private:
     void setStatus(const QString& status);
@@ -171,8 +188,6 @@ private:
     ChatListModel* directMessageModel_;
     ChatListModel* messageModel_;
     ChatListModel* memberModel_;
-    ConversationFilterModel* roomFilterModel_;
-    ConversationFilterModel* directMessageFilterModel_;
     QHash<QString, ChatListModel*> conversationModels_;
     QHash<QString, quint64> conversationModelAccessOrder_;
     quint64 conversationModelAccessSequence_ = 0;
@@ -197,4 +212,5 @@ private:
     bool historyLoading_ = false;
     QString historySearchQuery_;
     bool replaceHistoryOnNextResponse_ = false;
+    QHash<QString, QVariantMap> pendingAttachmentMetadata_;
 };

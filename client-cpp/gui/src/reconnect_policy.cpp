@@ -19,10 +19,12 @@ int ReconnectPolicy::scheduleNextAttempt() {
 void ReconnectPolicy::markConnected() {
     active_ = true;
     attemptCount_ = 0;
+    ++generation_;
 }
 
 void ReconnectPolicy::cancel() {
     active_ = false;
+    ++generation_;
 }
 
 bool ReconnectPolicy::isActive() const {
@@ -31,4 +33,8 @@ bool ReconnectPolicy::isActive() const {
 
 int ReconnectPolicy::attemptCount() const {
     return attemptCount_;
+}
+
+int ReconnectPolicy::generation() const {
+    return generation_;
 }

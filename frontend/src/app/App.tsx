@@ -252,59 +252,6 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   );
 }
 
-function LegacyRemoteConnectionPage({ bridge, state, mode, onBack }: {
-  bridge: ChatBridgeClient;
-  state: BridgeState;
-  mode: ConnectionMode;
-  onBack: () => void;
-}) {
-  const guest = mode === 'guest';
-  const [serverIp, setServerIp] = useState(state.savedConnection.serverIp || '127.0.0.1');
-  const [serverPort, setServerPort] = useState(String(state.savedConnection.serverPort || 8888));
-  const [username, setUsername] = useState(() => guest ? 'Bob' : (state.savedConnection.username || 'Alice'));
-  const [userCode, setUserCode] = useState(() => guest ? 'B001' : (state.savedConnection.userCode || 'A001'));
-  const [caFile, setCaFile] = useState(state.savedConnection.caFile);
-  const busy = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
-  const validPort = Number.isInteger(Number(serverPort)) && Number(serverPort) >= 1 && Number(serverPort) <= 65535;
-
-  function connect() {
-    if (busy || !serverIp.trim() || !username.trim() || !userCode.trim() || !validPort) return;
-    bridge.dispatch(createCommand('session.connectRemote', {
-      serverIp: serverIp.trim(), serverPort: Number(serverPort), username: username.trim(),
-      userCode: userCode.trim(), caFile: caFile.trim()
-    }));
-  }
-
-  return (
-    <main className="app-shell connect-shell">
-      <section className="connect-panel">
-        <p className="eyebrow">SECURE CONNECTION</p>
-        <h1>{guest ? '加入局域网聊天室' : '连接远程服务器'}</h1>
-        <ConnectionStatus state={state} />
-        <p className="connection-help">
-          {guest ? '填写 Host 电脑的局域网 IPv4；同一台电脑测试可填写 127.0.0.1。' : '填写已经启动 Go Server 的电脑 IPv4 和端口。'}
-        </p>
-        <div className="form-grid">
-          <label htmlFor="server-ip">服务器 IP</label>
-          <input id="server-ip" value={serverIp} onChange={(event) => setServerIp(event.target.value)} />
-          <label htmlFor="server-port">端口</label>
-          <input id="server-port" inputMode="numeric" value={serverPort} onChange={(event) => setServerPort(event.target.value)} />
-          <label htmlFor="username">用户名</label>
-          <input id="username" value={username} onChange={(event) => setUsername(event.target.value)} />
-          <label htmlFor="user-code">用户代码</label>
-          <input id="user-code" value={userCode} onChange={(event) => setUserCode(event.target.value)} />
-          <label htmlFor="ca-file">CA 文件</label>
-          <input id="ca-file" value={caFile} onChange={(event) => setCaFile(event.target.value)} placeholder="server-lan.crt 的完整路径" />
-        </div>
-        <div className="form-actions">
-          <button className="secondary-button" type="button" onClick={onBack} disabled={busy}>返回</button>
-          <button className="primary-button" type="button" aria-label="connect-session" onClick={connect} disabled={busy || !serverIp.trim() || !username.trim() || !userCode.trim() || !validPort}>{busy ? '连接中…' : '连接'}</button>
-        </div>
-      </section>
-    </main>
-  );
-}
-
 function LocalHostPage({ bridge, state, onBack }: {
   bridge: ChatBridgeClient;
   state: BridgeState;

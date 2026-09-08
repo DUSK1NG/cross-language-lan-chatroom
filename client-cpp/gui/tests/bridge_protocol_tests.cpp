@@ -7,6 +7,7 @@ class BridgeProtocolTests final : public QObject {
     Q_OBJECT
 
 private slots:
+    void acceptsFiveGiBAttachmentBoundaries();
     void acceptsRoomMessageCommand();
     void acceptsOpaqueEncryptedRoomMessageCommand();
     void acceptsHistorySearchCommand();
@@ -24,6 +25,24 @@ private slots:
     void neverSerializesPassword();
     void createsStableErrorEnvelope();
 };
+
+void BridgeProtocolTests::acceptsFiveGiBAttachmentBoundaries() {
+    constexpr double limit = 5.0 * 1024 * 1024 * 1024;
+    for (const double size : {977743312.0, limit}) {
+        QVERIFY(bridge::validateCommand(QJsonObject{{"id", "size"}, {"type", "attachment.init"},
+            {"payload", QJsonObject{{"room", "lobby"}, {"logicalSize", size}}}}));
+    }
+    for (const double size : {0.0, limit + 1, 1.5}) {
+        QVERIFY(!bridge::validateCommand(QJsonObject{{"id", "size"}, {"type", "attachment.init"},
+            {"payload", QJsonObject{{"room", "lobby"}, {"logicalSize", size}}}}));
+    }
+    for (const int index : {20001, 111550, 111551, -1}) {
+        const QJsonObject command{{"id", "chunk"}, {"type", "attachment.chunk"},
+            {"payload", QJsonObject{{"uploadId", "upload"}, {"ciphertext", "YQ=="},
+                {"cipherSha256", QString(64, '0')}, {"chunkIndex", index}}}};
+        QCOMPARE(bridge::validateCommand(command), index >= 0 && index < 111551);
+    }
+}
 
 void BridgeProtocolTests::acceptsRoomMessageCommand() {
     const QJsonObject command{

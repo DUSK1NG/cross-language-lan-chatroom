@@ -237,9 +237,12 @@ input.conversation-search {
 }
 .upload-card__body { flex: 1; min-width: 0; }
 .upload-card__title { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.upload-card__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.upload-card__percent { color: var(--t-accent); font-size: 14px; font-variant-numeric: tabular-nums; }
+.upload-card .progress-track { height: 8px; margin-top: 7px; }
+.upload-card .progress-fill { width: 100%; }
 .upload-card__meta { font-size: 11.5px; color: var(--t-ink-2); margin-top: 1px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .upload-card__meta--warn { color: var(--t-warn); }
-.upload-card__meta--ok { color: var(--t-online); }
 .upload-card__meta--error { color: var(--t-danger); }
 .upload-card__actions { display: flex; gap: 6px; margin-top: 6px; }
 .upload-card__actions button {

@@ -65,6 +65,8 @@ struct Message {
     std::string created_at;
     std::string before_message_id;
     std::string search_query;
+    // Compact JSON object carried end-to-end; the server must not interpret its contents.
+    std::string crypto;
     int limit = 0;
     bool has_more = false;
     bool recalled = false;
@@ -81,6 +83,15 @@ struct Message {
     std::string commit;
     std::string welcome;
     std::string welcome_digest;
+    std::string attachment_id;
+    std::string upload_id;
+    std::int64_t logical_size = 0;
+    std::int64_t chunk_size = 0;
+    std::int64_t chunk_index = 0;
+    std::string ciphertext;
+    std::string cipher_sha256;
+    std::string expires_at;
+    std::vector<std::int64_t> received_indexes{};
 };
 
 bool send_message(SOCKET socket_handle, const Message& message);

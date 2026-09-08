@@ -9,6 +9,7 @@ import (
 	"fmt"
 	_ "modernc.org/sqlite"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -48,8 +49,9 @@ type Account struct {
 }
 
 type AuthStore struct {
-	db           *sql.DB
-	attachmentMu sync.Mutex
+	db             *sql.DB
+	attachmentMu   sync.Mutex
+	attachmentRoot string
 }
 
 type HistoryQuery struct {
@@ -86,11 +88,12 @@ func resolveDBPath(path string) string {
 }
 
 func openAuthStore(path string) (*AuthStore, error) {
-	db, err := sql.Open("sqlite", resolveDBPath(path))
+	resolvedPath := resolveDBPath(path)
+	db, err := sql.Open("sqlite", resolvedPath)
 	if err != nil {
 		return nil, fmt.Errorf("open auth database: %w", err)
 	}
-	store := &AuthStore{db: db}
+	store := &AuthStore{db: db, attachmentRoot: filepath.Join(filepath.Dir(resolvedPath), "attachments")}
 	if err := store.initialize(); err != nil {
 		_ = db.Close()
 		return nil, err

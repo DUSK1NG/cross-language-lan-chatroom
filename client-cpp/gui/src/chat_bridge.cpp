@@ -120,8 +120,34 @@ ChatBridge::ChatBridge(GuiChatController* controller, PerformanceProfile* perfor
                                       message.isEmpty() ? QStringLiteral("MLS operation failed") : message,
                                       false, QStringLiteral("mls"), commandId);
         }
-        emit commandResult(QString::fromUtf8(
+            emit commandResult(QString::fromUtf8(
             QJsonDocument(bridge::makeCommandResult(commandId, ok, error)).toJson(QJsonDocument::Compact)));
+    });
+    connect(controller_, &GuiChatController::attachmentEvent, this,
+            [this](const QString& type, const QString& attachmentId, const QString& uploadId,
+                   const QString& commandId, qint64 chunkSize, qint64 chunkIndex,
+                   const QByteArray& ciphertext, const QByteArray& cipherSha256, const QString& expiresAt,
+                   const QList<qint64>& receivedIndexes, const QString& content, qint64 logicalSize) {
+        QJsonArray received;
+        for (const qint64 index : receivedIndexes) received.append(index);
+        QJsonObject payload{{"type", type}, {"attachmentId", attachmentId}, {"uploadId", uploadId},
+                            {"chunkSize", chunkSize}, {"chunkIndex", chunkIndex},
+                            {"ciphertext", QString::fromLatin1(ciphertext.toBase64())},
+                            {"cipherSha256", QString::fromLatin1(cipherSha256)},
+                            {"expiresAt", expiresAt}, {"receivedIndexes", received}, {"content", content}};
+        if (type == QStringLiteral("attachment.init") && logicalSize > 0) {
+            payload.insert(QStringLiteral("logicalSize"), logicalSize);
+        }
+        if (type == QStringLiteral("error")) {
+            // Attachment errors use the same event channel as progress events.
+            // Preserve the native reason so the UI does not collapse every
+            // failure into the unhelpful generic "upload failed" message.
+            payload.insert(QStringLiteral("code"), QStringLiteral("attachment_failed"));
+            payload.insert(QStringLiteral("message"), content);
+        }
+        emit commandResult(QString::fromUtf8(QJsonDocument(QJsonObject{
+            {"type", QStringLiteral("attachment.event")}, {"id", commandId}, {"payload", payload}
+        }).toJson(QJsonDocument::Compact)));
     });
 
     connectModel(controller_->roomModel(), false);
@@ -407,6 +433,29 @@ void ChatBridge::dispatch(const QString& commandJson) {
         controller_->removeMlsMember(payload.value("room").toString(), payload.value("groupId").toString(),
                                      payload.value("targetUserCode").toString(), commandId);
         awaitMlsResult = true;
+    } else if (type == QStringLiteral("attachment.init")) {
+        controller_->sendAttachmentInit(payload.value("room").toString(),
+                                        payload.value("logicalSize").toInteger(), commandId);
+        return;
+    } else if (type == QStringLiteral("attachment.chooseUpload")) {
+        controller_->chooseAndUploadAttachment(payload.value("room").toString(), commandId);
+        return;
+    } else if (type == QStringLiteral("attachment.chunk")) {
+        controller_->sendAttachmentChunk(payload.value("uploadId").toString(),
+                                          payload.value("chunkIndex").toInteger(),
+                                          QByteArray::fromBase64(payload.value("ciphertext").toString().toLatin1()),
+                                          payload.value("cipherSha256").toString().toLatin1(), commandId);
+        return;
+    } else if (type == QStringLiteral("attachment.resume")) {
+        controller_->resumeAttachment(payload.value("uploadId").toString(), commandId);
+        return;
+    } else if (type == QStringLiteral("attachment.commit")) {
+        controller_->sendAttachmentCommit(payload.value("uploadId").toString(), commandId);
+        return;
+    } else if (type == QStringLiteral("attachment.download")) {
+        controller_->sendAttachmentDownload(payload.value("attachmentId").toString(),
+                                             payload.value("chunkIndex").toInteger(), commandId);
+        return;
     } else if (type == QStringLiteral("session.disconnect")) {
         controller_->disconnectFromServer();
     } else if (type == QStringLiteral("chat.sendRoom")) {

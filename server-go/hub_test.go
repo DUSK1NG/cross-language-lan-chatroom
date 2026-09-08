@@ -440,12 +440,14 @@ func TestHubPrivateMessageErrorsOnlyGoToSender(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			const messageID = "private-rejection"
 			hub.Private <- PrivateMessageRequest{
 				Sender:     sender,
 				TargetCode: test.targetCode,
 				Content:    test.content,
+				MessageID:  messageID,
 			}
-			assertMessageReceived(t, sender.Send, Message{Type: "error", Content: test.wantError})
+			assertMessageReceived(t, sender.Send, Message{Type: "error", MessageID: messageID, Content: test.wantError})
 			assertNoMessageReceived(t, target.Send)
 		})
 	}

@@ -109,8 +109,8 @@ function Test-MemberArchive([string]$Archive) {
         }
 
         $forbidden = @($entryNames | Where-Object {
-            $_ -match '(^|/)(server-go|frontend|client-cpp|scripts|tools)/' -or
-            $_ -match '(?i)(\.key$|\.pem$|\.crt$|\.db$|(^|/)chat-server\.exe$|(^|/)LANChat-Launcher\.exe$|(^|/)node\.exe$|(^|/)go\.exe$)'
+            $_ -match '(^|/)(server-go|frontend|client-cpp|scripts|tools|\.git|\.tools|out|release|logs?|test-results|test-output|coverage|attachments|attachment-cache|__host-data|\.cache)/' -or
+            $_ -match '(?i)(\.key$|\.pem$|\.crt$|\.cer$|\.der$|\.pfx$|\.p12$|\.db(?:[-.]|$)|\.sqlite(?:[-.]|$)|\.sqlite3(?:[-.]|$)|\.log(?:[-.]|$)|\.test$|\.tap$|\.trx$|\.junit$|(^|/)chat-server\.exe$|(^|/)LANChat-Launcher\.exe$|(^|/)node\.exe$|(^|/)go\.exe$)'
         })
         if ($forbidden.Count -gt 0) {
             throw "Member ZIP contains forbidden paths: $($forbidden -join '; ')"
@@ -162,7 +162,7 @@ Copy-Item -LiteralPath $guiSource -Destination $guiTarget -Force
 Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $ReleaseDirectory 'LANChat.exe') -Force
 
 Write-Step 'Deploy Qt WebEngine and MSVC runtime'
-& $deployTool --release --compiler-runtime $guiTarget
+& $deployTool --release --compiler-runtime --no-quick-import $guiTarget
 if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE." }
 
 Write-Step 'Copy OpenSSL, MSVC runtime, member instructions, and shortcut icon'

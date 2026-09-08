@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"strings"
+	"time"
 )
 
 const listenAddress = "0.0.0.0:8888"
@@ -66,6 +67,17 @@ func main() {
 	}
 	defer store.Close()
 	hub.OfflineStore = store
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for now := range ticker.C {
+			if removed, cleanupErr := store.CleanupExpiredAttachmentUploads(now.UTC()); cleanupErr != nil {
+				log.Printf("attachment cleanup failed: %v", cleanupErr)
+			} else if removed > 0 {
+				log.Printf("removed %d expired attachment uploads", removed)
+			}
+		}
+	}()
 	log.Printf("account database: %s", resolveDBPath(*dbPath))
 	if hub.AdminCode != "" {
 		log.Printf("administrator code configured: %s", hub.AdminCode)

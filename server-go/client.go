@@ -204,6 +204,7 @@ func handleConnectionWithStore(conn net.Conn, hub *Hub, store *AuthStore) {
 }
 
 func (c *Client) readPump(hub *Hub) {
+	var attachmentLimiter attachmentRateLimiter
 	defer func() {
 		hub.Unregister <- c
 	}()
@@ -217,8 +218,12 @@ func (c *Client) readPump(hub *Hub) {
 			}
 			return
 		}
-		if message.Type != "quit" && !c.allowInboundMessage(time.Now()) {
-			if !c.enqueue(hub, Message{Type: "error", Content: "Rate limit exceeded; please slow down"}) {
+		if message.Type == "attachment.chunk" || message.Type == "attachment.download" {
+			if delay := attachmentLimiter.delay(time.Now()); delay > 0 {
+				time.Sleep(delay)
+			}
+		} else if message.Type != "quit" && !c.allowInboundMessage(time.Now()) {
+			if !c.enqueue(hub, Message{Type: "error", MessageID: message.MessageID, CommandID: message.CommandID, Content: "Rate limit exceeded; please slow down"}) {
 				return
 			}
 			continue
@@ -227,7 +232,7 @@ func (c *Client) readPump(hub *Hub) {
 		switch message.Type {
 		case "chat":
 			if c.Muted {
-				if !c.enqueue(hub, Message{Type: "error", Content: "You are muted"}) {
+				if !c.enqueue(hub, Message{Type: "error", MessageID: message.MessageID, CommandID: message.CommandID, Content: "You are muted"}) {
 					return
 				}
 				continue
@@ -235,8 +240,10 @@ func (c *Client) readPump(hub *Hub) {
 			if err := validateMessage(message); err != nil {
 				log.Printf("invalid chat message from %s: %v", c.Username, err)
 				if !c.enqueue(hub, Message{
-					Type:    "error",
-					Content: "Invalid chat content",
+					Type:      "error",
+					MessageID: message.MessageID,
+					CommandID: message.CommandID,
+					Content:   "Invalid chat content",
 				}) {
 					return
 				}
@@ -251,8 +258,10 @@ func (c *Client) readPump(hub *Hub) {
 			if _, err := normalizeUserCode(message.TargetUserCode); err != nil {
 				log.Printf("invalid private chat target from %s: %v", c.Username, err)
 				if !c.enqueue(hub, Message{
-					Type:    "error",
-					Content: "Invalid target user code",
+					Type:      "error",
+					MessageID: message.MessageID,
+					CommandID: message.CommandID,
+					Content:   "Invalid target user code",
 				}) {
 					return
 				}
@@ -261,8 +270,10 @@ func (c *Client) readPump(hub *Hub) {
 			if err := validateTextContent("private chat", message.Content); err != nil {
 				log.Printf("invalid private chat message from %s: %v", c.Username, err)
 				if !c.enqueue(hub, Message{
-					Type:    "error",
-					Content: "Invalid private chat content",
+					Type:      "error",
+					MessageID: message.MessageID,
+					CommandID: message.CommandID,
+					Content:   "Invalid private chat content",
 				}) {
 					return
 				}
@@ -341,13 +352,54 @@ func (c *Client) readPump(hub *Hub) {
 
 		case "attachment.init":
 			if err := validateMessage(message); err != nil {
-				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid attachment initialization"}) {
+				content := "Invalid attachment initialization"
+				if message.LogicalSize > maxAttachmentLogicalBytes {
+					content = ErrAttachmentTooLarge.Error()
+				}
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: content}) {
 					return
 				}
 				continue
 			}
 			hub.AttachmentInit <- AttachmentInitHubRequest{Sender: c, Room: message.Room,
 				LogicalSize: message.LogicalSize, CommandID: message.CommandID}
+
+		case "attachment.chunk":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid attachment chunk"}) {
+					return
+				}
+				continue
+			}
+			hub.AttachmentChunk <- AttachmentChunkHubRequest{Sender: c, UploadID: message.UploadID,
+				Index: message.ChunkIndex, Ciphertext: message.Ciphertext, CipherSHA256: message.CipherSHA256, CommandID: message.CommandID}
+
+		case "attachment.resume":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid attachment resume"}) {
+					return
+				}
+				continue
+			}
+			hub.AttachmentResume <- AttachmentResumeHubRequest{Sender: c, UploadID: message.UploadID, CommandID: message.CommandID}
+
+		case "attachment.commit":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid attachment commit"}) {
+					return
+				}
+				continue
+			}
+			hub.AttachmentCommit <- AttachmentCommitHubRequest{Sender: c, UploadID: message.UploadID, CommandID: message.CommandID}
+
+		case "attachment.download":
+			if err := validateMessage(message); err != nil {
+				if !c.enqueue(hub, Message{Type: "error", CommandID: message.CommandID, Content: "Invalid attachment download"}) {
+					return
+				}
+				continue
+			}
+			hub.AttachmentDownload <- AttachmentDownloadHubRequest{Sender: c, AttachmentID: message.AttachmentID, Index: message.ChunkIndex, CommandID: message.CommandID}
 
 		case "users_request":
 			hub.RequestUsers <- c

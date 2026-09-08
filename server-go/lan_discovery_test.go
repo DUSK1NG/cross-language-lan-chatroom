@@ -50,6 +50,7 @@ func TestBroadcastAddressForIPv4KeepsVirtualLanAndRejectsUnsafeAddresses(t *test
 		{name: "private lan", ip: "192.168.10.8", mask: "255.255.255.0", want: "192.168.10.255", ok: true},
 		{name: "loopback", ip: "127.0.0.1", mask: "255.0.0.0", ok: false},
 		{name: "link local", ip: "169.254.1.2", mask: "255.255.0.0", ok: false},
+		{name: "proxy benchmark network", ip: "198.18.0.1", mask: "255.255.255.252", ok: false},
 		{name: "unspecified", ip: "0.0.0.0", mask: "0.0.0.0", ok: false},
 		{name: "host route", ip: "26.12.34.56", mask: "255.255.255.255", ok: false},
 	}

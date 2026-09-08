@@ -2,10 +2,18 @@
 
 #include "connection.hpp"
 #include "reconnect_policy.hpp"
+#include "attachments/attachment_transfer_state.hpp"
+#include "attachments/transfer_client.hpp"
+#include "attachments/attachment_manifest.hpp"
+#include "attachments/attachment_download_assembler.hpp"
 
 #include <QObject>
+#include <QByteArray>
+#include <QFile>
+#include <QList>
 #include <QProcess>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <atomic>
 #include <map>
@@ -14,7 +22,6 @@
 
 #ifdef LAN_CHAT_ENABLE_MLSPP
 #include "crypto/mls_client.hpp"
-#include <QByteArray>
 #include <QSet>
 #endif
 
@@ -52,6 +59,18 @@ public slots:
                         bool isPrivate, const QString& beforeMessageId = {}, int limit = 50,
                         const QString& searchQuery = {});
     void sendAdminAction(const QString& action, const QString& targetUserCode, const QString& messageId = {}, const QString& commandId = {});
+    void sendAttachmentInit(const QString& room, qint64 logicalSize, const QString& commandId = {});
+    void startAttachmentUpload(const QString& room, const QString& filePath,
+                               const QStringList& targetUsers, const QString& commandId = {});
+    void sendAttachmentChunk(const QString& uploadId, qint64 chunkIndex,
+                             const QByteArray& ciphertext, const QByteArray& cipherSha256,
+                             const QString& commandId = {});
+    void resumeAttachment(const QString& uploadId, const QString& commandId = {});
+    void sendAttachmentCommit(const QString& uploadId, const QString& commandId = {});
+    void sendAttachmentDownload(const QString& attachmentId, qint64 chunkIndex,
+                                const QString& commandId = {});
+    void startAttachmentDownload(const QString& attachmentId, const QString& outputPath,
+                                 const QString& commandId = {});
     void fetchMlsKeyPackage(const QString& room, const QString& targetUserCode,
                             const QString& commandId = {});
     void addMlsMember(const QString& room, const QString& groupId,
@@ -91,6 +110,12 @@ signals:
     void historyReceived(const QString& room, const QString& targetUserCode,
                          bool isPrivate, const QVariantList& messages, bool hasMore,
                          const QString& searchQuery);
+    void attachmentEvent(const QString& type, const QString& attachmentId,
+                         const QString& uploadId, const QString& commandId,
+                         qint64 chunkSize, qint64 chunkIndex,
+                         const QByteArray& ciphertext, const QByteArray& cipherSha256,
+                         const QString& expiresAt, const QList<qint64>& receivedIndexes,
+                         const QString& content, qint64 logicalSize = 0);
     void mlsCommandResult(const QString& commandId, bool ok,
                           const QString& code, const QString& message);
     // Metadata-only observations; never carry key package, welcome, commit,
@@ -121,6 +146,14 @@ private:
     void publishMlsKeyPackage();
     void resumePendingMlsOperations();
     void processMlsMessage(const message::Message& incoming);
+    void processAttachmentMessage(const message::Message& incoming);
+    void sendNextAttachmentChunk(const QString& uploadId);
+    QString attachmentEventCommandId(const message::Message& incoming) const;
+#ifdef LAN_CHAT_ENABLE_MLSPP
+    void sendAttachmentManifest(const attachments::AttachmentManifest& manifest);
+    void startNextAttachmentMlsSetup(const QString& attachmentCommandId);
+    void failAttachmentMlsSetup(const QString& attachmentCommandId, const QString& reason);
+#endif
 
     std::unique_ptr<connection::ConnectionState> connection_;
     std::unique_ptr<QProcess> hostProcess_;
@@ -139,6 +172,51 @@ private:
     bool reconnectTimerActive_ = false;
     QString lastConnectionFailure_;
     bool explicitDisconnect_ = false;
+    std::map<QString, attachments::AttachmentTransferState> attachmentTransfers_;
+    std::map<QString, attachments::AttachmentTransferState> pendingAttachmentInits_;
+    struct PendingAttachmentFile {
+        QString room;
+        QString groupId;
+        QString filePath;
+        attachments::AttachmentCrypto::Key key{};
+        qint64 logicalSize = 0;
+    };
+    struct AttachmentUploadJob {
+        QString room;
+        QString fileName;
+        QString baseCommand;
+        attachments::AttachmentCrypto::Key key{};
+        attachments::ChunkContext context;
+        std::shared_ptr<QFile> input;
+        bool lastChunkSent = false;
+        int inFlightChunks = 0;
+        static constexpr int WindowSize = 8;
+    };
+    std::map<QString, PendingAttachmentFile> pendingAttachmentFiles_;
+    std::map<QString, std::pair<QString, qint64>> pendingAttachmentChunks_;
+    std::map<QString, AttachmentUploadJob> attachmentUploadJobs_;
+#ifdef LAN_CHAT_ENABLE_MLSPP
+    struct PendingAttachmentMlsSetup {
+        QString room;
+        QString filePath;
+        QString groupId;
+        QString commandId;
+        QStringList targetUsers;
+        int nextTarget = 0;
+    };
+    std::map<QString, PendingAttachmentMlsSetup> pendingAttachmentMlsSetups_;
+    std::map<QString, QString> pendingAttachmentMlsFetches_;
+    std::map<QString, QString> pendingAttachmentMlsAdds_;
+    std::map<QString, attachments::AttachmentManifest> pendingAttachmentManifests_;
+    std::map<QString, attachments::AttachmentManifest> receivedAttachmentManifests_;
+    struct AttachmentDownloadJob {
+        attachments::AttachmentManifest manifest;
+        attachments::AttachmentCrypto::Key manifestKey{};
+        attachments::AttachmentDownloadAssembler assembler;
+        QString commandId;
+    };
+    std::map<QString, AttachmentDownloadJob> attachmentDownloadJobs_;
+#endif
 
 #ifdef LAN_CHAT_ENABLE_MLSPP
     struct MlsGroupState {

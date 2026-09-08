@@ -14,7 +14,6 @@ private slots:
     void frameObservationWindowStaysBounded();
     void automaticModeExposesObservedMetrics();
     void automaticModeConfirmsFrameCandidatesBeforeSwitching();
-    void detachWindowCanRunBeforeWindowDestruction();
 };
 
 void PerformanceProfileTests::explicitModesExposeStableCapabilities() {
@@ -136,14 +135,6 @@ void PerformanceProfileTests::automaticModeConfirmsFrameCandidatesBeforeSwitchin
     QCOMPARE(profile.effectiveMode(), QStringLiteral("Balanced"));
     profile.observeFrameTime(16.0);
     QCOMPARE(profile.effectiveMode(), QStringLiteral("High"));
-}
-
-void PerformanceProfileTests::detachWindowCanRunBeforeWindowDestruction() {
-    PerformanceProfile profile;
-    profile.attachWindow(nullptr);
-    profile.detachWindow();
-
-    QCOMPARE(profile.observedFrameCount(), 0);
 }
 
 QTEST_GUILESS_MAIN(PerformanceProfileTests)

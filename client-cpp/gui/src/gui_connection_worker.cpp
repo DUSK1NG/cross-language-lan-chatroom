@@ -1,4 +1,5 @@
 #include "gui_connection_worker.hpp"
+#include "attachments/attachment_mls_group_id.hpp"
 #include "network_diagnostics.hpp"
 #include "openssl_runtime.hpp"
 
@@ -9,19 +10,32 @@
 #include <stdexcept>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QFileInfo>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTcpSocket>
 #include <QThread>
 #include <QTimer>
 #include <QVariantMap>
+#include "json.hpp"
 namespace {
 constexpr int kLocalHostPort = 8888;
 constexpr int kLocalHostProbeTimeoutMs = 150;
 constexpr int kLocalHostStartupTimeoutMs = 4000;
 constexpr int kLocalHostRetryAttempts = 8;
 constexpr int kLocalHostRetryDelayMs = 150;
+constexpr int kWelcomeAcceptCommandDigestSize = 56;
+
+QString welcomeAcceptCommandId(const QString& groupId, std::uint64_t epoch) {
+    const QByteArray material = groupId.toUtf8() + '|' + QByteArray::number(epoch);
+    const QByteArray digest = QCryptographicHash::hash(material, QCryptographicHash::Sha256).toHex();
+    // The Go transport caps command_id at 64 bytes. Keep this deterministic so retries
+    // of the same welcome are recognized as the same command.
+    return QStringLiteral("wa-") + QString::fromLatin1(digest.left(kWelcomeAcceptCommandDigestSize));
+}
 
 QString userFacingLoginFailure(const QString& reason) {
     if (reason == QStringLiteral("The room owner declined this connection")) {
@@ -32,6 +46,14 @@ QString userFacingLoginFailure(const QString& reason) {
     }
     return QStringLiteral("登录被拒绝：") + reason;
 }
+
+#ifdef LAN_CHAT_ENABLE_MLSPP
+bool attachmentKeyFromBytes(const QByteArray& bytes, attachments::AttachmentCrypto::Key& key) {
+    if (bytes.size() != static_cast<int>(attachments::AttachmentCrypto::KeySize)) return false;
+    std::copy(bytes.cbegin(), bytes.cend(), key.begin());
+    return true;
+}
+#endif
 
 #ifdef LAN_CHAT_ENABLE_MLSPP
 constexpr int kMaxMlsOpaqueBytes = 48 * 1024;
@@ -298,7 +320,9 @@ void GuiConnectionWorker::scheduleReconnect() {
                                               QStringLiteral("delay_ms=") + QString::number(delayMs));
     emit reconnectScheduled(reconnectPolicy_.attemptCount(), delayMs);
     reconnectTimerActive_ = true;
-    QTimer::singleShot(delayMs, this, [this]() {
+    const int reconnectGeneration = reconnectPolicy_.generation();
+    QTimer::singleShot(delayMs, this, [this, reconnectGeneration]() {
+        if (reconnectGeneration != reconnectPolicy_.generation()) return;
         reconnectTimerActive_ = false;
         retrySavedConnection();
     });
@@ -454,6 +478,517 @@ void GuiConnectionWorker::sendAdminAction(const QString& action, const QString& 
         emit connectionLost(QString::fromStdString(connection_->last_error()));
     }
 }
+
+void GuiConnectionWorker::sendAttachmentInit(const QString& room, qint64 logicalSize, const QString& commandId) {
+    if (logicalSize > attachments::MaxLogicalBytes) {
+        emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("文件超过 5 GiB 上限"));
+        return;
+    }
+    const QString normalizedRoom = room.trimmed();
+    NetworkDiagnostics::writeConnectionEvent(QStringLiteral("attachment_init"), savedConnection_.serverIp,
+                                              savedConnection_.serverPort, reconnectPolicy_.attemptCount(),
+                                              QStringLiteral("room=") + normalizedRoom);
+    if (!connection_ || !connection_->is_ready() || normalizedRoom.isEmpty() || logicalSize <= 0) {
+        emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("invalid attachment initialization"));
+        return;
+    }
+    message::Message message{"attachment.init"};
+    message.room = normalizedRoom.toStdString();
+    message.logical_size = logicalSize;
+    message.command_id = commandId.trimmed().toStdString();
+    const QString normalizedCommand = commandId.trimmed();
+    attachments::AttachmentTransferState transfer;
+    if (normalizedCommand.isEmpty() || !transfer.begin(logicalSize, attachments::TransferClient::ChunkSize)) {
+        emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("attachment command id and transfer state are required"));
+        return;
+    }
+    pendingAttachmentInits_[normalizedCommand] = std::move(transfer);
+    if (!connection_->send(message)) {
+        const QString reason = QString::fromStdString(connection_->last_error());
+        pendingAttachmentInits_.erase(normalizedCommand);
+        emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {}, reason);
+        emit connectionLost(reason);
+    }
+}
+
+void GuiConnectionWorker::startAttachmentUpload(const QString& room, const QString& filePath,
+                                                const QStringList& targetUsers, const QString& commandId) {
+    const QFileInfo fileInfo(filePath);
+    if (fileInfo.size() > attachments::MaxLogicalBytes) {
+        emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("文件超过 5 GiB 上限"));
+        return;
+    }
+    attachments::AttachmentCrypto::Key key{};
+    const QString normalizedCommand = commandId.trimmed();
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                         QStringLiteral("MLS++ is required before sending an attachment"));
+    return;
+#else
+    const QString normalizedRoom = room.trimmed();
+    NetworkDiagnostics::writeConnectionEvent(QStringLiteral("attachment_upload_start"), savedConnection_.serverIp,
+                                              savedConnection_.serverPort, reconnectPolicy_.attemptCount(),
+                                              QStringLiteral("room=") + normalizedRoom);
+    if (!fileInfo.isFile() || !fileInfo.isReadable() || normalizedCommand.isEmpty() || targetUsers.isEmpty()) {
+        emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                             targetUsers.isEmpty()
+                                 ? QStringLiteral("没有可用的在线成员来建立端到端加密群组")
+                                 : QStringLiteral("invalid attachment file or command"));
+        return;
+    }
+    try {
+        const QString groupId = attachments::attachment_mls_group_id(normalizedRoom, normalizedCommand);
+        MlsGroupState state;
+        state.client = std::make_shared<MlsClient>(MlsClient::create(mlsIdentity(savedConnection_.userCode)));
+        state.client->createGroup(mlsBytes(groupId.toUtf8()));
+        state.room = normalizedRoom;
+        mlsGroups_.emplace(groupId, std::move(state));
+        pendingAttachmentMlsSetups_[normalizedCommand] = {
+            normalizedRoom, fileInfo.absoluteFilePath(), groupId, normalizedCommand, targetUsers, 0};
+        startNextAttachmentMlsSetup(normalizedCommand);
+    } catch (const std::exception& error) {
+        emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                             QString::fromUtf8(error.what()));
+    }
+    return;
+#endif
+    if (!fileInfo.isFile() || !fileInfo.isReadable() || normalizedCommand.isEmpty() ||
+        !attachments::AttachmentCrypto::generate_key(key)) {
+        emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("invalid attachment file or key generation failed"));
+        return;
+    }
+    pendingAttachmentFiles_[normalizedCommand] =
+        {room.trimmed(), {}, fileInfo.absoluteFilePath(), key, fileInfo.size()};
+    sendAttachmentInit(room, fileInfo.size(), normalizedCommand);
+}
+
+#ifdef LAN_CHAT_ENABLE_MLSPP
+void GuiConnectionWorker::startNextAttachmentMlsSetup(const QString& attachmentCommandId) {
+    const auto setupIt = pendingAttachmentMlsSetups_.find(attachmentCommandId);
+    if (setupIt == pendingAttachmentMlsSetups_.end()) return;
+    auto& setup = setupIt->second;
+    if (setup.nextTarget >= setup.targetUsers.size()) {
+        const QFileInfo fileInfo(setup.filePath);
+        attachments::AttachmentCrypto::Key key{};
+        if (!fileInfo.isFile() || !fileInfo.isReadable() || !attachments::AttachmentCrypto::generate_key(key)) {
+            failAttachmentMlsSetup(attachmentCommandId, QStringLiteral("invalid attachment file or key generation failed"));
+            return;
+        }
+        pendingAttachmentFiles_[attachmentCommandId] =
+            {setup.room, setup.groupId, fileInfo.absoluteFilePath(), key, fileInfo.size()};
+        const QString room = setup.room;
+        pendingAttachmentMlsSetups_.erase(setupIt);
+        sendAttachmentInit(room, fileInfo.size(), attachmentCommandId);
+        return;
+    }
+    const QString target = setup.targetUsers.at(setup.nextTarget);
+    const QString fetchCommand = attachmentCommandId + QStringLiteral("-mls-fetch-%1").arg(setup.nextTarget);
+    pendingAttachmentMlsFetches_[fetchCommand] = attachmentCommandId;
+    fetchMlsKeyPackage(setup.room, target, fetchCommand);
+}
+
+void GuiConnectionWorker::failAttachmentMlsSetup(const QString& attachmentCommandId, const QString& reason) {
+    pendingAttachmentMlsSetups_.erase(attachmentCommandId);
+    for (auto it = pendingAttachmentMlsFetches_.begin(); it != pendingAttachmentMlsFetches_.end();) {
+        if (it->second == attachmentCommandId) it = pendingAttachmentMlsFetches_.erase(it);
+        else ++it;
+    }
+    for (auto it = pendingAttachmentMlsAdds_.begin(); it != pendingAttachmentMlsAdds_.end();) {
+        if (it->second == attachmentCommandId) it = pendingAttachmentMlsAdds_.erase(it);
+        else ++it;
+    }
+    emit attachmentEvent(QStringLiteral("error"), {}, {}, attachmentCommandId, 0, 0, {}, {}, {}, {}, reason);
+}
+#endif
+
+void GuiConnectionWorker::sendAttachmentChunk(const QString& uploadId, qint64 chunkIndex,
+                                               const QByteArray& ciphertext, const QByteArray& cipherSha256,
+                                               const QString& commandId) {
+    if (!connection_ || !connection_->is_ready() || uploadId.trimmed().isEmpty() || chunkIndex < 0 ||
+        ciphertext.isEmpty() || cipherSha256.size() != 64) {
+        emit attachmentEvent(QStringLiteral("error"), {}, uploadId, commandId, 0, chunkIndex, {}, {}, {}, {},
+                             QStringLiteral("invalid attachment chunk"));
+        return;
+    }
+    message::Message message{"attachment.chunk"};
+    message.upload_id = uploadId.trimmed().toStdString();
+    message.chunk_index = chunkIndex;
+    message.ciphertext = ciphertext.toBase64().toStdString();
+    message.cipher_sha256 = cipherSha256.toLower().toStdString();
+    message.command_id = commandId.trimmed().toStdString();
+    const QString normalizedCommand = commandId.trimmed();
+    auto transferIt = attachmentTransfers_.find(uploadId.trimmed());
+    if (normalizedCommand.isEmpty() || transferIt == attachmentTransfers_.end() ||
+        !transferIt->second.registerChunkCommand(normalizedCommand.toStdString(), chunkIndex)) {
+        emit attachmentEvent(QStringLiteral("error"), {}, uploadId, commandId, 0, chunkIndex, {}, {}, {}, {},
+                             QStringLiteral("attachment transfer is not initialized or command is duplicated"));
+        return;
+    }
+    pendingAttachmentChunks_[normalizedCommand] = {uploadId.trimmed(), chunkIndex};
+    NetworkDiagnostics::writeConnectionEvent(
+        QStringLiteral("attachment_chunk_send"), savedConnection_.serverIp, savedConnection_.serverPort,
+        reconnectPolicy_.attemptCount(),
+        QStringLiteral("upload_id=") + uploadId.trimmed() + QStringLiteral(" chunk_index=") + QString::number(chunkIndex) +
+            QStringLiteral(" total_chunks=") + QString::number(transferIt->second.chunkCount()) +
+            QStringLiteral(" received_chunks=") + QString::number(transferIt->second.receivedCount()));
+    if (!connection_->send(message)) {
+        const QString reason = QString::fromStdString(connection_->last_error());
+        pendingAttachmentChunks_.erase(normalizedCommand);
+        transferIt->second.fail();
+        emit attachmentEvent(QStringLiteral("error"), {}, uploadId, commandId, 0, chunkIndex, {}, {}, {}, {}, reason);
+        emit connectionLost(reason);
+    }
+}
+
+void GuiConnectionWorker::sendNextAttachmentChunk(const QString& uploadId) {
+    const auto jobIt = attachmentUploadJobs_.find(uploadId.trimmed());
+    if (jobIt == attachmentUploadJobs_.end()) return;
+    auto& job = jobIt->second;
+    // Keep a bounded window on the wire instead of paying one round trip per
+    // 47 KiB chunk. File reads remain incremental and acknowledgements refill it.
+    while (!job.lastChunkSent && job.inFlightChunks < AttachmentUploadJob::WindowSize) {
+        attachments::TransferChunk chunk;
+        bool endOfFile = false;
+        QString error;
+        if (!attachments::TransferClient::encrypt_next_chunk(*job.input, job.key, job.context,
+                                                             chunk, endOfFile, &error)) {
+            auto transferIt = attachmentTransfers_.find(uploadId.trimmed());
+            if (transferIt != attachmentTransfers_.end()) transferIt->second.fail();
+            emit attachmentEvent(QStringLiteral("error"), {}, uploadId, job.baseCommand, 0,
+                                 job.context.chunk_index, {}, {}, {}, {}, error);
+            attachmentUploadJobs_.erase(jobIt);
+            return;
+        }
+        if (endOfFile && chunk.ciphertext.isEmpty()) {
+            auto transferIt = attachmentTransfers_.find(uploadId.trimmed());
+            if (transferIt != attachmentTransfers_.end()) transferIt->second.fail();
+            emit attachmentEvent(QStringLiteral("error"), {}, uploadId, job.baseCommand, 0,
+                                 job.context.chunk_index, {}, {}, {}, {},
+                                 QStringLiteral("attachment file has no remaining data"));
+            attachmentUploadJobs_.erase(jobIt);
+            return;
+        }
+        job.lastChunkSent = endOfFile;
+        const QString commandId = job.baseCommand + QStringLiteral("-chunk-%1").arg(chunk.index);
+        ++job.context.chunk_index;
+        ++job.inFlightChunks;
+        sendAttachmentChunk(uploadId, chunk.index, chunk.ciphertext, chunk.cipher_sha256, commandId);
+        const auto transfer = attachmentTransfers_.find(uploadId.trimmed());
+        if (transfer == attachmentTransfers_.end() ||
+            transfer->second.status() == attachments::AttachmentTransferState::Status::Failed) return;
+    }
+}
+
+QString GuiConnectionWorker::attachmentEventCommandId(const message::Message& incoming) const {
+    const QString commandId = QString::fromStdString(incoming.command_id);
+    if (!commandId.isEmpty() && pendingAttachmentChunks_.find(commandId) != pendingAttachmentChunks_.end()) {
+        return commandId;
+    }
+    if (incoming.type != "attachment.chunk") return commandId;
+    for (const auto& entry : pendingAttachmentChunks_) {
+        if (entry.second.first == QString::fromStdString(incoming.upload_id) &&
+            entry.second.second == incoming.chunk_index) {
+            return entry.first;
+        }
+    }
+    return commandId;
+}
+
+void GuiConnectionWorker::resumeAttachment(const QString& uploadId, const QString& commandId) {
+    if (!connection_ || !connection_->is_ready() || uploadId.trimmed().isEmpty()) {
+        emit attachmentEvent(QStringLiteral("error"), {}, uploadId, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("invalid attachment resume"));
+        return;
+    }
+    message::Message message{"attachment.resume"};
+    message.upload_id = uploadId.trimmed().toStdString();
+    message.command_id = commandId.trimmed().toStdString();
+    if (!connection_->send(message)) {
+        const QString reason = QString::fromStdString(connection_->last_error());
+        emit attachmentEvent(QStringLiteral("error"), {}, uploadId, commandId, 0, 0, {}, {}, {}, {}, reason);
+        emit connectionLost(reason);
+    }
+}
+
+void GuiConnectionWorker::sendAttachmentCommit(const QString& uploadId, const QString& commandId) {
+    if (!connection_ || !connection_->is_ready() || uploadId.trimmed().isEmpty() || commandId.trimmed().isEmpty()) {
+        emit attachmentEvent(QStringLiteral("error"), {}, uploadId, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("invalid attachment commit"));
+        return;
+    }
+    message::Message message{"attachment.commit"};
+    message.upload_id = uploadId.trimmed().toStdString();
+    message.command_id = commandId.trimmed().toStdString();
+    if (!connection_->send(message)) {
+        const QString reason = QString::fromStdString(connection_->last_error());
+        emit attachmentEvent(QStringLiteral("error"), {}, uploadId, commandId, 0, 0, {}, {}, {}, {}, reason);
+        emit connectionLost(reason);
+    }
+}
+
+void GuiConnectionWorker::sendAttachmentDownload(const QString& attachmentId, qint64 chunkIndex,
+                                                  const QString& commandId) {
+    if (!connection_ || !connection_->is_ready() || attachmentId.trimmed().isEmpty() ||
+        chunkIndex < 0 || commandId.trimmed().isEmpty()) {
+        emit attachmentEvent(QStringLiteral("error"), attachmentId, {}, commandId, 0, chunkIndex,
+                             {}, {}, {}, {}, QStringLiteral("invalid attachment download"));
+        return;
+    }
+    message::Message message{"attachment.download"};
+    message.attachment_id = attachmentId.trimmed().toStdString();
+    message.chunk_index = chunkIndex;
+    message.command_id = commandId.trimmed().toStdString();
+    if (!connection_->send(message)) {
+        const QString reason = QString::fromStdString(connection_->last_error());
+        emit attachmentEvent(QStringLiteral("error"), attachmentId, {}, commandId, 0, chunkIndex,
+                             {}, {}, {}, {}, reason);
+        emit connectionLost(reason);
+    }
+}
+
+void GuiConnectionWorker::startAttachmentDownload(const QString& attachmentId, const QString& outputPath,
+                                                  const QString& commandId) {
+#ifndef LAN_CHAT_ENABLE_MLSPP
+    emit attachmentEvent(QStringLiteral("error"), attachmentId, {}, commandId, 0, 0, {}, {}, {}, {},
+                         QStringLiteral("MLS++ is required before downloading an attachment"));
+    return;
+#else
+    const auto manifestIt = receivedAttachmentManifests_.find(attachmentId.trimmed());
+    if (manifestIt == receivedAttachmentManifests_.end() || outputPath.trimmed().isEmpty() ||
+        commandId.trimmed().isEmpty()) {
+        emit attachmentEvent(QStringLiteral("error"), attachmentId, {}, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("attachment manifest or output path is unavailable"));
+        return;
+    }
+    AttachmentDownloadJob job;
+    job.manifest = manifestIt->second;
+    if (!attachmentKeyFromBytes(job.manifest.key, job.manifestKey)) {
+        emit attachmentEvent(QStringLiteral("error"), attachmentId, {}, commandId, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("attachment manifest contains an invalid key"));
+        return;
+    }
+    job.commandId = commandId.trimmed();
+    attachments::ChunkContext context{job.manifest.attachmentId.toStdString(), job.manifest.room.toStdString(),
+                                      job.manifest.groupId.toStdString(), job.manifest.logicalSize,
+                                      job.manifest.chunkSize, 0};
+    QString error;
+    if (!job.assembler.begin(outputPath.trimmed(), job.manifestKey, std::move(context), &error)) {
+        emit attachmentEvent(QStringLiteral("error"), attachmentId, {}, commandId, 0, 0, {}, {}, {}, {}, error);
+        return;
+    }
+    attachmentDownloadJobs_[job.manifest.attachmentId] = std::move(job);
+    sendAttachmentDownload(attachmentId, 0, commandId);
+#endif
+}
+
+void GuiConnectionWorker::processAttachmentMessage(const message::Message& incoming) {
+    const QString commandId = QString::fromStdString(incoming.command_id);
+    if (incoming.type == "error") {
+        pendingAttachmentInits_.erase(commandId);
+        pendingAttachmentFiles_.erase(commandId);
+        const auto chunk = pendingAttachmentChunks_.find(commandId);
+        if (chunk != pendingAttachmentChunks_.end()) {
+            const QString uploadId = chunk->second.first;
+            const auto transfer = attachmentTransfers_.find(uploadId);
+            if (transfer != attachmentTransfers_.end()) transfer->second.fail();
+            attachmentUploadJobs_.erase(uploadId);
+            for (auto it = pendingAttachmentChunks_.begin(); it != pendingAttachmentChunks_.end();) {
+                if (it->second.first == uploadId) it = pendingAttachmentChunks_.erase(it);
+                else ++it;
+            }
+        }
+        return;
+    }
+    if (incoming.type == "attachment.init") {
+        NetworkDiagnostics::writeConnectionEvent(QStringLiteral("attachment_init_ack"), savedConnection_.serverIp,
+                                                  savedConnection_.serverPort, reconnectPolicy_.attemptCount(),
+                                                  QStringLiteral("upload_id=") + QString::fromStdString(incoming.upload_id));
+        const auto it = pendingAttachmentInits_.find(commandId);
+        if (it == pendingAttachmentInits_.end()) return;
+        auto transfer = std::move(it->second);
+        pendingAttachmentInits_.erase(it);
+        if (!transfer.acceptInit(incoming.attachment_id, incoming.upload_id, incoming.chunk_size,
+                                 incoming.expires_at)) {
+            emit attachmentEvent(QStringLiteral("error"), {}, {}, commandId, 0, 0, {}, {}, {}, {},
+                                 QStringLiteral("invalid attachment initialization response"));
+            return;
+        }
+        attachmentTransfers_[QString::fromStdString(incoming.upload_id)] = std::move(transfer);
+        const auto& acceptedTransfer = attachmentTransfers_.at(QString::fromStdString(incoming.upload_id));
+        NetworkDiagnostics::writeConnectionEvent(
+            QStringLiteral("attachment_init_progress"), savedConnection_.serverIp, savedConnection_.serverPort,
+            reconnectPolicy_.attemptCount(),
+            QStringLiteral("upload_id=") + QString::fromStdString(incoming.upload_id) +
+                QStringLiteral(" logical_size=") + QString::number(acceptedTransfer.logicalSize()) +
+                QStringLiteral(" chunk_size=") + QString::number(acceptedTransfer.chunkSize()) +
+                QStringLiteral(" total_chunks=") + QString::number(acceptedTransfer.chunkCount()) +
+                QStringLiteral(" received_chunks=") + QString::number(acceptedTransfer.receivedCount()));
+        const auto fileIt = pendingAttachmentFiles_.find(commandId);
+        if (fileIt != pendingAttachmentFiles_.end()) {
+            const PendingAttachmentFile file = fileIt->second;
+            pendingAttachmentFiles_.erase(fileIt);
+            auto input = std::make_shared<QFile>(file.filePath);
+            if (!input->open(QIODevice::ReadOnly)) {
+                emit attachmentEvent(QStringLiteral("error"), {},
+                                     QString::fromStdString(incoming.upload_id), commandId, incoming.chunk_size,
+                                     0, {}, {}, {}, {}, QStringLiteral("unable to open attachment file"));
+                return;
+            }
+            AttachmentUploadJob job;
+            job.room = file.room;
+            job.fileName = QFileInfo(file.filePath).fileName();
+            job.baseCommand = commandId;
+            job.key = file.key;
+            job.context = {incoming.attachment_id, file.room.toStdString(),
+#ifdef LAN_CHAT_ENABLE_MLSPP
+                           file.groupId.toStdString(),
+#else
+                           {},
+#endif
+                           file.logicalSize,
+                           incoming.chunk_size, 0};
+            job.input = std::move(input);
+            attachmentUploadJobs_[QString::fromStdString(incoming.upload_id)] = std::move(job);
+            sendNextAttachmentChunk(QString::fromStdString(incoming.upload_id));
+        }
+        return;
+    }
+    if (incoming.type == "attachment.resume") {
+        const auto it = attachmentTransfers_.find(QString::fromStdString(incoming.upload_id));
+        if (it == attachmentTransfers_.end()) return;
+        std::vector<std::int64_t> indexes(incoming.received_indexes.begin(), incoming.received_indexes.end());
+        it->second.acceptResume(indexes);
+        NetworkDiagnostics::writeConnectionEvent(
+            QStringLiteral("attachment_resume_progress"), savedConnection_.serverIp, savedConnection_.serverPort,
+            reconnectPolicy_.attemptCount(),
+            QStringLiteral("upload_id=") + QString::fromStdString(incoming.upload_id) +
+                QStringLiteral(" total_chunks=") + QString::number(it->second.chunkCount()) +
+                QStringLiteral(" received_chunks=") + QString::number(it->second.receivedCount()));
+        return;
+    }
+    if (incoming.type == "attachment.chunk") {
+        auto pending = pendingAttachmentChunks_.find(commandId);
+        if (pending == pendingAttachmentChunks_.end()) {
+            for (auto candidate = pendingAttachmentChunks_.begin(); candidate != pendingAttachmentChunks_.end(); ++candidate) {
+                if (candidate->second.first == QString::fromStdString(incoming.upload_id) &&
+                    candidate->second.second == incoming.chunk_index) {
+                    pending = candidate;
+                    break;
+                }
+            }
+        }
+        if (pending == pendingAttachmentChunks_.end()) return;
+        const auto [uploadId, chunkIndex] = pending->second;
+        const QString matchedCommandId = pending->first;
+        pendingAttachmentChunks_.erase(pending);
+        const auto it = attachmentTransfers_.find(uploadId);
+        if (it != attachmentTransfers_.end() && it->second.acceptChunkAck(matchedCommandId.toStdString(), chunkIndex)) {
+            NetworkDiagnostics::writeConnectionEvent(
+                QStringLiteral("attachment_chunk_ack"), savedConnection_.serverIp, savedConnection_.serverPort,
+                reconnectPolicy_.attemptCount(),
+                QStringLiteral("upload_id=") + uploadId + QStringLiteral(" chunk_index=") + QString::number(chunkIndex) +
+                    QStringLiteral(" total_chunks=") + QString::number(it->second.chunkCount()) +
+                    QStringLiteral(" received_chunks=") + QString::number(it->second.receivedCount()));
+            const auto jobIt = attachmentUploadJobs_.find(uploadId);
+            if (jobIt != attachmentUploadJobs_.end()) {
+                --jobIt->second.inFlightChunks;
+                if (jobIt->second.lastChunkSent && jobIt->second.inFlightChunks == 0) {
+                    const QString commitCommand = jobIt->second.baseCommand + QStringLiteral("-commit");
+#ifdef LAN_CHAT_ENABLE_MLSPP
+                    attachments::AttachmentManifest manifest;
+                    manifest.attachmentId = QString::fromStdString(jobIt->second.context.attachment_id);
+                    manifest.fileName = jobIt->second.fileName;
+                    manifest.room = jobIt->second.room;
+                    manifest.groupId = QString::fromStdString(jobIt->second.context.group_id);
+                    manifest.logicalSize = jobIt->second.context.logical_size;
+                    manifest.chunkSize = jobIt->second.context.chunk_size;
+                    const auto groupIt = mlsGroups_.find(manifest.groupId);
+                    manifest.epoch = groupIt == mlsGroups_.end() ? 0 : groupIt->second.epoch;
+                    manifest.key = QByteArray(reinterpret_cast<const char*>(jobIt->second.key.data()),
+                                              static_cast<int>(jobIt->second.key.size()));
+                    pendingAttachmentManifests_[commitCommand] = std::move(manifest);
+#endif
+                    sendAttachmentCommit(uploadId, commitCommand);
+                    attachmentUploadJobs_.erase(jobIt);
+                } else {
+                    sendNextAttachmentChunk(uploadId);
+                }
+            }
+        }
+        return;
+    }
+    if (incoming.type == "attachment.commit") {
+#ifdef LAN_CHAT_ENABLE_MLSPP
+        const auto it = pendingAttachmentManifests_.find(commandId);
+        if (it == pendingAttachmentManifests_.end()) return;
+        const auto manifest = std::move(it->second);
+        pendingAttachmentManifests_.erase(it);
+        if (incoming.attachment_id == manifest.attachmentId.toStdString()) {
+            sendAttachmentManifest(manifest);
+        }
+#endif
+    }
+    if (incoming.type == "attachment.download") {
+#ifdef LAN_CHAT_ENABLE_MLSPP
+        const QString attachmentId = QString::fromStdString(incoming.attachment_id);
+        const auto jobIt = attachmentDownloadJobs_.find(attachmentId);
+        if (jobIt == attachmentDownloadJobs_.end()) return;
+        const QByteArray ciphertext = QByteArray::fromBase64(QByteArray::fromStdString(incoming.ciphertext));
+        QString error;
+        if (!jobIt->second.assembler.acceptChunk(incoming.chunk_index, ciphertext,
+                                                 QByteArray::fromStdString(incoming.cipher_sha256),
+                                                 incoming.content == "last", &error)) {
+            emit attachmentEvent(QStringLiteral("error"), attachmentId, {}, jobIt->second.commandId,
+                                 incoming.chunk_size, incoming.chunk_index, {}, {}, {}, {}, error);
+            attachmentDownloadJobs_.erase(jobIt);
+            return;
+        }
+        const QString commandId = jobIt->second.commandId;
+        if (jobIt->second.assembler.complete()) {
+            attachmentDownloadJobs_.erase(jobIt);
+            emit attachmentEvent(QStringLiteral("completed"), attachmentId, {}, commandId,
+                                 incoming.chunk_size, incoming.chunk_index, {}, {}, {}, {}, {});
+        } else {
+            sendAttachmentDownload(attachmentId, incoming.chunk_index + 1, commandId);
+        }
+#endif
+    }
+}
+
+#ifdef LAN_CHAT_ENABLE_MLSPP
+void GuiConnectionWorker::sendAttachmentManifest(const attachments::AttachmentManifest& manifest) {
+    const auto groupIt = mlsGroups_.find(manifest.groupId);
+    const QByteArray plaintext = manifest.encode();
+    if (groupIt == mlsGroups_.end() || !groupIt->second.client || plaintext.isEmpty()) {
+        emit attachmentEvent(QStringLiteral("error"), manifest.attachmentId, {}, {}, 0, 0, {}, {}, {}, {},
+                             QStringLiteral("unable to protect attachment manifest"));
+        return;
+    }
+    try {
+        const QByteArray ciphertext = encodeMlsOpaque(groupIt->second.client->protect(mlsBytes(plaintext)));
+        if (ciphertext.isEmpty()) throw std::runtime_error("MLS attachment manifest is too large");
+        const nlohmann::json envelope = {
+            {"v", 1}, {"alg", "mls-v1"}, {"group_id", manifest.groupId.toStdString()},
+            {"epoch", groupIt->second.epoch}, {"ciphertext", ciphertext.toStdString()}
+        };
+        message::Message message{"chat"};
+        message.room = manifest.room.toStdString();
+        message.message_id = attachments::manifestMessageId(manifest.attachmentId).toStdString();
+        message.crypto = envelope.dump();
+        if (!connection_->send(message)) {
+            emit connectionLost(QString::fromStdString(connection_->last_error()));
+        }
+    } catch (const std::exception& error) {
+        emit attachmentEvent(QStringLiteral("error"), manifest.attachmentId, {}, {}, 0, 0, {}, {}, {}, {},
+                             QString::fromUtf8(error.what()));
+    }
+}
+#endif
 
 void GuiConnectionWorker::fetchMlsKeyPackage(const QString& room,
                                              const QString& targetUserCode,
@@ -799,15 +1334,60 @@ void GuiConnectionWorker::resumePendingMlsOperations() {
 void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
 #ifdef LAN_CHAT_ENABLE_MLSPP
     try {
+        if (incoming.type == "chat" && !incoming.crypto.empty()) {
+            const nlohmann::json envelope = nlohmann::json::parse(incoming.crypto);
+            if (envelope.value("v", 0) != 1 || envelope.value("alg", "") != "mls-v1" ||
+                !envelope.contains("group_id") || !envelope.at("group_id").is_string() ||
+                !envelope.contains("ciphertext") || !envelope.at("ciphertext").is_string()) {
+                return;
+            }
+            const QString groupId = QString::fromStdString(envelope.at("group_id").get<std::string>());
+            const auto groupIt = mlsGroups_.find(groupId);
+            if (groupIt == mlsGroups_.end() || !groupIt->second.client) return;
+            const auto plaintext = groupIt->second.client->unprotect(
+                decodeMlsOpaque(envelope.at("ciphertext").get<std::string>()));
+            const QByteArray manifestBytes(reinterpret_cast<const char*>(plaintext.data()),
+                                           static_cast<int>(plaintext.size()));
+            attachments::AttachmentManifest manifest;
+            if (!attachments::AttachmentManifest::decode(manifestBytes, manifest) ||
+                manifest.room != QString::fromStdString(incoming.room) || manifest.groupId != groupId) {
+                return;
+            }
+            receivedAttachmentManifests_[manifest.attachmentId] = manifest;
+            const QJsonObject publicMetadata{
+                {QStringLiteral("fileName"), manifest.fileName},
+                {QStringLiteral("logicalSize"), manifest.logicalSize},
+                {QStringLiteral("chunkSize"), manifest.chunkSize},
+                {QStringLiteral("totalChunks"),
+                 (manifest.logicalSize + manifest.chunkSize - 1) / manifest.chunkSize}
+            };
+            emit attachmentEvent(QStringLiteral("manifest"), manifest.attachmentId, {},
+                                 QString::fromStdString(incoming.message_id), manifest.chunkSize, 0,
+                                 {}, {}, {}, {},
+                                 QString::fromUtf8(QJsonDocument(publicMetadata).toJson(QJsonDocument::Compact)));
+            return;
+        }
         if (incoming.type == "mls.key_package.fetch" && !incoming.key_package.empty()) {
             const QByteArray encoded = QByteArray::fromStdString(incoming.key_package);
-            mlsKeyPackages_[QString::fromStdString(incoming.target_user_code).toLower()] = encoded;
+            const QString targetUser = QString::fromStdString(incoming.target_user_code);
+            mlsKeyPackages_[targetUser.toLower()] = encoded;
             const QByteArray decoded = QByteArray::fromBase64(encoded);
-            emit mlsKeyPackageAvailable(QString::fromStdString(incoming.target_user_code),
+            emit mlsKeyPackageAvailable(targetUser,
                                         QCryptographicHash::hash(decoded, QCryptographicHash::Sha256).toHex());
             const QString commandId = QString::fromStdString(incoming.command_id);
             if (pendingMlsCommands_.remove(commandId)) {
                 emit mlsCommandResult(commandId, true, {}, {});
+            }
+            const auto fetchIt = pendingAttachmentMlsFetches_.find(commandId);
+            if (fetchIt != pendingAttachmentMlsFetches_.end()) {
+                const QString attachmentCommandId = fetchIt->second;
+                pendingAttachmentMlsFetches_.erase(fetchIt);
+                const auto setupIt = pendingAttachmentMlsSetups_.find(attachmentCommandId);
+                if (setupIt == pendingAttachmentMlsSetups_.end()) return;
+                const QString addCommand = attachmentCommandId + QStringLiteral("-mls-add-%1")
+                    .arg(setupIt->second.nextTarget);
+                pendingAttachmentMlsAdds_[addCommand] = attachmentCommandId;
+                addMlsMember(setupIt->second.room, setupIt->second.groupId, targetUser, addCommand);
             }
             return;
         }
@@ -875,7 +1455,7 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
                 accept.epoch = incoming.epoch;
                 accept.proposal_id = incoming.proposal_id;
                 accept.welcome_digest = QCryptographicHash::hash(welcome, QCryptographicHash::Sha256).toHex().toStdString();
-                accept.command_id = QStringLiteral("welcome-accept-%1-%2").arg(groupId).arg(incoming.epoch).toStdString();
+                accept.command_id = welcomeAcceptCommandId(groupId, incoming.epoch).toStdString();
                 return connection_ && connection_->send(accept);
             };
             auto groupIt = mlsGroups_.find(groupId);
@@ -991,6 +1571,16 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
                 pendingMlsOperations_.erase(operationIt);
                 pendingMlsCommands_.remove(commandId);
                 const bool duplicate = incoming.content == "duplicate";
+                const auto addIt = pendingAttachmentMlsAdds_.find(commandId);
+                if (addIt != pendingAttachmentMlsAdds_.end()) {
+                    const QString attachmentCommandId = addIt->second;
+                    pendingAttachmentMlsAdds_.erase(addIt);
+                    const auto setupIt = pendingAttachmentMlsSetups_.find(attachmentCommandId);
+                    if (setupIt != pendingAttachmentMlsSetups_.end()) {
+                        ++setupIt->second.nextTarget;
+                        startNextAttachmentMlsSetup(attachmentCommandId);
+                    }
+                }
                 emit mlsCommandResult(commandId, true, duplicate ? QStringLiteral("duplicate") : QString(), {});
                 return;
             }
@@ -1015,11 +1605,33 @@ void GuiConnectionWorker::processMlsMessage(const message::Message& incoming) {
             pendingMlsOperations_.erase(operationIt);
             pendingMlsCommands_.remove(commandId);
             const bool duplicate = incoming.content == "duplicate";
+            const auto addIt = pendingAttachmentMlsAdds_.find(commandId);
+            if (addIt != pendingAttachmentMlsAdds_.end()) {
+                const QString attachmentCommandId = addIt->second;
+                pendingAttachmentMlsAdds_.erase(addIt);
+                const auto setupIt = pendingAttachmentMlsSetups_.find(attachmentCommandId);
+                if (setupIt != pendingAttachmentMlsSetups_.end()) {
+                    ++setupIt->second.nextTarget;
+                    startNextAttachmentMlsSetup(attachmentCommandId);
+                }
+            }
             emit mlsCommandResult(commandId, true, duplicate ? QStringLiteral("duplicate") : QString(), {});
             return;
         }
         if (incoming.type == "error" && !incoming.command_id.empty()) {
             const QString commandId = QString::fromStdString(incoming.command_id);
+            const auto fetchIt = pendingAttachmentMlsFetches_.find(commandId);
+            if (fetchIt != pendingAttachmentMlsFetches_.end()) {
+                const QString attachmentCommandId = fetchIt->second;
+                pendingAttachmentMlsFetches_.erase(fetchIt);
+                failAttachmentMlsSetup(attachmentCommandId, QString::fromStdString(incoming.content));
+            }
+            const auto addIt = pendingAttachmentMlsAdds_.find(commandId);
+            if (addIt != pendingAttachmentMlsAdds_.end()) {
+                const QString attachmentCommandId = addIt->second;
+                pendingAttachmentMlsAdds_.erase(addIt);
+                failAttachmentMlsSetup(attachmentCommandId, QString::fromStdString(incoming.content));
+            }
             pendingMlsOperations_.erase(commandId);
             if (pendingMlsCommands_.remove(commandId)) {
                 emit mlsCommandResult(commandId, false, QStringLiteral("server_rejected"),
@@ -1076,7 +1688,34 @@ void GuiConnectionWorker::receiveLoop() {
             roomDetails.append(detail);
         }
 
+        const QString attachmentCommandId = attachmentEventCommandId(incoming);
         processMlsMessage(incoming);
+        processAttachmentMessage(incoming);
+
+        if (incoming.type == "attachment.init" || incoming.type == "attachment.chunk" ||
+            incoming.type == "attachment.resume" || incoming.type == "attachment.commit" ||
+            incoming.type == "attachment.download" || incoming.type == "error") {
+            QList<qint64> receivedIndexes;
+            for (const std::int64_t index : incoming.received_indexes) {
+                receivedIndexes.append(index);
+            }
+            // The server init response has no plaintext size. Recover it from
+            // the local transfer accepted by processAttachmentMessage above.
+            qint64 logicalSize = 0;
+            if (incoming.type == "attachment.init") {
+                const auto transfer = attachmentTransfers_.find(QString::fromStdString(incoming.upload_id));
+                if (transfer != attachmentTransfers_.end()) logicalSize = transfer->second.logicalSize();
+            }
+            emit attachmentEvent(QString::fromStdString(incoming.type),
+                                 QString::fromStdString(incoming.attachment_id),
+                                 QString::fromStdString(incoming.upload_id),
+                                 attachmentCommandId,
+                                 incoming.chunk_size, incoming.chunk_index,
+                                 QByteArray::fromBase64(QByteArray::fromStdString(incoming.ciphertext)),
+                                 QByteArray::fromStdString(incoming.cipher_sha256),
+                                 QString::fromStdString(incoming.expires_at), receivedIndexes,
+                                 QString::fromStdString(incoming.content), logicalSize);
+        }
 
         if (incoming.type == "history_response") {
             QVariantList historyMessages;

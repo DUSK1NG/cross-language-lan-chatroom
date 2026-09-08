@@ -1,11 +1,8 @@
 #pragma once
 
 #include <QObject>
-#include <QElapsedTimer>
-#include <QPointer>
 #include <QVector>
 
-class QQuickWindow;
 
 class PerformanceProfile final : public QObject {
     Q_OBJECT
@@ -37,8 +34,6 @@ public:
     QString automaticReason() const { return automaticReason_; }
 
     void setMode(const QString& mode);
-    void attachWindow(QQuickWindow* window);
-    void detachWindow();
     Q_INVOKABLE void updateGraphicsContext(bool hardwareAcceleration,
                                            bool softwareRendering,
                                            double refreshRate);
@@ -53,7 +48,6 @@ signals:
     void automaticReasonChanged();
 
 private:
-    void handleFrameSwapped();
     void recomputeMetrics();
     void recompute();
     QString automaticMode() const;
@@ -76,8 +70,4 @@ private:
     QString automaticReason_ = QStringLiteral("waiting-for-samples");
     QString pendingAutomaticMode_;
     int pendingAutomaticModeStreak_ = 0;
-    QPointer<QQuickWindow> window_;
-    QElapsedTimer frameTimer_;
-    qint64 lastFrameTimestampNs_ = 0;
-    int framesSinceSample_ = 0;
 };

@@ -103,7 +103,7 @@ func localCertificateIPs() []net.IP {
 				continue
 			}
 			ip := ipNet.IP.To4()
-			if !ip.IsUnspecified() && !seen[ip.String()] {
+			if !ip.IsUnspecified() && !isBenchmarkNetworkIPv4(ip) && !seen[ip.String()] {
 				seen[ip.String()] = true
 				ips = append(ips, ip)
 			}

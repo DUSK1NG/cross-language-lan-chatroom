@@ -20,6 +20,7 @@ private slots:
     void findsHostFilesFromUnifiedOutputDirectory();
     void usesPerUserAppDataForNewHostIdentity();
     void usesExplicitTestDataRootWhenProvided();
+    void explicitTestDataRootOverridesLegacyCheckoutData();
 };
 
 void HostPathResolverTests::prefersCertificateSiblingKey() {
@@ -183,6 +184,40 @@ void HostPathResolverTests::usesExplicitTestDataRootWhenProvided() {
     QVERIFY(QDir::cleanPath(paths.certFile).startsWith(expectedRoot + QLatin1Char('/')));
     QVERIFY(QDir::cleanPath(paths.keyFile).startsWith(expectedRoot + QLatin1Char('/')));
     QVERIFY(QDir::cleanPath(paths.dbFile).startsWith(expectedRoot + QLatin1Char('/')));
+}
+
+void HostPathResolverTests::explicitTestDataRootOverridesLegacyCheckoutData() {
+    QTemporaryDir packageRoot;
+    QTemporaryDir hostDataRoot;
+    QVERIFY(packageRoot.isValid());
+    QVERIFY(hostDataRoot.isValid());
+    const QString server = QDir(packageRoot.path()).filePath("server-go/chat-server.exe");
+    const QString legacyCert = QDir(packageRoot.path()).filePath("server-go/certs/server-lan.crt");
+    const QString legacyKey = QDir(packageRoot.path()).filePath("server-go/certs/server-lan.key");
+    const QString legacyDatabase = QDir(packageRoot.path()).filePath("server-go/chat.db");
+    QVERIFY(QDir().mkpath(QFileInfo(legacyCert).absolutePath()));
+    QVERIFY(QFile(server).open(QIODevice::WriteOnly));
+    QVERIFY(QFile(legacyCert).open(QIODevice::WriteOnly));
+    QVERIFY(QFile(legacyKey).open(QIODevice::WriteOnly));
+    QVERIFY(QFile(legacyDatabase).open(QIODevice::WriteOnly));
+
+    constexpr auto variableName = "LAN_CHAT_TEST_HOST_DATA_ROOT";
+    const bool hadPreviousValue = qEnvironmentVariableIsSet(variableName);
+    const QByteArray previousValue = qgetenv(variableName);
+    qputenv(variableName, hostDataRoot.path().toUtf8());
+    const HostPathResolver::HostPaths paths = HostPathResolver::resolveHostPaths(packageRoot.path());
+    if (hadPreviousValue) {
+        qputenv(variableName, previousValue);
+    } else {
+        qunsetenv(variableName);
+    }
+
+    const QString expectedRoot = QDir::cleanPath(hostDataRoot.path());
+    QVERIFY(QDir::cleanPath(paths.certFile).startsWith(expectedRoot + QLatin1Char('/')));
+    QVERIFY(QDir::cleanPath(paths.keyFile).startsWith(expectedRoot + QLatin1Char('/')));
+    QVERIFY(QDir::cleanPath(paths.dbFile).startsWith(expectedRoot + QLatin1Char('/')));
+    QVERIFY(paths.certFile != QFileInfo(legacyCert).absoluteFilePath());
+    QVERIFY(paths.dbFile != QFileInfo(legacyDatabase).absoluteFilePath());
 }
 
 QTEST_MAIN(HostPathResolverTests)

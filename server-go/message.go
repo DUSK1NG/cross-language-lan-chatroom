@@ -11,6 +11,7 @@ import (
 
 const maxUsernameSize = 32
 const maxRoomNameSize = 32
+const maxCommandIDSize = 64
 const sha256HexSize = 64
 
 // OnlineUser 是 users_response 中的结构化在线成员信息。
@@ -71,11 +72,17 @@ type Message struct {
 	WelcomeDigest string `json:"welcome_digest,omitempty"`
 	// Attachment fields carry only server-visible transfer metadata. Plaintext
 	// names and local paths belong exclusively in the encrypted manifest.
-	AttachmentID string `json:"attachment_id,omitempty"`
-	UploadID     string `json:"upload_id,omitempty"`
-	LogicalSize  int64  `json:"logical_size,omitempty"`
-	ChunkSize    int64  `json:"chunk_size,omitempty"`
-	ExpiresAt    string `json:"expires_at,omitempty"`
+	AttachmentID    string  `json:"attachment_id,omitempty"`
+	UploadID        string  `json:"upload_id,omitempty"`
+	LogicalSize     int64   `json:"logical_size,omitempty"`
+	ChunkSize       int64   `json:"chunk_size,omitempty"`
+	ExpiresAt       string  `json:"expires_at,omitempty"`
+	ChunkIndex      int64   `json:"chunk_index,omitempty"`
+	Ciphertext      string  `json:"ciphertext,omitempty"`
+	CipherSHA256    string  `json:"cipher_sha256,omitempty"`
+	WholeSha256     string  `json:"whole_sha256,omitempty"`
+	ReceivedIndexes []int64 `json:"received_indexes,omitempty"`
+	ReceivedBitmap  string  `json:"received_bitmap,omitempty"`
 	// Password is retained only so old database/test fixtures still compile;
 	// password authentication is removed and this field never crosses the wire.
 	Password string `json:"-"`
@@ -105,6 +112,20 @@ func validateOpaqueMLS(label, value string) error {
 	}
 	if _, err := base64.StdEncoding.DecodeString(value); err != nil {
 		return fmt.Errorf("%s must be base64: %w", label, err)
+	}
+	return nil
+}
+
+func validateOpaqueAttachmentChunk(value string) error {
+	if value == "" {
+		return fmt.Errorf("attachment ciphertext must not be empty")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return fmt.Errorf("attachment ciphertext must be base64: %w", err)
+	}
+	if int64(len(decoded)) > maxAttachmentCipherChunkBytes {
+		return fmt.Errorf("attachment ciphertext is too large")
 	}
 	return nil
 }
@@ -171,8 +192,11 @@ func receiveMessage(reader io.Reader) (Message, error) {
 	if message.Type == "" {
 		return Message{}, fmt.Errorf("message type is required")
 	}
-	if message.Type == "attachment.init" {
-		if err := validateAttachmentInitFrame(payload); err != nil {
+	if len(message.CommandID) > maxCommandIDSize {
+		return Message{}, fmt.Errorf("command id is too large")
+	}
+	if message.Type == "attachment.init" || message.Type == "attachment.chunk" || message.Type == "attachment.resume" || message.Type == "attachment.commit" || message.Type == "attachment.download" {
+		if err := validateAttachmentCommandFrame(message.Type, payload); err != nil {
 			return Message{}, err
 		}
 	}
@@ -182,15 +206,31 @@ func receiveMessage(reader io.Reader) (Message, error) {
 // attachment.init is an inbound client command. Its narrow wire schema makes
 // it impossible to smuggle a client file path, display name, or server-issued
 // identifier into the server's attachment metadata.
-func validateAttachmentInitFrame(payload []byte) error {
+func validateAttachmentCommandFrame(messageType string, payload []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &fields); err != nil {
 		return fmt.Errorf("decode attachment init fields: %w", err)
 	}
+	allowed := map[string]bool{"type": true, "command_id": true}
+	switch messageType {
+	case "attachment.init":
+		allowed["room"] = true
+		allowed["logical_size"] = true
+	case "attachment.chunk":
+		allowed["upload_id"] = true
+		allowed["chunk_index"] = true
+		allowed["ciphertext"] = true
+		allowed["cipher_sha256"] = true
+	case "attachment.resume":
+		allowed["upload_id"] = true
+	case "attachment.commit":
+		allowed["upload_id"] = true
+	case "attachment.download":
+		allowed["attachment_id"] = true
+		allowed["chunk_index"] = true
+	}
 	for field := range fields {
-		switch field {
-		case "type", "command_id", "room", "logical_size":
-		default:
+		if !allowed[field] {
 			return fmt.Errorf("attachment init contains unsupported field %q", field)
 		}
 	}
@@ -200,6 +240,9 @@ func validateAttachmentInitFrame(payload []byte) error {
 func validateMessage(message Message) error {
 	if message.Type == "" {
 		return fmt.Errorf("message type is required")
+	}
+	if len(message.CommandID) > maxCommandIDSize {
+		return fmt.Errorf("command id is too large")
 	}
 
 	switch message.Type {
@@ -367,6 +410,32 @@ func validateMessage(message Message) error {
 		}
 		if message.Content != "" {
 			return fmt.Errorf("attachment init must not include text content")
+		}
+		return nil
+	case "attachment.chunk":
+		if message.UploadID == "" || message.ChunkIndex < 0 {
+			return fmt.Errorf("attachment chunk upload id and non-negative index are required")
+		}
+		if err := validateOpaqueAttachmentChunk(message.Ciphertext); err != nil {
+			return err
+		}
+		if len(message.CipherSHA256) != sha256HexSize {
+			return fmt.Errorf("attachment chunk hash is invalid")
+		}
+		return nil
+	case "attachment.resume":
+		if message.UploadID == "" {
+			return fmt.Errorf("attachment resume upload id is required")
+		}
+		return nil
+	case "attachment.commit":
+		if message.UploadID == "" {
+			return fmt.Errorf("attachment commit upload id is required")
+		}
+		return nil
+	case "attachment.download":
+		if message.AttachmentID == "" || message.ChunkIndex < 0 {
+			return fmt.Errorf("attachment download id and non-negative index are required")
 		}
 		return nil
 	case "users_request", "quit":

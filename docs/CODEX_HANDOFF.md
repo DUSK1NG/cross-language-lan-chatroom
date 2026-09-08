@@ -10,7 +10,7 @@
 - 最新正式发布：[LAN Chat v1.2.0](https://github.com/DUSK1NG/cross-language-lan-chatroom/releases/tag/v1.2.0)。
 - 用户入口：React + TypeScript + Vite + Qt 6 WebEngine + QWebChannel + C++20 的现代客户端。
 - 服务端：Go TLS/TCP + SQLite，默认 TCP 8888；局域网发现使用 UDP 38888。
-- 旧 CLI 不是用户入口；旧 QML 仅用于诊断回退，可用 lan-chat-gui.exe --legacy-qml 显式进入。
+- 旧 CLI 不是用户入口；旧 QML / Flutter 界面已移除，仅保留 React + Qt WebEngine 界面。
 
 ### v1.2.0 发布资产
 
@@ -78,7 +78,7 @@ React UI
 | 历史症状/错误 | 根因或边界 | 以后正确做法 |
 | --- | --- | --- |
 | 启动后出现旧 QML 页面、旧深色 UI 或测试性能面板 | 我曾让用户从不同的 build 目录、诊断构建或旧 EXE 启动，导致“源码已更新”和“正在运行的程序”不一致。 | 普通用户只启动安装/ZIP 根目录的 `LANChat.exe`；源码调试只使用 `scripts\start-gui.ps1`。每次排查先记录 EXE 完整路径、提交号、构建时间和 GUI 哈希。 |
-| React 修改后发布包仍显示旧页面 | Vite 会生成新哈希资源；若 `client-cpp\gui\resources\frontend.qrc` 仍引用旧文件，WebEngine 会加载旧前端。 | 每次前端生产构建后检查 qrc 条目，重新构建 C++，再重新打包；不要只复制前端目录或 GUI EXE。 |
+| React 修改后发布包仍显示旧页面 | Vite 会生成新哈希资源；若 `out\modern-msvc-x64\frontend.qrc` 仍引用旧文件，WebEngine 会加载旧前端。 | 由 CMake 根据 frontend.qrc.in 自动生成 qrc；前端生产构建后重新构建 C++，再重新打包；不要只复制前端目录或 GUI EXE。 |
 | 双击单独的 GUI EXE 报缺 Qt DLL，例如 `Qt6QuickControls2d.dll` | 我曾提供过裸 EXE 测试路径；Qt WebEngine 依赖 DLL、plugins、`QtWebEngineProcess.exe`、resources 和 translations。 | 交付只能用 `package-unified-release.ps1` 或安装器；不得把 `lan-chat-gui.exe` 单独发给用户。 |
 | 关闭 GUI 后出现 MSVC “stack around variable bridge/lock was corrupted” 或运行时访问异常 | 发生在过期/调试构建及进程未彻底退出的迭代阶段，不能根据弹窗直接归因于网络逻辑。 | 先关闭所有 LAN Chat/QtWebEngineProcess，再重新构建；保留崩溃时间、构建目录和日志。没有可重复最小复现前，不得声称已找到根因。 |
 | PowerShell 启动脚本报 `Wait` 参数转换错误 | 我曾把开关参数按字符串/布尔值错误传递给 PowerShell 脚本。 | PowerShell `[switch]` 参数只写 `-Wait`，或明确写 `-Wait:$true/$false`；不要传递字符串。修改启动脚本后先复制实际命令在新 PowerShell 验证。 |
@@ -131,7 +131,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.
 
 - 发布脚本输出：release\LANChat-Windows-x64.zip 和 release\LANChat-Setup-x64.exe。
 - 若缺少 Node、Qt 或 OpenSSL，先运行 scripts\bootstrap-github.ps1；不要把依赖缺失误判为产品故障。
-- Vite 产物变更后必须确认 client-cpp\gui\resources\frontend.qrc 引用了新哈希资源，否则发布版会加载旧前端。
+- Vite 产物变更后必须确认 out\modern-msvc-x64\frontend.qrc 引用了新哈希资源，否则发布版会加载旧前端。
 - 打包后按 [发布基线与恢复验收清单](release-checklist.md) 复核 GUI 哈希和 ZIP 内敏感文件。
 
 ## 9. 关键文件索引

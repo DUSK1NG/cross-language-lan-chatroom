@@ -1,4 +1,5 @@
 #include "crypto/mls_client.hpp"
+#include "attachments/attachment_mls_group_id.hpp"
 
 #include <QtTest>
 
@@ -13,6 +14,7 @@ private slots:
   void rejectsTamperedHandshake();
   void handlesRemoteHandshakeCommit();
   void createsRemovalCommit();
+  void createsUniqueAttachmentGroupIds();
 };
 
 void MlsClientTests::createsKeyPackageAndRoundTripsApplicationData()
@@ -91,6 +93,18 @@ void MlsClientTests::createsRemovalCommit()
   alice.removeMember({ 5, 6, 7, 8 });
   const auto removalCommit = alice.commit();
   QVERIFY(!removalCommit.handshake.empty());
+}
+
+void MlsClientTests::createsUniqueAttachmentGroupIds()
+{
+  const auto first = attachments::attachment_mls_group_id(QStringLiteral("lobby"), QStringLiteral("upload-a"));
+  const auto same = attachments::attachment_mls_group_id(QStringLiteral("lobby"), QStringLiteral("upload-a"));
+  const auto second = attachments::attachment_mls_group_id(QStringLiteral("lobby"), QStringLiteral("upload-b"));
+
+  QCOMPARE(first, same);
+  QVERIFY(first.startsWith(QStringLiteral("lan-chat-attachment/")));
+  QVERIFY(first != second);
+  QVERIFY(first.size() <= 128);
 }
 
 #include "mls_client_tests.moc"

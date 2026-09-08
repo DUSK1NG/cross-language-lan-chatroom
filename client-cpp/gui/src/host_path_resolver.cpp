@@ -41,6 +41,18 @@ QString protectedHostDataRoot() {
 
 HostPathResolver::HostPaths pathsForRoot(const QString& root) {
     const HostPathResolver::HostPaths legacy = legacyPathsForRoot(root);
+    // A test root is an explicit isolation boundary. It must win even when a
+    // developer checkout happens to contain a legacy certificate or database.
+    const QString testDataRoot = qEnvironmentVariable("LAN_CHAT_TEST_HOST_DATA_ROOT").trimmed();
+    if (!testDataRoot.isEmpty()) {
+        const QDir dataDirectory(QDir::cleanPath(testDataRoot));
+        return {
+            legacy.serverExe,
+            QDir::cleanPath(dataDirectory.filePath(QStringLiteral("certs/server-lan.crt"))),
+            QDir::cleanPath(dataDirectory.filePath(QStringLiteral("certs/server-lan.key"))),
+            QDir::cleanPath(dataDirectory.filePath(QStringLiteral("chat.db")))
+        };
+    }
     // Keep an existing room identity in place for compatibility with earlier
     // releases. New identities are deliberately kept under the current
     // Windows user's AppLocalData directory instead of a shared install path.

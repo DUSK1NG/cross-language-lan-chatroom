@@ -5,6 +5,7 @@ server-go/.gocache*/
 
 # Stage build outputs
 server-go/chat-server.exe
+server-go/server-go.exe
 server-go/*.exe~
 client-cpp/chat-client.exe
 client-cpp/protocol-tests.exe
@@ -25,11 +26,30 @@ server-go/chat-server-current.exe
 *.test
 coverage.out
 server-go/chat.db
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+local-test/
 server-go/*.log
+*.log
+*.log.*
 server-go/certs/
 certs/
 *.key
 *.pem
+*.crt
+*.cer
+*.der
+*.pfx
+*.p12
+test-results/
+test-output/
+coverage/
+*.tap
+*.trx
+*.junit
 release/
 out/
 
@@ -37,7 +57,6 @@ out/
 .npm-cache/
 frontend/node_modules/
 frontend/dist/
-winui_client/artifacts/
 
 # Local diagnostics and image-generation scratch files
 /build-*.log

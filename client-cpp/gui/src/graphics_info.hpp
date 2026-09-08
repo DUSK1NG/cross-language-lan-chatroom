@@ -1,10 +1,8 @@
 #pragma once
 
 #include <QObject>
-#include <QPointer>
 #include <QString>
 
-class QQuickWindow;
 
 class GraphicsInfo final : public QObject {
     Q_OBJECT
@@ -30,14 +28,11 @@ public:
     QString resolution() const { return resolution_; }
 
     Q_INVOKABLE void refresh();
-    void attachWindow(QQuickWindow* window);
-    void detachWindow();
 
 signals:
     void changed();
 
 private:
-    QPointer<QQuickWindow> window_;
     QString graphicsApi_ = QStringLiteral("Unknown");
     QString renderer_ = QStringLiteral("Unknown");
     QString vendor_ = QStringLiteral("Unknown");

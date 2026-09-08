@@ -235,73 +235,17 @@ Test-NetConnection 192.168.1.100 -Port 8888
 
 发布前应同时参考本地检查和最新一次 GitHub Actions 结果。
 
-## 10. Qt Quick 图形与动画诊断
+## 10. WebEngine 界面与性能验证
 
-Phase 1 新增 `GraphicsInfo` 模块，默认 QML GUI 的“设置 → 性能 / 图形信息”会显示
-Qt Quick 实际使用的渲染 API、硬件/软件渲染状态、屏幕分辨率、刷新率和 DPI。渲染器与厂商名称
-在 Qt 公共跨平台接口不可用时显示 `Unknown`，不会依赖 Qt 私有 API 或显卡厂商 API。
+当前界面为 React + Qt WebEngine。旧 QML Profiler、frame overlay 和 C++ 侧栏过滤模型已移除。
 
 ```powershell
-$env:PATH = "C:\Qt\6.11.2\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;C:\msys64\mingw64\bin;$env:PATH"
-cmake --build .\client-cpp\gui\build-bridge --parallel 4
-ctest --test-dir .\client-cpp\gui\build-bridge -R "^graphics-info-tests$" --output-on-failure
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
+pnpm --dir frontend exec vitest run
 ```
 
-需要观察 Scene Graph 初始化时，可在启动 GUI 前开启 Qt 的诊断日志：
-
-```powershell
-$env:QSG_INFO = "1"
-$env:QT_LOGGING_RULES = "qt.scenegraph.general=true;qt.rhi.*=true"
-# 保持正常 UI 颜色；QSG_VISUALIZE=batches/overdraw 等只用于伪彩色诊断
-$env:QSG_VISUALIZE = $null
-& .\client-cpp\gui\build-bridge\lan-chat-gui.exe
-```
-
-必须在设置 PATH 的同一个 PowerShell 窗口中启动 GUI；直接双击或单独运行 exe 可能因缺少 Qt/MinGW/OpenSSL DLL 而立即退出（通常退出码为 `0xC0000135`）。
-
-可选的 QML Profiler 应在独立的开发/诊断运行中使用，不应默认打开：
-
-```powershell
-$env:QML_DISABLE_DISK_CACHE = "1"
-qmlprofiler.exe --attach <GUI进程PID>
-```
-
-诊断结论应区分“渲染 API/软件回退”与“GUI 线程业务更新过多”；这两个问题需要分别处理。
-
-Phase 8 提供 Debug-only frame overlay。默认构建关闭；需要采样时显式打开：
-
-```powershell
-$env:PATH = "C:\Qt\6.11.2\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;C:\msys64\mingw64\bin;$env:PATH"
-cmake -S .\client-cpp\gui -B .\client-cpp\gui\build-bridge -DLAN_CHAT_ENABLE_PERF_OVERLAY=ON
-cmake --build .\client-cpp\gui\build-bridge --parallel 4
-
-$env:QSG_INFO = "1"
-$env:QT_LOGGING_RULES = "qt.scenegraph.general=true;qt.rhi.*=true"
-& .\client-cpp\gui\build-bridge\lan-chat-gui.exe
-```
-
-右上角 Debug overlay 显示 FPS、样本数、P95/P99 和最大帧间隔。它统计 `frameSwapped` 回调在 GUI 事件队列中的帧节奏，适合发现 UI 线程卡顿；GPU 渲染耗时仍需结合 `QSG_INFO`、`QSG_VISUALIZE=batches` 或 QML Profiler 判断。关闭窗口后可恢复普通启动，不需要清理配置。
-
-Phase 8 收尾与 Phase 9 性能等级验证：
-
-```powershell
-cmake -S .\client-cpp\gui -B .\client-cpp\gui\build-webengine-msvc-ninja2 `
-  -DLAN_CHAT_ENABLE_WEB_UI=ON `
-  -DLAN_CHAT_ENABLE_PERF_OVERLAY=OFF
-cmake --build .\client-cpp\gui\build-webengine-msvc-ninja2 `
-  --target lan-chat-gui performance-profile-tests --parallel 4
-ctest --test-dir .\client-cpp\gui\build-webengine-msvc-ninja2 `
-  -R "performance-sampler-tests|performance-profile-tests" --output-on-failure
-```
-
-`performance-profile-tests` 验证四种等级、Automatic 的渲染上下文选择和慢帧降级；`performance-sampler-tests` 只验证诊断采样器，不代表发布包会包含性能面板。
-
-采样器单元测试和完整 GUI 回归：
-
-```powershell
-$env:PATH = "C:\Qt\6.11.2\mingw_64\bin;C:\msys64\mingw64\bin;$env:PATH"
-ctest --test-dir .\client-cpp\gui\build-bridge -R "^(performance-sampler-tests|bridge-protocol-tests|graphics-info-tests|chat-model-tests|conversation-filter-tests|chat-bridge-tests)$" --timeout 30 --output-on-failure
-```
+`performance-profile-tests` 验证性能等级和慢帧降级，React 的帧时间通过 QWebChannel 上报。
+`graphics-info-tests` 验证安全默认值与屏幕信息；当前 GPU API、厂商和渲染器信息保持 `Unknown`。
 
 ## 11. 当前限制与诚实说明
 
@@ -320,7 +264,3 @@ ctest --test-dir .\client-cpp\gui\build-bridge -R "^(performance-sampler-tests|b
 如果 CTest 报 0xc0000135，说明测试进程找不到 libssl-3-x64.dll 或 libcrypto-3-x64.dll；将包含这些 DLL 的 OpenSSL bin 目录加入当前 PowerShell 的 PATH 后重新执行。TLS 聊天联调时，先启动已配置证书和私钥的 Go Server，再用 --ca-file 指定签发服务端证书的 CA。
 
 TLS 当前已完成 Go Server 与 C++ Client 的端到端 localhost 联调；自签名证书必须通过 `--ca-file` 显式指定，不提供关闭证书验证的模式。
-
-## Flutter 双客户端人工验收
-
-Flutter Windows 客户端的真实连接只按 [人工验收清单](../flutter_client/test_driver/real_connection_smoke.md) 由操作员执行。操作员仅通过可信渠道提供服务器地址、端口和公共 CA 文件路径；本仓库的自动化验证不连接服务端。验收记录不得包含或复制私钥、证书内容、数据库、聊天或日志。

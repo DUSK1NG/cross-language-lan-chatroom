@@ -58,12 +58,15 @@ func buildLanDiscoveryAnnouncement(certificatePEM []byte, hostName string, port 
 // broadcastAddressForIPv4 returns the directed broadcast address for a usable
 // IPv4 interface. Virtual-LAN addresses (such as Radmin's 26.0.0.0/8) are
 // intentionally treated the same as private LAN addresses. Loopback,
-// link-local, unspecified, and host-route interfaces cannot discover peers.
+// link-local, unspecified, benchmark/test-network (198.18.0.0/15), and
+// host-route interfaces cannot discover peers. The benchmark range is used by
+// local proxy/virtual adapters such as FlClash and is not a peer LAN.
 func broadcastAddressForIPv4(ip net.IP, mask net.IPMask) (net.IP, bool) {
 	ipv4 := ip.To4()
 	ones, bits := mask.Size()
 	if ipv4 == nil || bits != net.IPv4len*8 || ones < 0 || ones >= net.IPv4len*8 ||
-		ipv4.IsLoopback() || ipv4.IsLinkLocalUnicast() || ipv4.IsUnspecified() {
+		ipv4.IsLoopback() || ipv4.IsLinkLocalUnicast() || ipv4.IsUnspecified() ||
+		isBenchmarkNetworkIPv4(ipv4) {
 		return nil, false
 	}
 	broadcast := make(net.IP, net.IPv4len)
@@ -73,9 +76,14 @@ func broadcastAddressForIPv4(ip net.IP, mask net.IPMask) (net.IP, bool) {
 	return broadcast, !broadcast.IsUnspecified()
 }
 
+func isBenchmarkNetworkIPv4(ip net.IP) bool {
+	ipv4 := ip.To4()
+	return ipv4 != nil && ipv4[0] == 198 && ipv4[1] >= 18 && ipv4[1] <= 19
+}
+
 func localBroadcastAddresses() []net.IP {
-	addresses := []net.IP{net.IPv4bcast}
-	seen := map[string]bool{net.IPv4bcast.String(): true}
+	addresses := make([]net.IP, 0)
+	seen := make(map[string]bool)
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		return addresses

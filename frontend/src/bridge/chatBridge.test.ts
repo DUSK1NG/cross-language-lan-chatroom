@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createQtBridge, createWebChannelBridge } from './chatBridge';
-import type { AttachmentEvent, BridgeState } from './types';
+import type { BridgeState } from './types';
 
 const state: BridgeState = {
   schemaVersion: 1,

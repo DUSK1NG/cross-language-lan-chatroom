@@ -1,5 +1,6 @@
 #include "message.hpp"
 #include "protocol.hpp"
+#include "json.hpp"
 
 #include <winsock2.h>
 
@@ -620,6 +621,83 @@ bool test_mls_proposal_message_round_trip() {
         expect_true(case_name, received.epoch == sent.epoch, "epoch mismatch");
 }
 
+bool test_chat_crypto_envelope_round_trip() {
+    const std::string case_name = "chat crypto envelope round trip";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
+        return false;
+    }
+
+    message::Message sent{"chat"};
+    sent.room = "lobby";
+    sent.crypto = R"({"v":1,"alg":"mls-v1","group_id":"room-group","epoch":7,"ciphertext":"b3BhcXVl"})";
+    if (!expect_true(case_name, message::send_message(sockets.client, sent),
+                     "message::send_message should accept an object crypto envelope")) {
+        return false;
+    }
+    message::Message received;
+    if (!expect_true(case_name, message::receive_message(sockets.server, received),
+                     "message::receive_message should preserve an object crypto envelope")) {
+        return false;
+    }
+    return expect_equal(case_name,
+                        nlohmann::json::parse(received.crypto).dump(),
+                        nlohmann::json::parse(sent.crypto).dump(),
+                        "crypto") &&
+        expect_equal(case_name, received.room, sent.room, "room");
+}
+
+bool test_attachment_chunk_message_round_trip() {
+    const std::string case_name = "attachment chunk message round trip";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) {
+        return false;
+    }
+    message::Message sent{"attachment.chunk"};
+    sent.upload_id = "1d495ce0-2f92-41c5-bc55-2be48f7bbd53";
+    sent.command_id = "chunk-1";
+    sent.chunk_index = 0;
+    sent.ciphertext = "Y2lwaGVydGV4dA==";
+    sent.cipher_sha256 = "8e3dc37d0d4cda5d604e92d5c38a8da8a301e8c7bb32a6f190d8adbe58db91c6";
+    if (!expect_true(case_name, message::send_message(sockets.client, sent),
+                     "message::send_message should succeed")) {
+        return false;
+    }
+    message::Message received;
+    if (!expect_true(case_name, message::receive_message(sockets.server, received),
+                     "message::receive_message should succeed")) {
+        return false;
+    }
+    return expect_equal(case_name, received.type, sent.type, "type") &&
+        expect_equal(case_name, received.upload_id, sent.upload_id, "upload_id") &&
+        expect_equal(case_name, received.ciphertext, sent.ciphertext, "ciphertext") &&
+        expect_equal(case_name, received.cipher_sha256, sent.cipher_sha256, "cipher_sha256") &&
+        expect_true(case_name, received.chunk_index == sent.chunk_index, "chunk index mismatch");
+}
+
+bool test_maximum_attachment_chunk_message_fits_frame() {
+    const std::string case_name = "maximum attachment chunk message fits frame";
+    SocketPair sockets = create_loopback_pair(case_name);
+    if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) return false;
+
+    message::Message sent{"attachment.chunk"};
+    sent.command_id = std::string(64, 'x');
+    sent.upload_id = "00000000-0000-0000-0000-000000000000";
+    sent.chunk_index = 10485759;
+    sent.ciphertext = std::string(64256, 'A');
+    sent.cipher_sha256 = std::string(64, '0');
+    message::Message received;
+    bool received_ok = false;
+    std::thread reader([&] { received_ok = message::receive_message(sockets.server, received); });
+    const bool sent_ok = message::send_message(sockets.client, sent);
+    if (!sent_ok) closesocket(sockets.client);
+    reader.join();
+    if (!expect_true(case_name, sent_ok, "maximum attachment chunk should fit the frame")) return false;
+    if (!expect_true(case_name, received_ok, "maximum attachment chunk should round-trip")) return false;
+    return expect_equal(case_name, received.ciphertext.size(), sent.ciphertext.size(),
+                        "ciphertext size");
+}
+
 bool test_room_list_response_round_trip() {
     const std::string case_name = "room list response round trip";
     SocketPair sockets = create_loopback_pair(case_name);
@@ -667,6 +745,40 @@ bool test_receive_message_rejects_numeric_target_user_code() {
         "message::receive_message should reject numeric target_user_code");
 }
 
+bool test_attachment_resume_bitmap() {
+    const std::string case_name = "attachment resume bitmap";
+    const auto decode = [&](const nlohmann::json& object, message::Message& result) {
+        SocketPair sockets = create_loopback_pair(case_name);
+        if (sockets.client == INVALID_SOCKET || sockets.server == INVALID_SOCKET) return false;
+        if (!protocol::send_frame(sockets.client, object.dump())) return false;
+        return message::receive_message(sockets.server, result);
+    };
+    message::Message received;
+    if (!expect_true(case_name, decode({{"type", "attachment.resume"}, {"received_bitmap", "8102"}}, received),
+                     "sparse bitmap must decode") ||
+        !expect_true(case_name, received.received_indexes == std::vector<std::int64_t>{0, 7, 9},
+                     "bitmap must use LSB-first bits")) return false;
+    std::string full(27888, 'f');
+    full.replace(full.size() - 2, 2, "7f"); // 111551 chunks: 7 bits in final byte.
+    if (!expect_true(case_name, decode({{"type", "attachment.resume"}, {"received_bitmap", full}}, received),
+                     "5 GiB resume must fit the frame") ||
+        !expect_true(case_name, received.received_indexes.size() == 111551 &&
+                     received.received_indexes.front() == 0 && received.received_indexes.back() == 111550,
+                     "full bitmap must preserve all indexes")) return false;
+    for (const auto& invalid : std::vector<nlohmann::json>{
+             {{"received_bitmap", "f"}}, {{"received_bitmap", "zz"}}, {{"received_bitmap", 42}},
+             {{"received_bitmap", "01"}, {"received_indexes", {0}}},
+             {{"received_bitmap", std::string(27890, '0')}},
+             {{"received_bitmap", std::string(27888, 'f')}}}) {
+        auto object = invalid;
+        object["type"] = "attachment.resume";
+        if (!expect_false(case_name, decode(object, received), "invalid bitmap must be rejected")) return false;
+    }
+    return expect_true(case_name, decode({{"type", "attachment.resume"}, {"received_indexes", {0, 7, 9}}}, received) &&
+                       received.received_indexes == std::vector<std::int64_t>{0, 7, 9},
+                       "legacy received_indexes must still decode");
+}
+
 bool test_three_frames_preserve_order() {
     const std::string case_name = "three frames preserve order";
     SocketPair sockets = create_loopback_pair(case_name);
@@ -710,6 +822,7 @@ int main() {
     }
 
     const std::vector<std::pair<std::string, std::function<bool()>>> tests = {
+        {"attachment resume bitmap fits frame and rejects invalid input", test_attachment_resume_bitmap},
         {"protocol::send_frame(socket, \"\") returns false",
          test_send_frame_rejects_empty_payload},
         {"protocol::send_frame(socket, oversized) returns false",
@@ -740,6 +853,9 @@ int main() {
         {"room message round-trip preserves fields", test_room_message_round_trip},
         {"MLS control message round-trip preserves fields", test_mls_control_message_round_trip},
         {"MLS proposal message round-trip preserves fields", test_mls_proposal_message_round_trip},
+        {"chat crypto envelope round-trip preserves fields", test_chat_crypto_envelope_round_trip},
+        {"attachment chunk message round-trip preserves fields", test_attachment_chunk_message_round_trip},
+        {"maximum attachment chunk message fits frame", test_maximum_attachment_chunk_message_fits_frame},
         {"room list response round-trip preserves fields", test_room_list_response_round_trip},
         {"three valid frames are received in send order", test_three_frames_preserve_order},
     };

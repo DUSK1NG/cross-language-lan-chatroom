@@ -29,8 +29,8 @@ bool send_all(SOCKET socket_handle, const char* data, std::size_t length) {
     std::size_t total_sent = 0;
     while (total_sent < length) {
         const std::size_t remaining = length - total_sent;
-        const int chunk_size = static_cast<int>(std::min(
-            remaining, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        const int chunk_size = static_cast<int>((std::min)(
+            remaining, static_cast<std::size_t>((std::numeric_limits<int>::max)())));
         const int sent = send(socket_handle, data + total_sent, chunk_size, 0);
         if (sent == SOCKET_ERROR || sent == 0) {
             set_error("send failed: WSA error " + std::to_string(WSAGetLastError()));
@@ -45,8 +45,8 @@ bool recv_all(SOCKET socket_handle, char* data, std::size_t length) {
     std::size_t total_received = 0;
     while (total_received < length) {
         const std::size_t remaining = length - total_received;
-        const int chunk_size = static_cast<int>(std::min(
-            remaining, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        const int chunk_size = static_cast<int>((std::min)(
+            remaining, static_cast<std::size_t>((std::numeric_limits<int>::max)())));
         const int received = recv(socket_handle, data + total_received, chunk_size, 0);
         if (received == SOCKET_ERROR) {
             set_error("recv failed: WSA error " + std::to_string(WSAGetLastError()));
@@ -102,8 +102,8 @@ bool send_all(SSL* ssl_handle, const char* data, std::size_t length) {
     std::size_t total_sent = 0;
     while (total_sent < length) {
         const std::size_t remaining = length - total_sent;
-        const int chunk_size = static_cast<int>(std::min(
-            remaining, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        const int chunk_size = static_cast<int>((std::min)(
+            remaining, static_cast<std::size_t>((std::numeric_limits<int>::max)())));
         const int sent = SSL_write(ssl_handle, data + total_sent, chunk_size);
         if (sent <= 0) {
             set_error(ssl_error("SSL_write failed"));
@@ -118,8 +118,8 @@ bool recv_all(SSL* ssl_handle, char* data, std::size_t length) {
     std::size_t total_received = 0;
     while (total_received < length) {
         const std::size_t remaining = length - total_received;
-        const int chunk_size = static_cast<int>(std::min(
-            remaining, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        const int chunk_size = static_cast<int>((std::min)(
+            remaining, static_cast<std::size_t>((std::numeric_limits<int>::max)())));
         const int received = SSL_read(ssl_handle, data + total_received, chunk_size);
         if (received <= 0) {
             const int ssl_result = SSL_get_error(ssl_handle, received);

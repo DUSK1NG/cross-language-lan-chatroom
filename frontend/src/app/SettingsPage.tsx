@@ -4,6 +4,8 @@ import { saveAppSettings, useAppSettings } from '../state/appSettings';
 
 type SettingsPageProps = { bridge: ChatBridgeClient; state: BridgeState; onBack(): void };
 
+const performanceDiagnosticsEnabled = import.meta.env.VITE_ENABLE_PERFORMANCE_DIAGNOSTICS !== 'false';
+
 export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
   const settings = useAppSettings();
   const update = (key: keyof typeof settings, value: boolean) => saveAppSettings({ ...settings, [key]: value });
@@ -48,7 +50,7 @@ export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
           <p className="settings-note">仅记录时间、服务器端点、重连次数和 TLS/审批结果；不记录消息内容、证书或私钥。</p>
           {diagnostics.enabled && <div className="settings-row"><span>日志目录</span><span className="settings-value">{diagnostics.directory}</span></div>}
         </section>
-        <section className="settings-group">
+        {performanceDiagnosticsEnabled && <section className="settings-group">
           <h2>性能 / 图形信息</h2>
           {performance && graphics ? <>
             <label className="settings-row settings-select-row">
@@ -67,7 +69,7 @@ export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
             <div className="settings-row"><span>观测帧率</span><span className="settings-value">{performance.observedFrameCount > 0 ? `${performance.observedFps.toFixed(1)} FPS` : '等待样本'}</span></div>
             <div className="settings-row"><span>P95 / 最大帧耗时</span><span className="settings-value">{performance.observedFrameCount > 0 ? `${performance.observedP95FrameMs.toFixed(2)} / ${performance.observedMaxFrameMs.toFixed(2)} ms` : '--'}</span></div>
           </> : <p className="settings-note">性能信息由 Qt bridge 提供，当前连接尚未发布完整运行状态。</p>}
-        </section>
+        </section>}
       </section>
     </main>
   );

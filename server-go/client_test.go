@@ -1,13 +1,100 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"reflect"
 	"testing"
 	"time"
 )
+
+func TestAttachmentBurstDoesNotConsumeChatRateLimit(t *testing.T) {
+	store, _ := newTestAuthStore(t)
+	hub := NewHub()
+	hub.OfflineStore = store
+	go hub.Run()
+	server, client := net.Pipe()
+	defer client.Close()
+	go handleConnection(server, hub)
+	loginAndDrainJoinMessage(t, client, "Alice", "Alice01")
+	receive := func() Message {
+		t.Helper()
+		_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
+		payload, err := readFrame(client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response Message
+		if err := json.Unmarshal(payload, &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	const chunks = 64
+	if err := sendMessage(client, Message{Type: "attachment.init", Room: "lobby", LogicalSize: chunks * attachmentChunkSize, CommandID: "init"}); err != nil {
+		t.Fatal(err)
+	}
+	init := receive()
+	if init.Type != "attachment.init" {
+		t.Fatalf("init response: %+v", init)
+	}
+	ciphertext := bytes.Repeat([]byte{'x'}, int(attachmentChunkSize+attachmentCryptoTagSize))
+	for i := int64(0); i < chunks; i++ {
+		if err := sendMessage(client, Message{Type: "attachment.chunk", UploadID: init.UploadID, ChunkIndex: i,
+			Ciphertext: base64.StdEncoding.EncodeToString(ciphertext), CipherSHA256: chunkHash(ciphertext), CommandID: "chunk"}); err != nil {
+			t.Fatal(err)
+		}
+		ack := receive()
+		if ack.Type != "attachment.chunk" || ack.ChunkIndex != i {
+			t.Fatalf("upload stalled at chunk %d: %+v", i, ack)
+		}
+	}
+	if err := sendMessage(client, Message{Type: "chat", Content: "chat still available"}); err != nil {
+		t.Fatal(err)
+	}
+	if response := receive(); response.Type != "chat" {
+		t.Fatalf("attachment consumed chat allowance: %+v", response)
+	}
+	if err := sendMessage(client, Message{Type: "attachment.commit", UploadID: init.UploadID, CommandID: "commit"}); err != nil {
+		t.Fatal(err)
+	}
+	committed := receive()
+	if committed.Type != "attachment.commit" {
+		t.Fatalf("commit response: %+v", committed)
+	}
+	for i := int64(0); i < chunks; i++ {
+		if err := sendMessage(client, Message{Type: "attachment.download", AttachmentID: committed.AttachmentID, ChunkIndex: i}); err != nil {
+			t.Fatal(err)
+		}
+		response := receive()
+		if response.Type != "attachment.download" || response.ChunkIndex != i || response.Ciphertext != base64.StdEncoding.EncodeToString(ciphertext) {
+			t.Fatalf("download stalled or changed bytes at chunk %d: type=%s content=%s", i, response.Type, response.Content)
+		}
+	}
+	sentMessageIDs := make(map[string]bool)
+	for i := 0; i < 64; i++ {
+		messageID := fmt.Sprintf("chat-rate-limit-%d", i)
+		sentMessageIDs[messageID] = true
+		if err := sendMessage(client, Message{Type: "chat", MessageID: messageID, Content: "bounded chat", CommandID: "chat-limit"}); err != nil {
+			t.Fatal(err)
+		}
+		if response := receive(); response.Type == "error" {
+			if response.CommandID != "chat-limit" {
+				t.Fatalf("rate-limit error lost command correlation: %+v", response)
+			}
+			if !sentMessageIDs[response.MessageID] {
+				t.Fatalf("rate-limit error lost message correlation: %+v", response)
+			}
+			return
+		}
+	}
+	t.Fatal("chat flood limit was disabled")
+}
 
 func TestHandleConnectionStopsAfterLoginEOF(t *testing.T) {
 	hub := NewHub()

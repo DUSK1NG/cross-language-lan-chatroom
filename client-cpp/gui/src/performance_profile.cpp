@@ -1,6 +1,5 @@
 #include "performance_profile.hpp"
 
-#include <QQuickWindow>
 #include <QSettings>
 
 #include <algorithm>
@@ -62,30 +61,6 @@ void PerformanceProfile::setMode(const QString& mode) {
     recompute();
 }
 
-void PerformanceProfile::attachWindow(QQuickWindow* window) {
-    if (window_ == window) return;
-
-    if (window_) {
-        disconnect(window_, &QQuickWindow::frameSwapped,
-                   this, &PerformanceProfile::handleFrameSwapped);
-    }
-
-    window_ = window;
-    frameTimer_.invalidate();
-    lastFrameTimestampNs_ = 0;
-    framesSinceSample_ = 0;
-
-    if (window_) {
-        connect(window_, &QQuickWindow::frameSwapped,
-                this, &PerformanceProfile::handleFrameSwapped,
-                Qt::QueuedConnection);
-    }
-}
-
-void PerformanceProfile::detachWindow() {
-    attachWindow(nullptr);
-}
-
 void PerformanceProfile::updateGraphicsContext(const bool hardwareAcceleration,
                                                 const bool softwareRendering,
                                                 const double refreshRate) {
@@ -105,26 +80,6 @@ void PerformanceProfile::observeFrameTime(const double frameMs) {
     emit observedFrameCountChanged();
     emit metricsChanged();
     recompute();
-}
-
-void PerformanceProfile::handleFrameSwapped() {
-    if (!window_) return;
-    if (!frameTimer_.isValid()) frameTimer_.start();
-
-    const qint64 nowNs = frameTimer_.nsecsElapsed();
-    if (lastFrameTimestampNs_ == 0) {
-        lastFrameTimestampNs_ = nowNs;
-        return;
-    }
-
-    ++framesSinceSample_;
-    if (framesSinceSample_ < 4) return;
-
-    const double frameMs = static_cast<double>(nowNs - lastFrameTimestampNs_) /
-        1'000'000.0 / static_cast<double>(framesSinceSample_);
-    lastFrameTimestampNs_ = nowNs;
-    framesSinceSample_ = 0;
-    observeFrameTime(frameMs);
 }
 
 QString PerformanceProfile::automaticMode() const {

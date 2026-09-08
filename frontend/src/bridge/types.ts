@@ -171,11 +171,15 @@ export type AttachmentEventPayload =
   | { type: 'attachment.init'; attachmentId: string; uploadId: string;
       chunkSize: number; chunkIndex: number; receivedIndexes: number[];
       expiresAt: string; content: string;
+      // Plaintext bytes from the native transfer; optional for older bridge events.
       logicalSize?: number }
   | { type: 'attachment.chunk'; attachmentId: string; chunkIndex: number;
       content: string }
   | { type: 'attachment.resume'; attachmentId: string;
       receivedIndexes: number[] }
+  | { type: 'attachment.commit'; attachmentId: string; content: string }
+  | { type: 'manifest'; attachmentId: string; chunkSize: number;
+      content: string }
   | { type: 'error'; code: string; message: string };
 
 export type AttachmentEvent = {
