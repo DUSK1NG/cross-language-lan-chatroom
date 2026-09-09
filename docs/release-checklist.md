@@ -1,6 +1,6 @@
 # 发布基线与恢复验收清单
 
-更新：2026-08-24。此清单用于区分“代码回归”和“运行了旧包或过期构建产物”。每次进入新功能阶段前、制作发布包前各执行一次。
+更新：2026-09-09。此清单用于区分“代码回归”和“运行了旧包或过期构建产物”。每次进入新功能阶段前、制作发布包前各执行一次。
 
 ## 0. 工作树与产物身份
 
@@ -17,7 +17,19 @@ Get-FileHash .\release\LANChat-Setup-x64.exe -Algorithm SHA256
 - 先记录输出；未跟踪的个人素材、`tmp\`、构建缓存和发布产物都不得顺手加入提交。
 - 运行包内的 `lan-chat-gui.exe` 必须与 `out\modern-msvc-x64\lan-chat-gui.exe` 为同一次构建。若哈希不同，先重新打包，不能把运行现象归因于源码。
 
-### v1.2.0 发布基线（2026-08-25）
+### v1.2.1 验证记录（2026-09-09）
+
+- 产品代码提交：`6035151`；后续发布元数据提交不改变产品代码。
+- 前端：16 个文件、132 项测试通过；TypeScript 检查和生产构建通过。
+- 原生：CTest 19/19 通过；Go 全量测试及 `go vet` 通过。
+- GitHub CI：Go（包含 race/vet/build）、前端、Windows 源码启动器均通过。
+- 正式构建：MLS++ 开启，测试钩子关闭；运行包敏感文件检查和启动烟雾测试通过。
+- 构建与运行包 GUI SHA-256：`42CEF408B17EE871E607A30FD5B3A2668016B2CAC03CCA1D84F307C80C8B80E1`。
+- ZIP、安装器和源码启动器包的校验值随 Release 的 `SHA256SUMS.txt` 发布。
+- 本轮未重复人工安装/卸载、跨机器聊天与 5 GiB 文件传输验收；自动测试不替代这些项目。
+- Qt 部署工具提示可选 NMEA 定位插件缺少 `Qt6SerialPort.dll`；当前聊天运行包启动烟雾测试通过。
+
+### 历史 v1.2.0 发布基线（2026-08-25，不适用于当前产物）
 
 | 项目 | 记录 |
 |---|---|
@@ -33,11 +45,10 @@ Get-FileHash .\release\LANChat-Setup-x64.exe -Algorithm SHA256
 ## 1. 自动化回归
 
 ```powershell
-cd C:\Users\jking1\Desktop\my-project\chat_X
+# 在当前项目根目录执行
 
-# 前端：66 项界面与状态测试（数量会随测试新增变化）
-$env:PATH = "$PWD\.tools\node-v24.19.0-win-x64;$env:PATH"
-pnpm.cmd --dir .\frontend test -- --run
+# 前端：以本次运行输出为准
+pnpm.cmd --dir .\frontend exec vitest run
 
 # 工具链预检；若报告缺少 Node、Qt 或 OpenSSL，先从源码包运行 bootstrap，
 # 不要把依赖缺失误判为产品构建失败。
