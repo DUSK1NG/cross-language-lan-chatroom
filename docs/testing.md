@@ -2,7 +2,21 @@
 
 本文档记录 Windows 11 下的可复现验证流程。所有局域网测试前，先完成 localhost 测试。
 
-> 发布前先执行 [发布基线与恢复验收清单](release-checklist.md)。该清单记录构建与发布包哈希，并区分 CLI 已有的退避重连和 GUI 尚未实现的通用断线恢复；不要将两者混为一谈。
+> 发布前先执行 [发布基线与恢复验收清单](release-checklist.md)。GUI 已有受控断线恢复；测试结果必须对应当前源码和构建产物。
+
+## 现代桌面客户端（当前主流程）
+
+在项目根目录运行：
+
+```powershell
+pnpm.cmd --dir .\frontend exec vitest run
+pnpm.cmd --dir .\frontend run build
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
+```
+
+现代客户端使用 MSVC、C++20、Qt WebEngine 和 OpenSSL 3；工具链由 `scripts/bootstrap-github.ps1` 准备。完整构建会编译 Go 服务端并运行桌面 CTest；Go 的全量测试须另按第 2 节执行。
+
+以下 MinGW/C++17 命令用于保留的 CLI 与协议层验证，不用于现代 GUI。历史测试数量和本机环境记录不代表当前构建结果。
 
 ## 1. 环境
 
@@ -15,7 +29,7 @@
 - C++17
 - PowerShell
 
-本机已配置并验证：CMake/CTest 4.3.3，MinGW Make 4.4.1；`C:\msys64\mingw64\bin` 已加入当前 Windows 用户的 `PATH`。
+运行前用 `Get-Command go, cmake, ctest, g++` 检查本机工具路径。
 
 进入项目目录（将路径替换为你的本地克隆目录）：
 
@@ -27,8 +41,8 @@ cd <项目根目录>
 
 ```powershell
 cd server-go
-gofmt -w *.go
 go test ./...
+go vet ./...
 go build -o chat-server.exe .
 ```
 
@@ -85,9 +99,9 @@ cd ..\client-cpp
 ctest --test-dir build --output-on-failure
 ```
 
-当前 CMake 注册两个测试目标：`command-tests` 和 `protocol-tests`；构建目录应包含 `chat-client.exe`、`command-tests.exe` 和 `protocol-tests.exe`。私聊功能的直接测试为：`protocol-tests` 15 个场景、`command-tests` 4 个命令解析场景。
+CLI 的 CMake 注册 `command-tests`、`auth-tests`、`protocol-tests` 和 `connection-tests` 四个目标；用 `ctest --test-dir build -N` 核对当前测试列表。
 
-`protocol-tests` 是 C++ 协议层的 loopback TCP 自动化测试目标，当前共有 13 个直接测试，覆盖：
+`protocol-tests` 是 C++ 协议层的 loopback TCP 自动化测试目标，覆盖：
 
 - `send_frame` 拒绝空 payload
 - `send_frame` 拒绝超长 payload

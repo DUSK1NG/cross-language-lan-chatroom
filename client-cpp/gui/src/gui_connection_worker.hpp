@@ -47,7 +47,6 @@ public slots:
                             const QString& userCode);
     void disconnectFromServer();
     void scheduleReconnect();
-    void sendChat(const QString& content, const QString& messageId = {});
     void sendChatToRoom(const QString& content, const QString& room, const QString& messageId = {});
     void sendPrivate(const QString& content, const QString& targetUserCode, const QString& messageId = {});
     void joinRoom(const QString& room);

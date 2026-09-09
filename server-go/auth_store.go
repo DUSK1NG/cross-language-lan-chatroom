@@ -1299,17 +1299,6 @@ func chatMessageIdentity(message Message) (kind, conversationKey, senderCode, ta
 	return kind, conversationKey, senderCode, "", nil
 }
 
-func (s *AuthStore) UpdateChatMessageDeliveryState(messageID, deliveryState string) error {
-	if s == nil || s.db == nil {
-		return errors.New("auth store is not initialized")
-	}
-	if messageID == "" || (deliveryState != "sent" && deliveryState != "delivered") {
-		return errors.New("invalid chat delivery state")
-	}
-	_, err := s.db.Exec(`UPDATE chat_messages SET delivery_state = ? WHERE message_id = ?`, deliveryState, messageID)
-	return err
-}
-
 func (s *AuthStore) UpdateChatMessageDeliveryStateForMessage(message Message, deliveryState string) error {
 	if s == nil || s.db == nil {
 		return errors.New("auth store is not initialized")
@@ -1579,20 +1568,6 @@ VALUES (?, ?, ?, ?, '', ?)`, username, normalizeUsername(username), userCode, st
 		return fmt.Errorf("insert account: %w", err)
 	}
 	return nil
-}
-
-func (s *AuthStore) HasIdentity(username, userCode string) (bool, error) {
-	if s == nil || s.db == nil {
-		return false, errors.New("auth store is not initialized")
-	}
-	var count int
-	err := s.db.QueryRow(`
-SELECT COUNT(*) FROM accounts
-WHERE normalized_username = ? OR normalized_code = ?`, normalizeUsername(username), strings.ToLower(userCode)).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("query account identity: %w", err)
-	}
-	return count > 0, nil
 }
 
 // EnsureIdentity creates a passwordless account on first login and returns the

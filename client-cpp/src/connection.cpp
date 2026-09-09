@@ -284,11 +284,6 @@ bool ConnectionState::is_ready() const {
     return ready_ && !stop_requested_ && session_ != nullptr;
 }
 
-bool ConnectionState::stop_requested() const {
-    const std::lock_guard<std::mutex> lock(mutex_);
-    return stop_requested_;
-}
-
 std::string ConnectionState::last_error() const {
     const std::lock_guard<std::mutex> lock(mutex_);
     return last_error_;

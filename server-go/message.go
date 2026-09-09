@@ -499,16 +499,6 @@ func validateMessage(message Message) error {
 	return nil
 }
 
-func validateLoginIdentity(message Message) error {
-	if message.Username == "" || !utf8.ValidString(message.Username) || len([]byte(message.Username)) > maxUsernameSize {
-		return fmt.Errorf("invalid username")
-	}
-	if _, err := normalizeUserCode(message.UserCode); err != nil {
-		return err
-	}
-	return nil
-}
-
 func validateRoomName(room string) error {
 	if room == "" {
 		return fmt.Errorf("room name must not be empty")

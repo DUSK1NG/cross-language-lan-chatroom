@@ -62,7 +62,6 @@ public:
     void close_current() const;
 
     bool is_ready() const;
-    bool stop_requested() const;
     std::string last_error() const;
     bool wait_before_retry(
         std::chrono::seconds delay,

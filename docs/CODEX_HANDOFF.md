@@ -1,27 +1,25 @@
 # LAN Chat 项目交接说明
 
-更新：2026-08-25。此文档供新的 Codex 对话直接接手；以仓库实际代码、git status 与 GitHub Release 为准。
+更新：2026-09-09。此文档供新的 Codex 对话接手；历史实施记录见 `docs/superpowers/`，当前状态以仓库代码、Git 状态与本次验证结果为准。
 
 ## 1. 当前交付状态
 
 - 仓库：https://github.com/DUSK1NG/cross-language-lan-chatroom
-- 主工作目录：C:\Users\jking1\Desktop\my-project\chat_X
-- 主分支：master；v1.2.0 的发布元数据提交为 fe5181c，产品源码基线为 554de72。接手时必须用 `git log -1 --oneline` 获取当前提交。
-- 最新正式发布：[LAN Chat v1.2.0](https://github.com/DUSK1NG/cross-language-lan-chatroom/releases/tag/v1.2.0)。
+- 工作目录：使用当前本地克隆目录；通过 `git rev-parse --show-toplevel` 确认，勿复制历史机器路径。
+- 主分支：master；接手时用 `git log -1 --oneline` 获取当前提交。
+- 发布入口：[GitHub Releases](https://github.com/DUSK1NG/cross-language-lan-chatroom/releases)。
 - 用户入口：React + TypeScript + Vite + Qt 6 WebEngine + QWebChannel + C++20 的现代客户端。
 - 服务端：Go TLS/TCP + SQLite，默认 TCP 8888；局域网发现使用 UDP 38888。
 - 旧 CLI 不是用户入口；旧 QML / Flutter 界面已移除，仅保留 React + Qt WebEngine 界面。
 
-### v1.2.0 发布资产
+### 发布资产
 
-| 资产 | 用途 | SHA-256 |
-| --- | --- | --- |
-| LANChat-Setup-x64.exe | 推荐；每用户安装、开始菜单/桌面快捷方式、Windows 卸载项 | E1B9A13A04C105F894A0CD19D70325D88D6EF9A631F1B84B10895680F34E2C95 |
-| LANChat-Windows-x64.zip | 便携运行包；完整解压后运行 LANChat.exe | ECEFA0D5DC8345150C2FFD53812248933E7EA5F57BBBFA062378FFBBC5E408EC |
+| 资产 | 用途 |
+| --- | --- |
+| LANChat-Setup-x64.exe | 每用户安装、开始菜单/桌面快捷方式、Windows 卸载项 |
+| LANChat-Windows-x64.zip | 便携运行包；完整解压后运行 LANChat.exe |
 
-- 自动验证：Vitest 13 个文件、79 项通过；CTest 15/15 通过；go test ./... 通过。
-- 包安全检查：ZIP 内禁止文件 0；包内 lan-chat-gui.exe 与构建目录的 SHA-256 一致。
-- 用户已验收：安装包安装、桌面/开始菜单快捷方式，以及从安装目录直接运行卸载 EXE。
+每次发布重新记录测试结果、产物 SHA-256、包安全检查与人工验收结果，见 [发布清单](release-checklist.md)。源码改动不会自动更新已有 ZIP 或安装器；历史测试数量和哈希不能证明当前产物有效。
 
 ## 2. 架构与不可突破的边界
 
@@ -37,12 +35,13 @@ React UI
 - ChatBridge 是 Web UI 和 C++ 业务层唯一边界。发布构建把 Vite 产物写入 Qt Resource System，最终用户不需要 Node.js。
 - 动画只允许短时 transform / opacity；不要在消息列表、消息项或大面积容器上实时 blur、stagger 或持续动画。
 - 性能面板/基准门禁仅供测试，不能进入发布 UI。
-- 不要添加文件、图片、音频或视频传输；不要添加自动更新、P2P/NAT 穿透、管理员角色/黑名单/禁言管理或专门的无障碍工作流，除非用户明确重新立项。
+- 附件传输、房间管理、禁言和踢出已属于现有功能；精简时保留相应命令、权限校验与测试。自动更新、P2P/NAT 穿透等新功能按用户授权范围实施。
 
 ## 3. 已实现功能
 
 - TLS/TCP 连接、4-byte big-endian 长度帧、UTF-8 JSON 协议。
 - 大厅、公开/私有频道、一对一私信、离线私信、历史消息、复制、引用、撤回与表情。
+- 加密附件：单文件上限 5 GiB、每房间配额 20 GiB；客户端 AES-256-GCM 分块、MLS manifest、上传进度、续传与下载解密落盘。
 - 房主连接审批：每个成员连接必须由在线房主明确允许或拒绝；审批入口固定存在，弹窗不能通过点击空白处、Esc 或切换页面绕过。
 - 已批准会话的受控断线恢复；连续消息自动定位、历史阅读时的新消息计数与提示。
 - 房主首次启动自动生成 TLS 证书对与 SQLite 数据库；半个证书对会报错且不覆盖既有身份。
@@ -69,7 +68,7 @@ React UI
 | 性能硬件采样 | Phase 6 搁置 | 自动化门禁已完成；参考机器上的 500/2,000 消息交互采样尚未完成。不能把 GamePP 仅采集父进程的约 22 FPS 当作 WebEngine 实际帧率结论。 |
 | TLS certificate verify failed | 待复现/诊断 | 曾在跨网络测试中记录，后续连接未稳定复现；优先检查日志、公开 .crt 是否对应当前房主身份、TLS 主机名和隧道端点。 |
 
-已完成验收的 Phase 1（会话恢复）、Phase 2（投递状态/搜索）和 Phase 4A（虚拟局域网）若出现回归，应重新打开对应 Phase 并补充复现证据。P2P、自动更新和管理员权限明确不做。
+历史验收的 Phase 1（会话恢复）、Phase 2（投递状态/搜索）和 Phase 4A（虚拟局域网）若出现回归，应补充复现证据。以上搁置项是历史记录，恢复工作前须重新确认状态。
 
 ## 6. 实施经过、历史错误与防回归规则
 
@@ -103,30 +102,30 @@ React UI
 开始任何工作前先执行：
 
 ~~~powershell
-cd C:\Users\jking1\Desktop\my-project\chat_X
+# 在当前项目根目录执行
 git status --short
 git log -1 --oneline
 ~~~
 
-当前工作树保留 14 个未跟踪的 assets\lan-chat-desktop-icon-*.png 图标草稿。它们不是当前发布图标，不能顺手提交、删除或覆盖；当前正式图标由已跟踪的 frontend\src\assets\lan-chat-cat.png 使用。
+未跟踪文件以本次 `git status` 为准。界面图标使用 `frontend/src/assets/lan-chat-cat.png`，Windows 打包图标使用 `assets/LANChat.ico`。
 
 不要使用 git reset --hard、git clean 或批量删除 assets\。任何新增提交必须只包含与当前任务直接相关的文件。
 
 ## 8. 构建、测试和打包
 
 ~~~powershell
-cd C:\Users\jking1\Desktop\my-project\chat_X
+# 在当前项目根目录执行
 
 # 完整现代构建与 CTest
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
 
-# 前端单独测试；若系统找不到 Node，使用仓库工具链
-$env:PATH = "$PWD\.tools\node-v24.19.0-win-x64;$env:PATH"
-pnpm.cmd --dir .\frontend test -- --run
+# 前端单独测试与构建
+pnpm.cmd --dir .\frontend exec vitest run
+pnpm.cmd --dir .\frontend run build
 
-# 生成统一 ZIP 与 v1.2.0 安装器
+# 生成统一 ZIP 与 v1.2.1 安装器
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.2.0 -SmokeTest
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.2.1 -SmokeTest
 ~~~
 
 - 发布脚本输出：release\LANChat-Windows-x64.zip 和 release\LANChat-Setup-x64.exe。

@@ -73,12 +73,10 @@ public:
                                         const QString& username,
                                         const QString& userCode);
     Q_INVOKABLE void disconnectFromServer();
-    Q_INVOKABLE void sendChatMessage(const QString& content);
     Q_INVOKABLE void sendRoomMessage(const QString& content, const QString& room);
     Q_INVOKABLE void sendPrivateMessage(const QString& content, const QString& targetUserCode);
     Q_INVOKABLE void requestUsers();
     Q_INVOKABLE void requestRooms();
-    Q_INVOKABLE void loadMoreHistory();
     Q_INVOKABLE void searchActiveHistory(const QString& query);
     Q_INVOKABLE void createRoom(const QString& room, bool isPrivate);
     Q_INVOKABLE void sendRoomAction(const QString& action, const QString& room, const QString& targetUserCode = {});
@@ -208,9 +206,7 @@ private:
     QString bundledCaFile_;
     int onlineMemberCount_ = 0;
     int localMessageCounter_ = 0;
-    bool historyHasMore_ = false;
     bool historyLoading_ = false;
     QString historySearchQuery_;
-    bool replaceHistoryOnNextResponse_ = false;
     QHash<QString, QVariantMap> pendingAttachmentMetadata_;
 };

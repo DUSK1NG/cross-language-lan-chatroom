@@ -365,10 +365,6 @@ void GuiConnectionWorker::stopHostedServer() {
     hostProcess_.reset();
 }
 
-void GuiConnectionWorker::sendChat(const QString& content, const QString& messageId) {
-    sendChatToRoom(content, QStringLiteral("lobby"), messageId);
-}
-
 void GuiConnectionWorker::sendChatToRoom(const QString& content, const QString& room, const QString& messageId) {
     if (!connection_ || !connection_->is_ready() || content.trimmed().isEmpty()) {
         if (!messageId.isEmpty()) emit messageDeliveryFailed(messageId);

@@ -214,12 +214,6 @@ void GuiChatController::disconnectFromServer() {
     setStatus(QStringLiteral("未连接"));
 }
 
-void GuiChatController::sendChatMessage(const QString& content) {
-    sendRoomMessage(content, activeConversationKey_.startsWith("room:")
-                                   ? activeConversationKey_.mid(5)
-                                   : QStringLiteral("lobby"));
-}
-
 void GuiChatController::sendRoomMessage(const QString& content, const QString& room) {
     const QString trimmedContent = content.trimmed();
     const QString normalizedRoom = room.trimmed().isEmpty() ? QStringLiteral("lobby") : room.trimmed();
@@ -265,15 +259,8 @@ void GuiChatController::requestActiveHistory(const QString& beforeMessageId, con
                               Q_ARG(QString, beforeMessageId), Q_ARG(int, 50), Q_ARG(QString, searchQuery));
 }
 
-void GuiChatController::loadMoreHistory() {
-    if (!connected_ || historyLoading_ || !historyHasMore_ || !historySearchQuery_.isEmpty() || messageModel_->rowCount() == 0) return;
-    const QString before = messageModel_->valueAt(0, "messageId").toString();
-    if (!before.isEmpty()) requestActiveHistory(before);
-}
-
 void GuiChatController::searchActiveHistory(const QString& query) {
     historySearchQuery_ = query.trimmed();
-    replaceHistoryOnNextResponse_ = true;
     if (!historyLoading_) requestActiveHistory({}, historySearchQuery_);
 }
 
@@ -292,7 +279,6 @@ void GuiChatController::sendRoomAction(const QString& action, const QString& roo
 
 void GuiChatController::selectRoom(const QString& room) {
     historySearchQuery_.clear();
-    replaceHistoryOnNextResponse_ = false;
     const QString key = "room:" + room;
     messageModel_ = ensureConversationModel(key);
     activeConversationKey_ = key;
@@ -319,7 +305,6 @@ void GuiChatController::selectRoom(const QString& room) {
 
 void GuiChatController::selectDirectMessage(const QString& userCode) {
     historySearchQuery_.clear();
-    replaceHistoryOnNextResponse_ = false;
     const QString key = "dm:" + userCode;
     messageModel_ = ensureConversationModel(key);
     activeConversationKey_ = key;
@@ -412,10 +397,8 @@ void GuiChatController::resetSessionData() {
     activeConversationKey_ = QStringLiteral("room:lobby");
     joinedRoom_ = QStringLiteral("lobby");
     messageModel_ = ensureConversationModel(activeConversationKey_);
-    historyHasMore_ = false;
     historyLoading_ = false;
     historySearchQuery_.clear();
-    replaceHistoryOnNextResponse_ = false;
     onlineMemberCount_ = 0;
     emit onlineMemberCountChanged();
     emit activeMessageModelChanged();
@@ -461,7 +444,7 @@ void GuiChatController::handleReconnectFailed(const QString& reason) {
 }
 
 void GuiChatController::handleHistory(const QString& room, const QString& targetUserCode,
-                                      bool isPrivate, const QVariantList& messages, bool hasMore,
+                                      bool isPrivate, const QVariantList& messages, bool /*hasMore*/,
                                       const QString& searchQuery) {
     historyLoading_ = false;
     const QString expectedKey = isPrivate ? "dm:" + targetUserCode : "room:" + room;
@@ -492,8 +475,6 @@ void GuiChatController::handleHistory(const QString& room, const QString& target
                      {"systemMessage", false}, {"deliveryState", detail.value("deliveryState", "sent")}});
     }
     if (!rows.isEmpty()) messageModel_->prependRows(rows);
-    historyHasMore_ = searchQuery.isEmpty() ? hasMore : false;
-    replaceHistoryOnNextResponse_ = false;
 }
 
 void GuiChatController::handleMessage(const QString& type, const QString& messageId, const QString& commandId,

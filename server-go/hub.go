@@ -854,19 +854,6 @@ func (h *Hub) removeClient(client *Client) {
 	}
 }
 
-func (h *Hub) broadcastSystemMessage(content string) {
-	if content == "" {
-		return
-	}
-
-	message := Message{
-		Type:    "system",
-		Content: content,
-	}
-
-	h.broadcastMessage(message)
-}
-
 func (h *Hub) broadcastSystemMessageToRoom(room, content string) {
 	if content == "" {
 		return

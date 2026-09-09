@@ -129,7 +129,6 @@ input.conversation-search {
 .message + .message { margin-top: 6px; }
 .message.message--grouped { margin-top: 2px; }
 .message.message--system { margin: 4px 0; }
-.message--grouped { margin-top: 2px; }
 .message-avatar {
   width: 30px; height: 30px; border-radius: 50%; margin-top: 20px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
@@ -170,7 +169,7 @@ input.conversation-search {
 }
 .message-actions button:hover { color: var(--t-accent); }
 
-.message--system { align-self: center; max-width: 90%; margin: 4px 0; }
+.message--system { align-self: center; max-width: 90%; }
 .message-system-text {
   background: rgba(255, 255, 255, 0.85); color: var(--t-ink-2);
   font-size: 12px; padding: 3px 10px; border-radius: 999px;
@@ -185,7 +184,7 @@ input.conversation-search {
   cursor: pointer; box-shadow: 0 6px 18px rgba(15, 23, 32, 0.16); z-index: 3;
 }
 
-/* ---- 消息内附件卡（规格 §7.4；接收侧命令未对齐前下载钮禁用） ---- */
+/* ---- 消息内附件卡 ---- */
 .message-attachment {
   display: flex; align-items: center; gap: 9px;
   background: var(--t-accent-soft); border-radius: 10px;
