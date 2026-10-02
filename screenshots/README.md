@@ -1,11 +1,6 @@
-# Screenshots
+# LAN Chat 截图
+本目录用于保存现代桌面客户端的使用截图，展示房主创建、成员加入、连接审批与聊天操作。
 
-请在真实 Windows Terminal 局域网测试后，把截图放在本目录，并使用以下建议命名：
+截图应来自实际运行，可按创建聊天室、附近聊天室、连接审批、多人聊天与附件传输命名。跨电脑场景只有完成实际测试后才标注为已验证，测试步骤见[发布验收](../docs/release-acceptance.md)。
 
-- 01-server-listening.png：Go Server 监听 0.0.0.0:8888；
-- 02-client-a-login.png：第一个 C++ 客户端登录；
-- 03-three-clients-chat.png：三个客户端同时中文聊天；
-- 04-users-command.png：/users 在线列表；
-- 05-lan-topology.png：Ethernet Server 与 Wi-Fi Client 测试环境。
-
-截图应隐藏个人 IP 之外的敏感信息、用户名密码、系统通知和无关窗口；不要提交可执行文件、日志或包含私人数据的完整桌面截图。
+只截取与操作有关的窗口。提交前遮盖个人 IP、用户名、账号、通知和聊天内容；不要提交证书私钥、数据库、日志或完整私人桌面截图。
