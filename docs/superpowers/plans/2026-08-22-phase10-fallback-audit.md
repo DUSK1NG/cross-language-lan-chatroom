@@ -36,30 +36,6 @@
 | Debug 性能面板 | 仅诊断构建 | 不进入发布 | 保持现状，不迁移到发布 UI |
 | QWebChannel 失败错误页 | QML 回退 | 已提供受控错误页 | 已补齐，待发布包验收 |
 
-## 已完成验证
-
-- 前端 Vitest：10 个测试文件、59 个测试通过。
-- 前端生产构建：TypeScript 检查和 Vite 构建通过。
-- QML/诊断 CTest：8/8 通过。
-- WebEngine CTest：9/9 通过，包含 `web-ui-host-tests`。
-- Go 服务端单元测试：`go test ./...` 通过。
-- 真实 TLS 验收：使用临时 SQLite 数据库和 `server-lan.crt`，P10 Alice/Bob/Charlie 三个协议客户端完成双客户端主流程与权限扩展验收。
-
-前四项构建/单进程结果与真实 TLS 验收均已完成；局域网实体两台电脑验收仍应在发布前按 `docs/release-setup.md` 单独执行。
-
-## 真实 TLS 验收记录
-
-可复现脚本：[scripts/p10-tls-acceptance.mjs](../../../scripts/p10-tls-acceptance.mjs)。本轮使用重建后的 `server-go/chat-server.exe`、临时 `server-go/p10-acceptance.db` 和 `server-lan.crt`，验收结果为 `ok: true`：
-
-- TLS 登录、管理员身份和 CA 校验；
-- 中文群聊、私信投递与第三方隔离；
-- 离线私信、重新登录和历史响应；
-- 公共频道创建/加入/聊天；
-- 私密频道拒绝、邀请、移除和删除；
-- 管理员禁言/解禁、撤回、踢出与断开。
-
-验收中发现并修复一个服务端时序缺陷：踢出通知原先在立即关闭 TLS 连接前可能丢失；现改为写泵完成通知后再关闭连接，并新增 Go 回归测试。
-
 ## 阻断项
 
 ### 已修复：React 设置页功能不等价

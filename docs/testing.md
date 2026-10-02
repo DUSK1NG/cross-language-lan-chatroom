@@ -90,8 +90,6 @@ cmake --build build --config Release
 
 预期：生成 `chat-client.exe` 与 `protocol-tests.exe`。
 
-本机验证结果：CMake 配置、构建均成功。
-
 ## 4. C++ 协议测试（CTest）
 
 ```powershell
@@ -111,7 +109,6 @@ CLI 的 CMake 注册 `command-tests`、`auth-tests`、`protocol-tests` 和 `conn
 - `receive_message` 拒绝 malformed JSON、缺少字符串 `type`、数值型 `content`
 - 合法 UTF-8 消息往返保持字段一致
 
-本机验证结果：CTest 报告 `100% tests passed, 0 tests failed out of 1`，协议测试内部 13 个场景全部通过。
 - 三个合法 frame 按发送顺序被接收
 
 分段接收测试设置了有限接收超时，避免网络回归导致 CI 无限阻塞；其中还包含对 UTF-8 round-trip 和 `recv_all` 的直接覆盖。

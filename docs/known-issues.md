@@ -15,6 +15,5 @@
 
 **根因与修复：** 服务端在批准后注册新会话时，仍会因 `ActiveCodes` 中保留的旧会话返回“User code already exists”。旧会话的空闲读取期限为五分钟，因此网络中断后可能迟迟未被清理。现已改为：账号连接在通过房主批准后接管同一用户代码的旧活动会话，并主动关闭旧连接。
 
-**自动化证据：** `TestApprovedReconnectReplacesStaleActiveSession` 先确认旧行为返回“User code already exists”，修复后通过；`go test -race .`、Go 完整测试与 Windows GUI CTest（12/12）通过。
 
 **待验证：** 重新进行两台电脑断网重连验收，并同时确认“更换用户代码后房主仍收到待批准请求”。

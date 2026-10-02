@@ -757,17 +757,6 @@ C:/Users/Q1573/Desktop/MY_project/lan-chat/.worktrees/winui3-phase1-core-shell/w
 
 请用户手动确认窗口打开、显示“未连接”、四边与四角缩放流畅。该确认完成后阶段 1 才算验收，通过后另写阶段 2 连接流程计划。
 
-## 阶段 1 验收记录
-
-- Debug：62 项通过，1 项按设计跳过。
-- Release：63/63 通过（含真实 Core smoke test）。
-- 既有 Core CTest：2/2 通过。
-- 独立发布目录加载 native 运行库：12/12，全部来自同一目录。
-- UI Automation：窗口显示“未连接”，无 Core 诊断错误。
-- 自动缩放：120 次，总耗时 7.32 秒，MoveWindow P95 16.11 毫秒。
-- 2026-08-29 人工验收：发布版正常显示“未连接”；连续缩放、最小尺寸、最大化/还原、重复关闭均通过；关闭路径不再卡死，用户确认验收通过。
-- 审计结束时工作树 clean；Flutter、Qt、React、Go 服务端、通信协议与数据库未修改。
-
 ## Authoritative References
 
 - Windows App SDK 2.4.0 stable: https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads

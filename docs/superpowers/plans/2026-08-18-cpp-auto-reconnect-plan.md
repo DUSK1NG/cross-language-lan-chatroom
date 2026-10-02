@@ -90,5 +90,5 @@
 - [ ] 明确 `/quit`、EOF 和本地错误不会触发重连，避免用户误以为程序卡住。
 - [ ] 更新架构图或说明，标明接收线程拥有连接生命周期、主线程通过线程安全接口发送。
 - [ ] 运行 `gofmt` 不涉及本次源文件；运行 MinGW 主程序构建、`connection-tests`、`command-tests`、`protocol-tests`，执行 `git diff --check`。
-- [ ] 提交 `docs: document cpp client auto reconnect`，整理最终修改和测试结果。
+- [ ] 提交 `docs: document cpp client auto reconnect`，整理最终修改。
 

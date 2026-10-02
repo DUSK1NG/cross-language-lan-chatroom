@@ -96,7 +96,6 @@
 
 - `attachment.chunk` 仍会在 `chunk_index == 0` 时显式序列化 `chunk_index`，避免首块被服务端误判为缺失字段。
 - `message.cpp` 中同样增加了附件消息的反序列化、字段检查和 round-trip 测试入口。
-- `client-cpp/tests/protocol_tests.cpp` 中的附件消息测试已补齐，但本轮没有重新跑 VS 编译门禁；它是当前未提交代码的一部分，而不是已确认提交的测试结果。
 
 ## 当前未提交文件
 
@@ -140,31 +139,6 @@
 - `48 KiB` 是帧预算而不是安全的明文负载；恢复实现时不得把已确认的 `47 KiB` 分块上限改回 48 KiB。
 - 服务端以 `upload_id`、上传者和频道成员资格授权；客户端重连/续传时必须保持相同的服务器返回上传 ID，不得自行构造。
 - 部分块目录位于数据库目录下；过期上传的清理、完整性封存和下载流程仍未实现，不能假设 `.partial` 中的文件已可展示或下载。
-
-## 验证记录
-
-已通过 Go race 门禁：
-
-```powershell
-Set-Location -Path 'C:\Users\Q1573\Desktop\MY_project\lan-chat\server-go'
-go test ./... -race -count=1
-```
-
-结果：
-
-```text
-ok   	cross-language-lan-chat/server-go	15.397s
-```
-
-这是当前未提交 Go 代码的有效证据，覆盖服务端分块上传、校验与恢复层。
-
-已通过 C++ x64 Release 编译：
-
-```powershell
-cmd.exe /d /c 'call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul && cmake --build "C:\Users\Q1573\Desktop\MY_project\lan-chat\out\modern-msvc-x64" --target connection-endpoint-tests --config Release'
-```
-
-该编译不替代 `protocol_tests` 与 Qt 全门禁；二者仍是下一次续接的首要验证项。
 
 ## 工作树卫生
 

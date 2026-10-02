@@ -229,13 +229,6 @@ React/WebEngine 作为可选适配器继续使用 `ChatBridge`，但不与 QML �
 
 本阶段仍未处理历史消息分页、线程池、文件传输或 GPU 型号识别；这些保持在后续阶段，避免把未验证的业务和渲染变化混入导航优化。
 
-### Phase 2 完成判定
-
-- 默认 MinGW Qt GUI 编译通过。
-- 页面 Loader 不再因设置返回而重建聊天消息列表。
-- `chat-model-tests`、`chat-bridge-tests`、`bridge-protocol-tests` 和 `graphics-info-tests` 可分别通过。
-- GUI 启动烟测保持进程存活，未出现 QML 加载即退出。
-
 ## Phase 4 当前执行切片：消息列表基础与历史接缝
 
 当前仓库的 Go 协议没有公开频道消息历史请求/响应，服务端也没有保存公开频道消息的持久化表。因此本切片只实现已经有真实协议基础的部分，不伪造历史分页已完成：
@@ -255,15 +248,9 @@ Phase 4 后续仍需单独设计并实现服务端消息存储、`history_reques
 - `ChatPage.qml` 保留现有低基数 `Repeater` 和选择行为，只替换数据源并移除 QML 侧逐项 `visible` 过滤。
 - 新增 `conversation-filter-tests`，覆盖空查询、单字段、多字段和无匹配场景。
 
-### Phase 3 完成判定
-
-- 过滤模型测试通过，源模型刷新后代理模型仍能自动同步。
-- GUI 编译通过，频道/私信搜索不改动聊天协议和选择逻辑。
-- 默认 QML GUI 启动烟测通过。
-
 ## Phase 4 持久化完成记录（2026-08-22）
 
-Phase 4 的历史消息边界已实现并验证：
+历史消息支持：
 
 - Go SQLite 新增 `chat_messages`，每个会话最多保留 10,000 条消息。
 - `history_request` / `history_response` 支持房间和私信的游标分页，单页最多 100 条。
