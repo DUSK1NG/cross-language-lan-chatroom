@@ -8,11 +8,23 @@
 
 在项目根目录运行：
 
+将 CMake 的 `bin` 目录加入当前终端的 PATH，使 `ctest.exe` 可被找到。Windows 下应把源码检出放在较短的路径，避免编译器生成的目标文件路径过长；输出目录可通过构建脚本的 `-BuildDirectory` 指定。
+
 ```powershell
 pnpm.cmd --dir .\frontend exec vitest run
 pnpm.cmd --dir .\frontend run build
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
 ```
+
+本次 Windows 验证输出节选（前端测试与桌面 CTest）：
+
+```text
+Test Files  16 passed (16)
+     Tests  132 passed (132)
+100% tests passed, 0 tests failed out of 19
+```
+
+构建后运行 `scripts/start-gui.ps1` 启动客户端；`-CheckOnly` 检查构建清单、可执行文件及运行库，`-Rebuild` 重新构建后启动。
 
 现代客户端使用 MSVC、C++20、Qt WebEngine 和 OpenSSL 3；工具链由 `scripts/bootstrap-github.ps1` 准备。完整构建会编译 Go 服务端并运行桌面 CTest；Go 的全量测试须另按第 2 节执行。
 
