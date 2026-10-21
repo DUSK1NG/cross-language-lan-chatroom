@@ -36,7 +36,7 @@
 - R4.2 THE page SHALL 只通过 `lanchat-media://` 自定义 scheme 的不透明令牌（128 位随机，会话内有效）访问媒体；页面永不获知文件路径或密钥。
 - R4.3 THE scheme handler SHALL 只响应来自 `qrc:` 主页面的请求，只返回已登记令牌对应的文件，设置正确的 `Content-Type`，并在可行时支持 `Range` 以便视频拖动。
 - R4.4 THE cache SHALL 有总量上限（默认 2 GB，LRU 淘汰）；WHEN 消息被撤回 THE SYSTEM SHALL 删除对应缓存并作废令牌；设置中提供「清除媒体缓存」。
-- R4.5 ⛔ 是否「退出时自动清除媒体缓存」及其默认值由任务 1.1 决策门确定。
+- R4.5 WHEN 应用退出 THE SYSTEM SHALL 默认清除媒体缓存；设置中提供「退出时清除媒体缓存」开关（已决定，见 tasks 1.1）。
 
 ## R5 私信附件（含媒体）
 - R5.1 THE composer SHALL 在私信会话中启用附件按钮（移除「附件暂仅支持频道会话」限制）。

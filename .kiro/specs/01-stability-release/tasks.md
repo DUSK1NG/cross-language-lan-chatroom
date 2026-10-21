@@ -22,7 +22,8 @@
   - [ ] 3.5 在 Windows 上测量 100 MB 下载用时（局域网两机），记录到 PR；若 > 15 s，把窗口调到 16 再测一次并记录。_R2.2_
 
 - [ ] 4. 发布工作流（分支 `feat/01-stability-release`）
-  - [ ] 4.1 ⛔ 决策门：确认发布包是否启用 MLS++、MLS++ 源在 CI 中的获取方式（`vendor/mls/manifest.json` 锁定的来源），以及是否提供代码签名证书。向用户给出选项后等待答复。_R4.4_
+  - [x] 4.1 ⛔ 决策门：确认发布包是否启用 MLS++、MLS++ 源在 CI 中的获取方式（`vendor/mls/manifest.json` 锁定的来源），以及是否提供代码签名证书。向用户给出选项后等待答复。_R4.4_
+    > 决定（2026-10-21）：发布包**启用 MLS++**（附件与媒体预览依赖它），CI 中按 `vendor/mls/manifest.json` 锁定的归档与 SHA256 获取源码，复用 `scripts/test-mls-e2e-build.ps1` / `test-mlspp-supply-chain.ps1` 的校验；用户**没有代码签名证书**：跳过签名，发行说明注明「未签名，请核对 SHA256」。如以后取得证书，再新增签名任务。
   - [ ] 4.2 新增 `.github/workflows/release.yml`（tag 触发），按 D4 产出三件产物并上传 Release；包内容检查失败则中止。_R4.2 R4.3_
   - [ ] 4.3 在 fork 或测试 tag（如 `v1.3.0-rc.1`，标记为 prerelease）上演练一次，记录产物哈希与耗时。_R4.2_
 
