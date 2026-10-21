@@ -47,4 +47,19 @@ using IN_ADDR = struct in_addr;
 inline int closesocket(SOCKET socket_handle) { return ::close(socket_handle); }
 inline int WSAGetLastError() { return errno; }
 
+// Winsock requires explicit library start-up/tear-down; POSIX needs none.
+// Provide no-op equivalents so the same init code compiles everywhere.
+using WSADATA = int;
+inline int WSAStartup(unsigned short /*version*/, WSADATA* data) {
+    if (data) *data = 0;
+    return 0;
+}
+inline int WSACleanup() { return 0; }
+#ifndef MAKEWORD
+#define MAKEWORD(low, high) \
+    static_cast<unsigned short>(((low) & 0xff) | (((high) & 0xff) << 8))
+#endif
+
+using u_short = unsigned short;
+
 #endif  // _WIN32
