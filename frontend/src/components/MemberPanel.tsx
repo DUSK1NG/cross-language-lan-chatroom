@@ -18,7 +18,7 @@ export function MemberPanel({ state, className = '', localUserCode, onStartDirec
 
   return (
     <aside className={`member-panel ${className}`.trim()} data-testid="member-panel" data-motion="workspace-panel" aria-label="成员">
-      <div className="sidebar-heading"><div><p className="eyebrow">成员 · {state.members.length}</p><h2>成员</h2></div><span className="member-count" aria-label="在线成员数量">{onlineCount}</span>{onClose && <button type="button" className="icon-button" aria-label="关闭成员列表" onClick={onClose}><Icon name="close" /></button>}</div>
+      <div className="sidebar-heading"><div><h2>成员</h2><p className="sidebar-heading__sub"><span className="member-count" aria-label="在线成员数量">{onlineCount}</span> 人在线，共 {state.members.length} 人</p></div>{onClose && <button type="button" className="icon-button" aria-label="关闭成员列表" onClick={onClose}><Icon name="close" /></button>}</div>
       <div className="member-list">
         {state.members.map((member) => (
           <div className={`member-row${member.online ? '' : ' member-row--offline'}`} key={member.userCode}>

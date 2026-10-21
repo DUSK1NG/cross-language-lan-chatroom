@@ -113,7 +113,6 @@ function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvail
         </ul>
       </section>
       <section className="mode-panel">
-        <p className="eyebrow">LAN CHAT / LOCAL WORKSPACE</p>
         <h1>选择聊天方式</h1>
         <p className="lede">安全、稳定的 Go + Qt 局域网聊天</p>
         <div className="mode-grid">
@@ -133,14 +132,11 @@ function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvail
   );
 }
 
-function PageHeader({ eyebrow, title, onBack, busy }: { eyebrow: string; title: string; onBack: () => void; busy: boolean }) {
+function PageHeader({ title, onBack, busy }: { title: string; onBack: () => void; busy: boolean }) {
   return (
     <header className="page-header">
       <button className="icon-button page-header__back" type="button" aria-label="返回模式选择" title="返回" onClick={onBack} disabled={busy}><Icon name="back" /></button>
-      <div>
-        <p className="eyebrow">{eyebrow}</p>
-        <h1>{title}</h1>
-      </div>
+      <h1>{title}</h1>
     </header>
   );
 }
@@ -217,7 +213,7 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   return (
     <main className="app-shell connect-shell">
       <section ref={pageRef} className="connect-panel">
-        <PageHeader eyebrow="SECURE CONNECTION" title={tunnel ? '通过 TCP 隧道加入' : (guest ? '加入局域网聊天室' : '连接远程服务器')} onBack={onBack} busy={busy} />
+        <PageHeader title={tunnel ? '通过 TCP 隧道加入' : (guest ? '加入局域网聊天室' : '连接远程服务器')} onBack={onBack} busy={busy} />
         <ConnectionStatus state={state} />
         <p className="connection-help">
           {tunnel ? '填写外部隧道提供的主机和端口，并使用房主的公开证书。隧道令牌和私钥只保留在外部隧道工具中。' : (guest ? '自动发现局域网或同一虚拟局域网内的房主；IPv4 变化后会持续重新发现。手动连接仍可作为备用方式。' : '填写已经启动 Go Server 的电脑 IPv4 和端口。')}
@@ -338,7 +334,7 @@ function LocalHostPage({ bridge, state, onBack }: {
   return (
     <main className="app-shell connect-shell">
       <section ref={pageRef} className="connect-panel host-panel">
-        <PageHeader eyebrow="LOCAL HOST" title="创建本地聊天室" onBack={onBack} busy={busy} />
+        <PageHeader title="创建本地聊天室" onBack={onBack} busy={busy} />
         <ConnectionStatus state={state} />
         <p className="connection-help">程序会启动本地 Go Server，再自动连接到本机聊天室。其他电脑可通过 Guest 加入。</p>
         <div className="form-grid">

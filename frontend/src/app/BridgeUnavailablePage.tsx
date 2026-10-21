@@ -4,7 +4,6 @@ export function BridgeUnavailablePage({ message, onRetry }: BridgeUnavailablePag
   return (
     <main className="app-shell mode-shell bridge-error-shell">
       <section className="mode-panel bridge-error-panel">
-        <p className="eyebrow">LAN CHAT / CONNECTION ERROR</p>
         <h1>界面暂时不可用</h1>
         <p className="status-line status-line--error" role="alert">{message}</p>
         <p className="lede">Qt bridge 未连接，当前不会伪造聊天状态或吞掉操作。</p>

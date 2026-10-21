@@ -37,6 +37,8 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
   const pendingJumpToLatestRef = useRef(false);
   const atBottomRef = useRef(true);
   const [newMessageCount, setNewMessageCount] = useState(0);
+  // First message that arrived while the reader was scrolled up; marks the "新消息" divider.
+  const [firstUnseenId, setFirstUnseenId] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const knownMessageIds = knownMessageIdsRef.current;
   const enteringMessageIds = knownMessageIds
@@ -85,6 +87,7 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
         return;
       }
       activeConversationRef.current = key;
+      setFirstUnseenId(null);
       knownMessageIdsRef.current = currentIds;
       previousMessageCountRef.current = state.activeMessages.length;
       atBottomRef.current = true;
@@ -134,6 +137,7 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
       scrollToLatest();
       return;
     }
+    setFirstUnseenId((current) => current ?? appendedMessages[0].messageId);
     setNewMessageCount((count) => count + appendedMessages.length);
   }, [key, latestWindowStart, messages, scrollToLatest, state.activeMessages, state.identity.userCode, visibleWindowStart]);
 
@@ -150,7 +154,13 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
             const grouped = !!previous && !previous.systemMessage && !message.systemMessage
               && previous.userCode === message.userCode
               && previous.selfMessage === message.selfMessage;
-            return <MessageItem key={message.messageId} message={message} bridge={bridge} onQuote={onQuote} canRecall={canRecall?.(message)} showTime={settings.showSendTime} animateEntry={enteringMessageIds.has(message.messageId)} grouped={grouped} />;
+            const next = index < messages.length - 1 ? messages[index + 1] : undefined;
+            const tail = !next || next.systemMessage || message.systemMessage
+              || next.userCode !== message.userCode || next.selfMessage !== message.selfMessage;
+            const divider = message.messageId === firstUnseenId
+              ? <div key={`unseen-${message.messageId}`} className="unseen-divider" role="separator" aria-label="以下为新消息"><span>新消息</span></div>
+              : null;
+            return [divider, <MessageItem key={message.messageId} message={message} bridge={bridge} onQuote={onQuote} canRecall={canRecall?.(message)} showTime={settings.showSendTime} animateEntry={enteringMessageIds.has(message.messageId)} grouped={grouped && !divider} tail={tail} />];
           })}
         </>}
       </section>

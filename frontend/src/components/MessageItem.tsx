@@ -11,6 +11,8 @@ type MessageItemProps = {
   message: MessageItemData;
   bridge: ChatBridgeClient;
   grouped?: boolean;
+  /** Last bubble of a run from one sender: it carries the tail corner. */
+  tail?: boolean;
   onCopy?: (message: MessageItemData) => void;
   onQuote?: (message: MessageItemData) => void;
   onLocalDelete?: (message: MessageItemData) => void;
@@ -20,14 +22,21 @@ type MessageItemProps = {
   animateEntry?: boolean;
 };
 
-const deliveryTicks: Record<NonNullable<MessageItemData['deliveryState']>, string> = {
-  queued: '⏱',
-  sent: '✓',
-  delivered: '✓✓',
-  failed: '⚠'
+const deliveryCopy: Record<NonNullable<MessageItemData['deliveryState']>, string> = {
+  queued: '发送中',
+  sent: '已发送',
+  delivered: '已送达',
+  failed: '发送失败'
 };
 
-export const MessageItem = memo(function MessageItem({ message, bridge, grouped = false, onCopy, onQuote, onLocalDelete, onRecall, canRecall = false, showTime = true, animateEntry = true }: MessageItemProps) {
+function DeliveryMark({ state }: { state: NonNullable<MessageItemData['deliveryState']> }) {
+  if (state === 'queued') return <Icon name="clock" size={13} />;
+  if (state === 'failed') return <Icon name="alert" size={13} />;
+  if (state === 'delivered') return <><Icon name="check" size={13} /><Icon name="check" size={13} /></>;
+  return <Icon name="check" size={13} />;
+}
+
+export const MessageItem = memo(function MessageItem({ message, bridge, grouped = false, tail = true, onCopy, onQuote, onLocalDelete, onRecall, canRecall = false, showTime = true, animateEntry = true }: MessageItemProps) {
   const [feedback, setFeedback] = useState<{ status: 'idle' | 'pending' | 'success' | 'error'; message: string }>({ status: 'idle', message: '' });
   const pendingCommandIdRef = useRef<string | null>(null);
   const pendingUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -41,6 +50,8 @@ export const MessageItem = memo(function MessageItem({ message, bridge, grouped 
   const [firstLine = '', ...remainingLines] = message.content.split('\n');
   const isQuotedMessage = firstLine.startsWith('> ') && remainingLines.length > 0;
   const quotedText = isQuotedMessage ? firstLine : '';
+  // Stored form is "> 作者: 原文"; show author and text, keep the marker for copy and screen readers.
+  const quoteMatch = /^> ([^:：]{1,40})[:：] ?(.*)$/.exec(quotedText);
   const messageText = isQuotedMessage ? remainingLines.join('\n') : message.content;
 
   const dispatch = (type: string, label = '操作', payload: Record<string, unknown> = { messageId: message.messageId }) => {
@@ -62,18 +73,20 @@ export const MessageItem = memo(function MessageItem({ message, bridge, grouped 
   };
 
   return (
-    <article ref={messageRef} className={`message ${message.selfMessage ? 'message--self' : 'message--peer'}${grouped ? ' message--grouped' : ''}${message.systemMessage ? ' message--system' : ''}`} data-testid={`message-${message.messageId}`}>
+    <article ref={messageRef} className={`message ${message.selfMessage ? 'message--self' : 'message--peer'}${grouped ? ' message--grouped' : ''}${tail ? ' message--tail' : ''}${message.systemMessage ? ' message--system' : ''}`} data-testid={`message-${message.messageId}`}>
       {!message.systemMessage && !message.selfMessage && <span className={`message-avatar avatar--tone-${avatarTone(message.userCode || message.displayName)}`} aria-hidden="true">{message.displayName.slice(0, 1).toUpperCase()}</span>}
       <div className="message-cluster">
         {message.systemMessage ? <p className="message-system-text" data-testid={`message-content-${message.messageId}`}>{message.content}</p> : <>
           {!grouped && !message.selfMessage && <div className={`message-who message-who--tone-${avatarTone(message.userCode || message.displayName)}`}>{message.displayName}</div>}
           <div className="message-bubble">
             {message.attachment && <AttachmentCard attachment={message.attachment} bridge={bridge} />}
-            {isQuotedMessage && <blockquote className="message-quote message-content--wrap" data-testid={`message-quote-${message.messageId}`}>{quotedText}</blockquote>}
+            {isQuotedMessage && <blockquote className="message-quote message-content--wrap" data-testid={`message-quote-${message.messageId}`}>{quoteMatch
+              ? <><span className="visually-hidden">&gt; </span><strong className="message-quote__who">{quoteMatch[1]}</strong><span className="visually-hidden">: </span><span className="message-quote__text">{quoteMatch[2]}</span></>
+              : quotedText}</blockquote>}
             {(!isQuotedMessage || messageText) && <p className="message-content message-content--wrap" data-testid={`message-content-${message.messageId}`}>{messageText}</p>}
             <div className="message-meta">
               {showTime && <span>{message.time}</span>}
-              {message.selfMessage && message.deliveryState && <span className={`message-delivery message-delivery--${message.deliveryState}`} aria-label={`投递状态：${message.deliveryState}`}>{deliveryTicks[message.deliveryState]}{message.deliveryState === 'queued' ? ' 发送中' : ''}</span>}
+              {message.selfMessage && message.deliveryState && <span className={`message-delivery message-delivery--${message.deliveryState}`} aria-label={`投递状态：${message.deliveryState}`} title={deliveryCopy[message.deliveryState]}><DeliveryMark state={message.deliveryState} />{message.deliveryState === 'queued' || message.deliveryState === 'failed' ? <span>{deliveryCopy[message.deliveryState]}</span> : null}</span>}
             </div>
           </div>
           <div className="message-actions" aria-label={`actions-${message.messageId}`}>
@@ -115,7 +128,7 @@ function AttachmentCard({ attachment, bridge }: { attachment: MessageAttachment;
         <strong className="message-attachment__name">{attachment.fileName}</strong>
         <span className="message-attachment__meta">
           {sizeMiB && <span>{sizeMiB}</span>}
-          <span>🔒 端到端加密</span>
+          <span className="message-attachment__e2ee"><Icon name="lock" size={12} />端到端加密</span>
           {statusCopy && <span>{statusCopy}</span>}
         </span>
       </span>
@@ -139,6 +152,7 @@ function areMessageItemPropsEqual(previous: MessageItemProps, next: MessageItemP
     && previous.showTime === next.showTime
     && previous.animateEntry === next.animateEntry
     && previous.grouped === next.grouped
+    && previous.tail === next.tail
     && previousMessage.messageId === nextMessage.messageId
     && previousMessage.displayName === nextMessage.displayName
     && previousMessage.userCode === nextMessage.userCode

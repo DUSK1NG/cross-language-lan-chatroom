@@ -45,6 +45,17 @@ const systemMessage: MessageItemData = {
   systemMessage: true
 };
 
+const cancelMessage: MessageItemData = {
+  messageId: 'm-cancel', displayName: 'Bob', userCode: 'B002', time: '10:00', content: 'arrived while scrolled up', selfMessage: false, systemMessage: false
+};
+const baseStateForCancel = {
+  schemaVersion: 1, connection: { phase: 'connected', statusText: '已连接', retryable: false },
+  identity: { displayName: 'Alice', userCode: 'A001', admin: false },
+  navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } },
+  rooms: [], directMessages: [], activeMessages: [], members: [], permissions: { activeRoomCanManage: false },
+  savedConnection: { serverIp: '127.0.0.1', serverPort: 8888, username: 'Alice', userCode: 'A001', caFile: '' }
+} as BridgeState;
+
 describe('MessageItem', () => {
   afterEach(cleanup);
 
@@ -149,15 +160,16 @@ describe('MessageItem', () => {
 
     let delivery = screen.getByLabelText('投递状态：queued');
     expect(delivery).toHaveClass('message-delivery--queued');
-    expect(delivery).toHaveTextContent('⏱ 发送中');
+    expect(delivery).toHaveTextContent('发送中');
 
     rerender(<MessageItem message={{ ...message, deliveryState: 'delivered' }} bridge={bridge} />);
     delivery = screen.getByLabelText('投递状态：delivered');
-    expect(delivery).toHaveTextContent('✓✓');
+    expect(delivery).toHaveAttribute('title', '已送达');
+    expect(delivery.querySelectorAll('svg')).toHaveLength(2);
     expect(delivery).toHaveClass('message-delivery--delivered');
 
     rerender(<MessageItem message={{ ...message, deliveryState: 'failed' }} bridge={bridge} />);
-    expect(screen.getByLabelText('投递状态：failed')).toHaveTextContent('⚠');
+    expect(screen.getByLabelText('投递状态：failed')).toHaveTextContent('发送失败');
   });
 
   it('marks consecutive grouped messages and hides the author line', () => {
@@ -188,7 +200,7 @@ describe('MessageItem', () => {
     const card = screen.getByTestId('message-attachment-att-1');
     expect(card).toHaveTextContent('design.pdf');
     expect(card).toHaveTextContent('3.0 MiB');
-    expect(card).toHaveTextContent('🔒 端到端加密');
+    expect(card).toHaveTextContent('端到端加密');
     const download = screen.getByRole('button', { name: '下载 design.pdf' });
     expect(download).toBeEnabled();
     fireEvent.click(download);
@@ -210,5 +222,17 @@ describe('MessageItem', () => {
 
     expect(screen.getByTestId('message-attachment-att-2')).toHaveClass('message-attachment--expired');
     expect(screen.getByText('文件已过期（超过 24 小时），请让发送者重新发送')).toBeInTheDocument();
+  });
+
+  it('never leaves a message invisible when its entrance animation is cancelled mid-flight', () => {
+    const bridge = createFakeBridge(baseStateForCancel);
+    const props = { message: cancelMessage, bridge } as const;
+    const { rerender } = render(<MessageItem {...props} animateEntry />);
+    // The timeline flips animateEntry off on the very next render, before the tween can finish.
+    rerender(<MessageItem {...props} animateEntry={false} />);
+
+    const article = screen.getByTestId('message-m-cancel');
+    expect(article.style.opacity).not.toBe('0');
+    expect(article.style.transform).toBe('');
   });
 });

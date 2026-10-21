@@ -4,9 +4,7 @@
 .connect-shell, .settings-shell {
   display: flex; justify-content: center; align-items: flex-start;
   padding: 40px 20px 56px; height: 100vh; overflow-y: auto;
-  background:
-    radial-gradient(900px 420px at 50% -120px, var(--t-accent-soft), transparent 70%),
-    var(--t-wall);
+  background: var(--t-wall);
 }
 
 .connect-panel, .settings-panel {
@@ -30,10 +28,7 @@
   background: var(--t-hero); color: #fff;
   padding: 56px 48px; display: flex; flex-direction: column; justify-content: center; gap: 14px;
 }
-.mode-hero::before, .mode-hero::after {
-  content: ''; position: absolute; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 65%);
-}
+.mode-hero::before, .mode-hero::after { content: none; }
 .mode-hero::before { width: 520px; height: 520px; right: -220px; top: -180px; }
 .mode-hero::after { width: 380px; height: 380px; left: -160px; bottom: -160px; opacity: 0.6; }
 .mode-hero > * { position: relative; }
@@ -68,7 +63,7 @@
 }
 .mode-card:hover:not(:disabled) { border-color: var(--t-accent); box-shadow: var(--t-shadow-md); transform: translateY(-1px); }
 .mode-card:disabled { opacity: 0.55; cursor: not-allowed; }
-.mode-card--featured .mode-icon { background: var(--t-accent); color: var(--t-on-accent); }
+.mode-card--featured .mode-icon { background: transparent; color: var(--t-ink); }
 .mode-card__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mode-card__text strong { font-size: 14.5px; font-weight: 650; }
 .mode-card__text span { color: var(--t-ink-2); font-size: 12.5px; }
@@ -122,7 +117,7 @@
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--t-chip); color: var(--t-ink-2);
 }
-.lan-host-card--selected .lan-host-card__icon { background: var(--t-accent); color: var(--t-on-accent); }
+.lan-host-card--selected .lan-host-card__icon { background: transparent; color: var(--t-ink); }
 .lan-host-card__copy { flex: 1; min-width: 0; }
 .lan-host-card strong { font-size: 13.5px; display: block; }
 .lan-host-card small { color: var(--t-ink-2); font-size: 12px; font-family: var(--t-mono); }
@@ -161,7 +156,7 @@
   background: var(--t-surface);
 }
 .settings-group h2 {
-  font-size: 12px; font-weight: 650; letter-spacing: 0.06em; color: var(--t-ink-3);
+  font-size: 12px; font-weight: 650;  color: var(--t-ink-3);
   margin: 10px 0 2px;
 }
 .settings-row {
@@ -184,7 +179,7 @@
 }
 .theme-switch__option[aria-checked='true'] { background: var(--t-surface-raised); color: var(--t-ink); font-weight: 600; box-shadow: var(--t-shadow-sm); }
 .theme-switch__swatch { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--t-line-strong); }
-.theme-switch__option--system .theme-switch__swatch { background: linear-gradient(135deg, #fff 50%, #1b1c24 50%); }
+.theme-switch__option--system .theme-switch__swatch { background: #fff; box-shadow: inset -6px 0 0 #1b1c24; }
 .theme-switch__option--light .theme-switch__swatch { background: #fff; }
 .theme-switch__option--dark .theme-switch__swatch { background: #1b1c24; }
 
@@ -218,3 +213,9 @@
   .form-grid { grid-template-columns: 1fr; gap: 6px; }
   .form-grid input { margin-bottom: 6px; }
 }
+
+/* achromatic-ledger：入口与品牌面板的图标不放进有色方块，统一为灰色描边图标 */
+.mode-icon, .mode-card--featured .mode-icon { width: 24px; height: 24px; background: transparent; color: var(--t-ink-2); border-radius: 0; margin: 0 4px; }
+.mode-card:hover:not(:disabled) .mode-icon { color: var(--t-ink); transform: none; }
+.mode-hero__points .icon { width: 16px; height: 16px; padding: 0; background: transparent; color: rgba(255, 255, 255, 0.72); }
+.lan-host-card__icon { background: transparent; width: 24px; height: 24px; }

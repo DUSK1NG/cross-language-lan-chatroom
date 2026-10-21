@@ -22,6 +22,19 @@ export function setMotionScale(scale: number | undefined) {
 }
 const d = (seconds: number) => seconds * durationScale;
 
+/**
+ * Killing a tween stops it before `clearProps` runs, which would leave the
+ * element frozen mid-entrance (opacity 0). Every cleanup therefore also strips
+ * the inline styles the tween wrote, so content is always left visible.
+ */
+function settle(targets: Element | Element[], props = ['opacity', 'transform', 'transform-origin']) {
+  for (const target of Array.isArray(targets) ? targets : [targets]) {
+    const style = (target as HTMLElement).style;
+    if (!style) continue;
+    for (const prop of props) style.removeProperty(prop);
+  }
+}
+
 export function animateWorkspacePanels(root: Element) {
   if (!motionAllowed()) return () => undefined;
   const context = gsap.context(() => {
@@ -50,7 +63,7 @@ export function animateMessage(element: HTMLElement | null, side: 'self' | 'peer
   const tween = gsap.fromTo(element, from,
     { opacity: 1, transform: 'translate(0px, 0px) scale(1)', duration: d(0.22), ease: 'power3.out', clearProps: 'transform,opacity' }
   );
-  return () => { tween.kill(); };
+  return () => { tween.kill(); settle(element); };
 }
 
 export function animatePopover(element: HTMLElement | null) {
@@ -59,7 +72,7 @@ export function animatePopover(element: HTMLElement | null) {
     { opacity: 0, transform: 'translateY(4px) scale(0.96)', transformOrigin: 'bottom right' },
     { opacity: 1, transform: 'translateY(0px) scale(1)', duration: d(0.18), ease: 'power3.out', clearProps: 'transform,opacity,transformOrigin' }
   );
-  return () => { tween.kill(); };
+  return () => { tween.kill(); settle(element); };
 }
 
 /** Full-page entrance used when switching between mode / connect / host / settings pages. */
@@ -69,7 +82,7 @@ export function animatePage(root: HTMLElement | null) {
     { opacity: 0, transform: 'translateY(10px)' },
     { opacity: 1, transform: 'translateY(0px)', duration: d(0.28), ease: 'power3.out', clearProps: 'transform,opacity' }
   );
-  return () => { tween.kill(); };
+  return () => { tween.kill(); settle(root); };
 }
 
 /** One-shot staggered entrance for a short list of elements (welcome cards, release-note items). */
@@ -84,7 +97,7 @@ export function animateStagger(root: HTMLElement | null, selector: string, optio
       delay: d(options.delay ?? 0), stagger: d(0.06), clearProps: 'transform,opacity'
     }
   );
-  return () => { tween.kill(); };
+  return () => { tween.kill(); settle(targets); };
 }
 
 /** Discord-style dialog pop: spring-ish scale-up from slightly below. */
@@ -94,5 +107,5 @@ export function animateDialog(element: HTMLElement | null) {
     { opacity: 0, transform: 'translateY(16px) scale(0.94)' },
     { opacity: 1, transform: 'translateY(0px) scale(1)', duration: d(0.42), ease: 'back.out(1.6)', clearProps: 'transform,opacity' }
   );
-  return () => { tween.kill(); };
+  return () => { tween.kill(); settle(element); };
 }

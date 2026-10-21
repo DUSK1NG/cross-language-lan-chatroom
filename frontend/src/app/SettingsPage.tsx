@@ -27,7 +27,7 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
       <section className="settings-panel" aria-label="设置">
         <header className="settings-header">
           <button className="icon-button settings-back" type="button" aria-label="返回聊天" onClick={onBack}><Icon name="back" /></button>
-          <div><p className="eyebrow">界面设置</p><h1>设置</h1></div>
+          <h1>设置</h1>
         </header>
         <section className="settings-group">
           <h2>界面</h2>

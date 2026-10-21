@@ -41,10 +41,7 @@ export function ConversationSidebar({ state, bridge, section, onSectionChange, o
         {onSettings && <button className="icon-button" type="button" aria-label="设置" title="设置" onClick={onSettings}><Icon name="settings" /></button>}
       </div>
       <div className="sidebar-heading">
-        <div>
-          <p className="eyebrow">{showRooms ? '群聊' : '私信'}</p>
-          <h2>{showRooms ? '频道' : '消息'}</h2>
-        </div>
+        <h2>{showRooms ? '频道' : '私信'}<span className="sidebar-heading__count">{showRooms ? state.rooms.length : state.directMessages.length}</span></h2>
         <div className="sidebar-actions">
           {showRooms ? <button className="icon-button" type="button" aria-label="新建频道" title="新建频道" onClick={onCreateRoom}><Icon name="plus" /></button> : null}
           <button className="icon-button" type="button" aria-label={showRooms ? '刷新频道' : '刷新私信'} title={showRooms ? '刷新频道' : '刷新私信'}

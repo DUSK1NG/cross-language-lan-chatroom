@@ -1,106 +1,142 @@
-/* Aurora 令牌层 — 唯一令牌来源。保留 --t-* 名称以兼容既有选择器；浅色为默认，深色由 html[data-theme='dark'] 覆盖。 */
+/* 令牌层 — achromatic-ledger（taste-skill 应用样式，seed 1573981768）。唯一令牌来源。
+   原则：界面框架无品牌色；唯一的色相 --t-accent（#1d5fbf）只落在需要注意的数据上：未读数、新消息提示、焦点环。
+   自己的消息用近黑（深色主题用浅灰）实心气泡，不再用彩色大面积填充。保留 --t-* 名称以兼容既有选择器。 */
+@font-face {
+  font-family: "Geist";
+  src: url("../assets/fonts/Geist-Variable.woff2") format("woff2-variations"), url("../assets/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
-  --t-accent: #5B5BD6;
-  --t-accent-strong: #4A48C4;
-  --t-accent-soft: #EEEEFC;
-  --t-accent-ring: rgba(91, 91, 214, 0.28);
-  --t-on-accent: #FFFFFF;
-  --t-bubble-out: #5B5BD6;
-  --t-bubble-out-ink: #FFFFFF;
-  --t-bubble-out-ink-2: rgba(255, 255, 255, 0.74);
-  --t-bubble-in: #FFFFFF;
-  --t-wall: #F4F5F8;
-  --t-sidebar: #FAFAFC;
-  --t-surface: #FFFFFF;
-  --t-surface-raised: #FFFFFF;
-  --t-ink: #16171D;
-  --t-ink-2: #5F6372;
-  --t-ink-3: #9599A6;
-  --t-online: #1F9D63;
-  --t-online-soft: #E3F5EC;
-  --t-warn: #B4730F;
-  --t-warn-soft: #FDF3E1;
-  --t-danger: #D23F4A;
-  --t-danger-strong: #B8323C;
-  --t-danger-soft: #FCE9EA;
-  --t-line: #E6E7EC;
-  --t-line-strong: #D6D8E0;
-  --t-chip: #F0F1F5;
-  --t-chip-hover: #E7E8EE;
-  --t-backdrop: rgba(17, 18, 26, 0.42);
-  --t-radius-sm: 8px;
-  --t-radius: 12px;
-  --t-radius-lg: 18px;
-  --t-bubble-radius: 16px;
-  --t-bubble-shadow: 0 1px 2px rgba(17, 18, 26, 0.06);
-  --t-shadow-sm: 0 1px 2px rgba(17, 18, 26, 0.06), 0 1px 1px rgba(17, 18, 26, 0.04);
-  --t-shadow-md: 0 8px 24px rgba(17, 18, 26, 0.08), 0 2px 6px rgba(17, 18, 26, 0.04);
-  --t-shadow-lg: 0 24px 64px rgba(17, 18, 26, 0.18), 0 4px 12px rgba(17, 18, 26, 0.06);
-  --t-drawer-shadow: -12px 0 32px rgba(17, 18, 26, 0.10);
-  --t-hero: linear-gradient(150deg, #5B5BD6 0%, #7A5AF8 48%, #3E7BFA 100%);
-  --t-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  /* 唯一色相：数据上的注意信号；不进入按钮、导航与气泡 */
+  --t-accent: #1d5fbf;
+  --t-accent-strong: #174d9c;
+  --t-accent-soft: #edf2fa;
+  --t-accent-ring: rgba(29, 95, 191, 0.32);
+  --t-on-accent: #ffffff;
+  /* 主操作：近黑实心 */
+  --t-primary: #141414;
+  --t-primary-hover: #2a2a2a;
+  --t-on-primary: #ffffff;
+  --t-active: #e9ebee;                 /* 选中行 / 导航中性灰药丸 */
+  /* 气泡：对方白底 1px 边；自己近黑实心 */
+  --t-bubble-out: #1c1d1f;
+  --t-bubble-out-ink: #ffffff;
+  --t-bubble-out-ink-2: #c4c6ca;      /* 白底近黑上 9.2:1 */
+  --t-bubble-in: #ffffff;
+  --t-bubble-in-line: #e3e5e8;
+  /* 地面：取自“网络/仪表”的低彩度蓝灰（sheet 的 face 选项一） */
+  --t-wall: #f2f4f7;
+  --t-sidebar: #f2f4f7;
+  --t-surface: #ffffff;
+  --t-surface-raised: #ffffff;
+  /* 文字三档，均 ≥ 4.5:1（白底与 #f2f4f7） */
+  --t-ink: #0a0a0a;
+  --t-ink-2: #5c5f66;                  /* 白 6.5:1 · 地面 5.9:1 */
+  --t-ink-3: #6b6e75;                  /* 白 5.2:1 · 地面 4.7:1 */
+  --t-online: #247b50;
+  --t-online-soft: #dcfae5;
+  --t-online-ink: #04250e;
+  --t-warn: #92400e;
+  --t-warn-soft: #fffbeb;
+  --t-danger: #c4242a;
+  --t-danger-strong: #a51d22;
+  --t-danger-soft: #ffedea;
+  --t-danger-ink: #831c1e;
+  --t-line: #e6e6e6;
+  --t-line-strong: #d4d4d4;
+  --t-rule: #f0f0f0;
+  --t-chip: #eef0f3;
+  --t-chip-hover: #e5e8ec;
+  --t-backdrop: rgba(10, 10, 10, 0.38);
+  /* 圆角：tight 一对（8/6），气泡 14，胶囊 999 */
+  --t-radius-sm: 6px;
+  --t-radius: 8px;
+  --t-radius-lg: 12px;
+  --t-bubble-radius: 14px;
+  --t-bubble-tail: 4px;
+  /* 阴影只给漂浮物：菜单、弹窗、表情面板、提示卡 */
+  --t-bubble-shadow: none;
+  --t-shadow-sm: none;
+  --t-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --t-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.12);
+  --t-drawer-shadow: -8px 0 24px rgba(0, 0, 0, 0.06);
+  --t-hero: #141414;
+  --t-font: "Geist", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
   --t-mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
   --t-motion-scale: 1;
-  --t-fast: calc(160ms * var(--t-motion-scale));
-  --t-sidebar-width: 300px;
+  --t-fast: calc(140ms * var(--t-motion-scale));
+  --t-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-sidebar-width: 256px;
+  --t-gap: 12px;
 
-  /* 头像色调：soft 背景 + 强调前景，8 档按用户代码稳定分配 */
-  --tone-0-bg: #EEEEFC; --tone-0-fg: #4A48C4;
-  --tone-1-bg: #E3F2FD; --tone-1-fg: #1F6FB8;
-  --tone-2-bg: #E3F5EC; --tone-2-fg: #187A4E;
-  --tone-3-bg: #FDF0E1; --tone-3-fg: #A65E0B;
-  --tone-4-bg: #FCE8EF; --tone-4-fg: #B42F63;
-  --tone-5-bg: #F1E9FD; --tone-5-fg: #7240C9;
-  --tone-6-bg: #E1F5F5; --tone-6-fg: #11787A;
-  --tone-7-bg: #FCEBE6; --tone-7-fg: #B4462A;
+  /* 人物色调：仅用于头像身份，浅色底 + 同色相深色字，彼此相距 ≥ 60° */
+  --tone-0-bg: #e8eef8; --tone-0-fg: #24477a;
+  --tone-1-bg: #e6f2ec; --tone-1-fg: #1f5a3c;
+  --tone-2-bg: #f6ece2; --tone-2-fg: #6e4317;
+  --tone-3-bg: #f4e6ee; --tone-3-fg: #73264d;
+  --tone-4-bg: #e6f0f2; --tone-4-fg: #1d5560;
+  --tone-5-bg: #f2efe2; --tone-5-fg: #5c5214;
+  --tone-6-bg: #f6e8e6; --tone-6-fg: #7a2a22;
+  --tone-7-bg: #ececf0; --tone-7-fg: #3d3d47;
 }
 
 html[data-theme='dark'] {
   color-scheme: dark;
-  --t-accent: #8B8BF5;
-  --t-accent-strong: #A3A3FA;
-  --t-accent-soft: rgba(139, 139, 245, 0.16);
-  --t-accent-ring: rgba(139, 139, 245, 0.36);
-  --t-on-accent: #0E0F1A;
-  --t-bubble-out: #5B5BD6;
-  --t-bubble-out-ink: #FFFFFF;
-  --t-bubble-out-ink-2: rgba(255, 255, 255, 0.70);
-  --t-bubble-in: #1E2029;
-  --t-wall: #111218;
-  --t-sidebar: #15161D;
-  --t-surface: #181920;
-  --t-surface-raised: #20222B;
-  --t-ink: #ECEDF3;
-  --t-ink-2: #A3A7B7;
-  --t-ink-3: #6C7083;
-  --t-online: #3CCB8A;
-  --t-online-soft: rgba(60, 203, 138, 0.14);
-  --t-warn: #F0B455;
-  --t-warn-soft: rgba(240, 180, 85, 0.14);
-  --t-danger: #F06872;
-  --t-danger-strong: #F4858D;
-  --t-danger-soft: rgba(240, 104, 114, 0.14);
-  --t-line: #262832;
-  --t-line-strong: #343744;
-  --t-chip: #22242E;
-  --t-chip-hover: #2B2E3A;
-  --t-backdrop: rgba(4, 5, 10, 0.62);
-  --t-bubble-shadow: none;
-  --t-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --t-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.36);
-  --t-shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55);
-  --t-drawer-shadow: -12px 0 32px rgba(0, 0, 0, 0.4);
-  --t-hero: linear-gradient(150deg, #3A3AA8 0%, #5A3FC0 48%, #2756B8 100%);
+  --t-accent: #6ea2ec;
+  --t-accent-strong: #8db6f0;
+  --t-accent-soft: #14213a;
+  --t-accent-ring: rgba(110, 162, 236, 0.4);
+  --t-on-accent: #0a0a0a;
+  --t-primary: #ffffff;
+  --t-primary-hover: #e6e6e6;
+  --t-on-primary: #0a0a0a;
+  --t-active: #222222;
+  /* 深色：自己的气泡反转为浅灰实心，深色字 */
+  --t-bubble-out: #e8e8e8;
+  --t-bubble-out-ink: #0a0a0a;
+  --t-bubble-out-ink-2: #4f5157;
+  --t-bubble-in: #161616;
+  --t-bubble-in-line: #262626;
+  /* 真中性黑，无藏青 */
+  --t-wall: #0b0b0b;
+  --t-sidebar: #0b0b0b;
+  --t-surface: #111111;
+  --t-surface-raised: #1a1a1a;
+  --t-ink: #ffffff;
+  --t-ink-2: #b4b4b4;
+  --t-ink-3: #949494;
+  --t-online: #3fc07a;
+  --t-online-soft: #172a1d;
+  --t-online-ink: #3fc07a;
+  --t-warn: #e0b45a;
+  --t-warn-soft: #2a2414;
+  --t-danger: #e5566f;
+  --t-danger-strong: #ef7a8e;
+  --t-danger-soft: #2c1a20;
+  --t-danger-ink: #e5566f;
+  --t-line: #232323;
+  --t-line-strong: #3a3a3a;
+  --t-rule: #1a1a1a;
+  --t-chip: #1c1c1c;
+  --t-chip-hover: #262626;
+  --t-backdrop: rgba(0, 0, 0, 0.6);
+  --t-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --t-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --t-drawer-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+  --t-hero: #111111;
 
-  --tone-0-bg: rgba(139, 139, 245, 0.18); --tone-0-fg: #B2B2FB;
-  --tone-1-bg: rgba(84, 166, 240, 0.18); --tone-1-fg: #8CC6F7;
-  --tone-2-bg: rgba(60, 203, 138, 0.16); --tone-2-fg: #7FDDB1;
-  --tone-3-bg: rgba(240, 180, 85, 0.16); --tone-3-fg: #F4C77E;
-  --tone-4-bg: rgba(240, 104, 156, 0.16); --tone-4-fg: #F59CBE;
-  --tone-5-bg: rgba(170, 120, 245, 0.18); --tone-5-fg: #C9A8FA;
-  --tone-6-bg: rgba(60, 196, 200, 0.16); --tone-6-fg: #82DDE0;
-  --tone-7-bg: rgba(240, 128, 96, 0.16); --tone-7-fg: #F6A88F;
+  --tone-0-bg: #18243a; --tone-0-fg: #a9c3ea;
+  --tone-1-bg: #16271e; --tone-1-fg: #9fd3b4;
+  --tone-2-bg: #2b2117; --tone-2-fg: #e3bf98;
+  --tone-3-bg: #2a1a23; --tone-3-fg: #e2a9c5;
+  --tone-4-bg: #15262a; --tone-4-fg: #98cdd7;
+  --tone-5-bg: #27251a; --tone-5-fg: #d9cd8f;
+  --tone-6-bg: #2b1a18; --tone-6-fg: #e8a69c;
+  --tone-7-bg: #1f1f24; --tone-7-fg: #c3c3cc;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -110,11 +146,11 @@ body {
   color: var(--t-ink);
   background: var(--t-wall);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
-h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
-h2 { font-size: 16px; font-weight: 650; }
+h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+h2 { font-size: 16px; font-weight: 600; line-height: 1.4; }
 h3 { font-size: 14px; }
 button, input, select, textarea { font: inherit; color: inherit; }
 a { color: var(--t-accent); }
@@ -132,13 +168,7 @@ a { color: var(--t-accent); }
 *::-webkit-scrollbar-thumb:hover { background-color: var(--t-ink-3); }
 *::-webkit-scrollbar-track { background: transparent; }
 
-.eyebrow {
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--t-ink-3);
-}
+.eyebrow { font-size: 12px; font-weight: 500; color: var(--t-ink-2); }
 .lede { color: var(--t-ink-2); font-size: 14px; }
 
 /* 按钮 */
@@ -174,6 +204,8 @@ a { color: var(--t-accent); }
 .icon-button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 :where(button, [role='radio'], a):focus-visible { outline: 2px solid var(--t-accent); outline-offset: 2px; }
+/* 静止的卡片与弹窗边：一律 1px，圆角取 tight 一对 */
+.modal-surface { border-radius: var(--t-radius-lg); box-shadow: var(--t-shadow-lg); }
 
 /* 表单 */
 input[type='text'], input[type='search'], input[type='password'], input:not([type]), textarea, select {
@@ -247,11 +279,9 @@ input[type='checkbox'] { accent-color: var(--t-accent); }
 /* 模态 */
 .modal-backdrop {
   position: fixed; inset: 0; background: var(--t-backdrop);
-  backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center; z-index: 40;
   animation: t-fade-in var(--t-fast) ease-out both;
 }
-html[data-effects='off'] .modal-backdrop { backdrop-filter: none; }
 .modal-surface {
   background: var(--t-surface-raised); border-radius: var(--t-radius-lg);
   border: 1px solid var(--t-line);
