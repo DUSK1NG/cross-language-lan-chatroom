@@ -60,14 +60,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mls-e2e-build
 # 统一运行包（生成 release\LANChat-Windows-x64\ 与 .zip）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
 
-# 成员包内容检查（含禁止文件检查与启动烟雾测试）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-member-package.ps1 -PackageDirectory .\release\LANChat-Windows-x64 -Smoke
+# 统一包内容检查（含禁止文件检查与启动烟雾测试）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-member-package.ps1 -PackageDirectory .\release\LANChat-Windows-x64 -AllowLocalHost -Smoke
 
 # 安装器（需要 Inno Setup 6）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version X.Y.Z -SmokeTest
 ```
 
-再手动做 `docs/release-checklist.md` 第 2 节的 ZIP 内容检查：压缩包内不得出现 `.key/.pem/.crt/.db`、`frontend|server-go|client-cpp` 目录、`node_modules|.tools`。
+再手动做 `docs/release-checklist.md` 第 2 节的 ZIP 内容检查：压缩包内不得出现 `.key/.pem/.crt/.db`、`frontend|client-cpp` 目录、`node_modules|.tools`；`server-go/` 内仅允许 `chat-server.exe`。
 
 ## 5. 记录产物哈希
 

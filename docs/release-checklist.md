@@ -54,9 +54,11 @@ $zip = Join-Path $PWD 'release\LANChat-Windows-x64.zip'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
 $forbidden = $archive.Entries | Where-Object {
-  $_.FullName -match '\.(key|pem|crt|db)$' -or
-  $_.FullName -match '(^|/)(frontend|server-go|client-cpp)/' -or
-  $_.FullName -match '(^|/)(node_modules|\.tools)/'
+  $path = $_.FullName.Replace('\', '/')
+  $path -match '\.(key|pem|crt|db)$' -or
+  $path -match '(^|/)(frontend|client-cpp)/' -or
+  $path -match '(^|/)(node_modules|\.tools)/' -or
+  ($path -match '(^|/)server-go/' -and $path -notin @('server-go/', 'server-go/chat-server.exe'))
 }
 $archive.Dispose()
 if ($forbidden) { $forbidden.FullName; throw '发布 ZIP 含不应交付的文件。' }
@@ -81,3 +83,19 @@ if ($forbidden) { $forbidden.FullName; throw '发布 ZIP 含不应交付的文�
 3. 从“已安装的应用”卸载，确认快捷方式和卸载项被移除；用户的 `%LocalAppData%\DUSK1NG\LAN Chat\host\` 身份数据按卸载提示决定是否保留。当前已知 Windows“设置”卸载可能遗留少量安装目录文件，记录即可，不作为 v1.2.0 发布阻塞项。
 
 ## 5. 记录结果
+
+### v1.3.0
+
+- 记录时间：2026-10-21 23:10:59 +08:00。
+- 构建源码：master，提交 80c72c4。
+- GitHub CI：Go server、React frontend、C++ core (headless)、C++ GUI (Windows)、Windows source launcher 全部成功。
+- 本机验证：前端 141 项测试、Go 测试和 CTest 19/19 通过；MLS++ 已启用，CTest 无跳过。
+- 包验证：统一包内容检查、启动烟雾测试和 ZIP 安全检查通过；安装器前置烟雾测试及 Inno Setup 编译通过，AppVersion 为 1.3.0。
+- 运行包中的 GUI 与构建目录中的 GUI 已通过逐字节比较，内容相同。
+- 干净机器及双机人工验收：未完成。
+
+| 文件 | SHA256 |
+| --- | --- |
+| LANChat-Windows-x64.zip | 82b3b848cd050ebed7b9045acd7ea0e166198958654d0a5e042eacc2ad24e88a |
+| LANChat-Setup-x64.exe | d0fee7f224887be25c513216cba81ac975056b0c8b4b71960a2c658c06643a46 |
+| out/modern-msvc-x64/lan-chat-gui.exe | 43d7e5ee08acaa3290b354b7028647792e4fe8a12fc22e3f94e26a47ac58c14b |
