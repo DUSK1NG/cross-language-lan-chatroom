@@ -299,7 +299,7 @@ if ($Action -eq 'Test') {
 
 if ($Action -eq 'Test') {
     Write-Step 'Run CTest'
-    $ctest = Find-CommandPath 'ctest.exe'
+    $ctest = Find-CommandPath 'ctest.exe' @((Join-Path (Split-Path -Parent $cmake) 'ctest.exe'))
     if ([string]::IsNullOrWhiteSpace($ctest)) { throw 'ctest.exe was not found.' }
     $ctestArguments = @('--test-dir', $BuildDirectory, '--output-on-failure')
     $quotedArguments = ($ctestArguments | ForEach-Object { Quote-CmdArgument $_ }) -join ' '
