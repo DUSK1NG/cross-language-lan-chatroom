@@ -18,12 +18,12 @@
 #include <QThread>
 #include <QSignalSpy>
 #include <QScopeGuard>
+#include "platform_socket.hpp"
+
 #include <QTemporaryDir>
 #include <QtTest>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
 
 #include <array>
 

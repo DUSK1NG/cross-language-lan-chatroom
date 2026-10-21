@@ -1,6 +1,6 @@
 #pragma once
 
-#include <winsock2.h>
+#include "platform_socket.hpp"
 
 #include "message.hpp"
 
