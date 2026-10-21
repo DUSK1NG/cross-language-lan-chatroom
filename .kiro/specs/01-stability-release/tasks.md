@@ -3,10 +3,14 @@
 执行规则见 `.kiro/steering/engineering-methodology.md`。每个子任务完成后勾选并追加证据行。
 
 - [ ] 1. 依赖与版本基线（分支 `feat/01-stability-baseline`）
-  - [ ] 1.1 用 `pnpm-lock.yaml` 的解析版本替换 `frontend/package.json` 中全部 `"latest"`；`pnpm install --frozen-lockfile` 通过且锁文件无变化。_R4.1_
-  - [ ] 1.2 新增 `scripts/check-version.mjs` 及其最小自测（构造不一致输入应退出 1）；接入 `.github/workflows/ci.yml` 的 frontend 作业。_R4.5_
-  - [ ] 1.3 新增 `frontend/src/app/ErrorBoundary.tsx` + `unhandledrejection` 处理；先写 vitest：子组件抛错时渲染错误页且「重试」可点击。_R5.1 R5.2_
-  - [ ] 1.4 bridge 增加 `diagnostics.frontendError` 命令：`bridge_protocol.cpp` 白名单校验（字段 `name`、`stack`，各 ≤ 2048 字节）+ `bridge_protocol_tests.cpp` 用例；仅在连接日志开启时写日志。_D5_
+  - [x] 1.1 用 `pnpm-lock.yaml` 的解析版本替换 `frontend/package.json` 中全部 `"latest"`；`pnpm install --frozen-lockfile` 通过且锁文件无变化。_R4.1_
+    > 证据：`package.json` 的 12 个 `"latest"` 改为锁文件解析出的精确版本（如 react 19.2.8、vite 8.2.2、vitest 4.1.11）；锁文件仅 `specifier:` 行随之更新，所有 `version:` 解析结果不变。`pnpm install --frozen-lockfile` 通过；`npx tsc --noEmit` 无错误；`npx vitest --run` = 16 文件 / 132 测试全绿；`npx vite build` 成功（随后删除 dist）。
+  - [x] 1.2 新增 `scripts/check-version.mjs` 及其最小自测（构造不一致输入应退出 1）；接入 `.github/workflows/ci.yml` 的 frontend 作业。_R4.5_
+    > 证据：`scripts/check-version.mjs`（纯 Node，无依赖）读取 `installer/LANChat.iss`、`scripts/package-installer.ps1`、`frontend/src/changelog/releaseNotes.ts` 三处版本号，不一致则退出码 1；`scripts/check-version.test.mjs` 用 `node --test` 喂入不一致 fixture 断言退出码 1（4 个用例全过）。CI frontend 作业新增 `node ../scripts/check-version.mjs` 步骤（该作业 working-directory 为 frontend）。真实仓库运行输出「版本一致：1.3.0」退出码 0。
+  - [x] 1.3 新增 `frontend/src/app/ErrorBoundary.tsx` + `unhandledrejection` 处理；先写 vitest：子组件抛错时渲染错误页且「重试」可点击。_R5.1 R5.2_
+    > 证据：`ErrorBoundary.tsx`（React 类组件，复用 BridgeUnavailablePage 的 `bridge-error-shell/panel`、`eyebrow`、`status-line--error`、`primary/secondary-button` 令牌类名），`frontendDiagnostics.ts`（`reportFrontendError` + `registerUnhandledRejectionReporter`，name/stack 各按 UTF-8 截断到 2048 字节并派发 `diagnostics.frontendError`），`main.tsx` 用 ErrorBoundary 包裹 App 并注册 `unhandledrejection`（`preventDefault`）。先写失败测试 `ErrorBoundary.test.tsx`（子组件抛错渲染「界面遇到问题」+ 可点击「重试」「返回」+ 校验上报命令）与 `frontendDiagnostics.test.ts`。`npx tsc --noEmit` 通过；`npx vitest --run` = 18 文件 / 141 测试全绿（新增 2 文件 9 测试，原有 132 不变）；`npx vite build` 成功（随后删除 dist）。
+  - [x] 1.4 bridge 增加 `diagnostics.frontendError` 命令：`bridge_protocol.cpp` 白名单校验（字段 `name`、`stack`，各 ≤ 2048 字节）+ `bridge_protocol_tests.cpp` 用例；仅在连接日志开启时写日志。_D5_
+    > 证据：`bridge_protocol.cpp` 新增 `boundedUtf8String` 辅助并在 `validatePayload` 白名单加入 `diagnostics.frontendError`（`name` 必填非空且 ≤ 2048 UTF-8 字节，`stack` 允许空字符串且 ≤ 2048 UTF-8 字节）。`chat_bridge.cpp` dispatch 新增分支，调用 `NetworkDiagnostics::writeConnectionEvent("frontend-error", name, …, stack)`；该函数内部经 `NetworkDiagnostics::enabled()` 自门控，连接日志关闭时为 no-op，满足「仅在连接日志开启时写日志」。`bridge_protocol_tests.cpp` 新增 `acceptsFrontendErrorDiagnosticsCommand`（含空 stack 与 2048 边界）与 `rejectsOversizedFrontendErrorFields`（空 name、name/stack 超 2048 字节均拒绝）。**C++ 未在本环境编译/运行**（沙箱无 Qt6/OpenSSL 开发头文件，dnf 只读无法安装）；需在 Windows 或装有 Qt6 的 Linux 上跑 `scripts/build-modern.ps1 -Action Test` / ctest 验证。
 
 - [ ] 2. C++ 进入 CI（分支 `feat/01-stability-ci`）
   - [ ] 2.1 在 `client-cpp/gui/CMakeLists.txt` 抽出 `lan_chat_core` 静态库并增加 `LAN_CHAT_BUILD_GUI` 选项；GUI=ON 时目标与测试列表与现在完全一致（对比 `ctest -N` 输出）。_D2.1_

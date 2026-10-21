@@ -13,6 +13,8 @@ private slots:
     void acceptsHistorySearchCommand();
     void acceptsPerformanceModeCommand();
     void acceptsConnectionLogPreferenceCommand();
+    void acceptsFrontendErrorDiagnosticsCommand();
+    void rejectsOversizedFrontendErrorFields();
     void acceptsBoundedFrameTelemetryCommand();
     void acceptsMlsKeyPackageFetchCommand();
     void acceptsMlsGroupAddCommand();
@@ -105,6 +107,68 @@ void BridgeProtocolTests::acceptsConnectionLogPreferenceCommand() {
     QString error;
     QVERIFY(bridge::validateCommand(command, &error));
     QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::acceptsFrontendErrorDiagnosticsCommand() {
+    const QJsonObject command{
+        {"id", "cmd-frontend-error"},
+        {"type", "diagnostics.frontendError"},
+        {"payload", QJsonObject{{"name", "TypeError"},
+                                 {"stack", "at Component (App.tsx:12)"}}}
+    };
+
+    QString error;
+    QVERIFY(bridge::validateCommand(command, &error));
+    QVERIFY(error.isEmpty());
+
+    // An empty stack (e.g. a missing React component stack) is still accepted.
+    const QJsonObject emptyStack{
+        {"id", "cmd-frontend-error-empty-stack"},
+        {"type", "diagnostics.frontendError"},
+        {"payload", QJsonObject{{"name", "Error"}, {"stack", ""}}}
+    };
+    QVERIFY(bridge::validateCommand(emptyStack, &error));
+    QVERIFY(error.isEmpty());
+
+    // Fields exactly at the 2048-byte boundary are accepted.
+    const QJsonObject atBoundary{
+        {"id", "cmd-frontend-error-boundary"},
+        {"type", "diagnostics.frontendError"},
+        {"payload", QJsonObject{{"name", "Error"}, {"stack", QString(2048, 'x')}}}
+    };
+    QVERIFY(bridge::validateCommand(atBoundary, &error));
+    QVERIFY(error.isEmpty());
+}
+
+void BridgeProtocolTests::rejectsOversizedFrontendErrorFields() {
+    QString error;
+
+    // A missing/blank error name is rejected.
+    const QJsonObject blankName{
+        {"id", "cmd-frontend-error-blank"},
+        {"type", "diagnostics.frontendError"},
+        {"payload", QJsonObject{{"name", " "}, {"stack", "trace"}}}
+    };
+    QVERIFY(!bridge::validateCommand(blankName, &error));
+    QCOMPARE(error, QStringLiteral("invalid_command"));
+
+    // A name exceeding 2048 UTF-8 bytes is rejected.
+    const QJsonObject longName{
+        {"id", "cmd-frontend-error-long-name"},
+        {"type", "diagnostics.frontendError"},
+        {"payload", QJsonObject{{"name", QString(2049, 'n')}, {"stack", "trace"}}}
+    };
+    QVERIFY(!bridge::validateCommand(longName, &error));
+    QCOMPARE(error, QStringLiteral("invalid_command"));
+
+    // A stack exceeding 2048 UTF-8 bytes is rejected.
+    const QJsonObject longStack{
+        {"id", "cmd-frontend-error-long-stack"},
+        {"type", "diagnostics.frontendError"},
+        {"payload", QJsonObject{{"name", "Error"}, {"stack", QString(2049, 's')}}}
+    };
+    QVERIFY(!bridge::validateCommand(longStack, &error));
+    QCOMPARE(error, QStringLiteral("invalid_command"));
 }
 
 void BridgeProtocolTests::acceptsBoundedFrameTelemetryCommand() {

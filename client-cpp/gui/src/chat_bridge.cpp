@@ -514,6 +514,15 @@ void ChatBridge::dispatch(const QString& commandJson) {
     } else if (type == QStringLiteral("settings.setConnectionLogging")) {
         NetworkDiagnostics::setEnabled(payload.value("enabled").toBool());
         scheduleStateUpdate();
+    } else if (type == QStringLiteral("diagnostics.frontendError")) {
+        // Only persist the report when connection logging is already enabled;
+        // writeConnectionEvent is a no-op otherwise (NetworkDiagnostics::enabled()).
+        NetworkDiagnostics::writeConnectionEvent(
+            QStringLiteral("frontend-error"), payload.value(QStringLiteral("name")).toString(), 0, 0,
+            payload.value(QStringLiteral("stack")).toString());
+        emit commandResult(QString::fromUtf8(
+            QJsonDocument(bridge::makeCommandResult(commandId, true)).toJson(QJsonDocument::Compact)));
+        return;
     } else if (type == QStringLiteral("performance.reportFrameTimes")) {
         if (performanceProfile_) {
             const QJsonArray frameTimes = payload.value(QStringLiteral("frameTimesMs")).toArray();

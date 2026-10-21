@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App';
 import { BridgeUnavailablePage } from './app/BridgeUnavailablePage';
+import { ErrorBoundary } from './app/ErrorBoundary';
+import { registerUnhandledRejectionReporter } from './app/frontendDiagnostics';
 import { resolveRuntimeBridge } from './app/runtimeBridge';
 import { createFakeBridge, createWebChannelBridge } from './bridge/chatBridge';
 import type { BridgeState } from './bridge/types';
@@ -29,7 +31,15 @@ async function bootstrap() {
     root.render(<BridgeUnavailablePage message={resolution.error ?? 'Qt bridge 未连接'} onRetry={() => window.location.reload()} />);
     return;
   }
-  root.render(<StrictMode><App bridge={resolution.bridge} /></StrictMode>);
+  const bridge = resolution.bridge;
+  registerUnhandledRejectionReporter(bridge);
+  root.render(
+    <StrictMode>
+      <ErrorBoundary bridge={bridge} onBack={() => window.location.reload()}>
+        <App bridge={bridge} />
+      </ErrorBoundary>
+    </StrictMode>
+  );
 }
 
 void bootstrap();
