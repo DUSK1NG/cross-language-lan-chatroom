@@ -17,9 +17,13 @@ option(LAN_CHAT_ENABLE_TEST_HOOKS "Enable explicit test-only runtime hooks" OFF)
 # Qt Core/Network/Test, OpenSSL and Threads. Keeping the component list minimal
 # in that mode lets CI run on a machine that has only qt6-base-dev installed.
 if(LAN_CHAT_BUILD_GUI)
+    # WebEngine/WebChannel and the Aurora UI need Qt 6.5+.
     find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Test Network Widgets WebEngineWidgets WebChannel)
 else()
-    find_package(Qt6 6.5 REQUIRED COMPONENTS Core Test Network)
+    # The headless core build only exercises Qt Core/Network/Test. Distribution
+    # packages such as Ubuntu's qt6-base-dev ship 6.4, which is sufficient for
+    # the pure-logic libraries and tests, so do not force the GUI's 6.5 floor.
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Core Test Network)
 endif()
 find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
 find_package(Threads REQUIRED)
@@ -148,8 +152,15 @@ if(MSVC)
     add_compile_definitions(NOMINMAX)
 endif()
 
-qt_standard_project_setup(REQUIRES 6.5)
-qt_policy(SET QTP0004 NEW)
+if(LAN_CHAT_BUILD_GUI)
+    qt_standard_project_setup(REQUIRES 6.5)
+    # QTP0004 (extra module include dirs) only exists on Qt 6.5+.
+    qt_policy(SET QTP0004 NEW)
+else()
+    # Core build may run against Qt 6.4 (e.g. Ubuntu qt6-base-dev); do not pin
+    # the 6.5 floor or set 6.5-only policies here.
+    qt_standard_project_setup()
+endif()
 
 # ---------------------------------------------------------------------------
 # lan_chat_core: the pure-logic sources shared by the GUI executable and the
