@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="360" viewBox="0 0 880 360" role="img" aria-labelledby="t d">
+  <title id="t">LAN Chat v1.3.0 · Aurora</title>
+  <desc id="d">LAN Chat 1.3.0 发行版卡片：全新 Aurora 界面、深色模式、动画体验与版本更新卡片。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="0.5" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#3B82F6"/>
+    </linearGradient>
+    <radialGradient id="orbA"><stop offset="0" stop-color="#fff" stop-opacity="0.38"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="orbB"><stop offset="0" stop-color="#EC4899" stop-opacity="0.6"/><stop offset="1" stop-color="#EC4899" stop-opacity="0"/></radialGradient>
+    <radialGradient id="orbC"><stop offset="0" stop-color="#38BDF8" stop-opacity="0.6"/><stop offset="1" stop-color="#38BDF8" stop-opacity="0"/></radialGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.28"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#fff" stroke-opacity="0.12"/>
+    </pattern>
+    <clipPath id="card"><rect width="880" height="360" rx="24"/></clipPath>
+    <path id="spark" d="M0 -8 L2 -2 L8 0 L2 2 L0 8 L-2 2 L-8 0 L-2 -2 Z" fill="#fff"/>
+  </defs>
+  <style>
+    .f { font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC", sans-serif; }
+    .orb-a { animation: floatA 8s ease-in-out infinite alternate; }
+    .orb-b { animation: floatB 9s ease-in-out infinite alternate; }
+    .orb-c { animation: floatA 11s ease-in-out infinite alternate-reverse; }
+    .shine { animation: shine 5s ease-in-out 1s infinite; }
+    .mark { animation: bob 4s ease-in-out infinite; transform-origin: 140px 160px; transform-box: view-box; }
+    .spark { animation: twinkle 2.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; opacity: 0; }
+    .s1 { animation-delay: .6s } .s2 { animation-delay: 1.2s } .s3 { animation-delay: 1.8s } .s4 { animation-delay: 2.2s }
+    .rise { animation: rise .7s cubic-bezier(.22,1,.36,1) both; }
+    .r1 { animation-delay: .1s } .r2 { animation-delay: .2s } .r3 { animation-delay: .32s } .r4 { animation-delay: .44s } .r5 { animation-delay: .56s }
+    @keyframes floatA { to { transform: translate(60px, 30px) scale(1.15); } }
+    @keyframes floatB { to { transform: translate(-50px, -26px) scale(1.1); } }
+    @keyframes shine { 0% { transform: translateX(-420px) skewX(-14deg); } 50%, 100% { transform: translateX(1100px) skewX(-14deg); } }
+    @keyframes bob { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-9px) rotate(3deg); } }
+    @keyframes twinkle { 0%, 100% { opacity: 0; transform: scale(.4) rotate(0); } 45% { opacity: 1; transform: scale(1) rotate(45deg); } 70% { opacity: .2; } }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } .spark { opacity: .8; } }
+  </style>
+
+  <g clip-path="url(#card)">
+    <rect width="880" height="360" fill="url(#bg)"/>
+    <rect width="880" height="360" fill="url(#grid)"/>
+    <circle class="orb-a" cx="90" cy="40" r="200" fill="url(#orbA)"/>
+    <circle class="orb-b" cx="820" cy="350" r="190" fill="url(#orbB)"/>
+    <circle class="orb-c" cx="640" cy="20" r="140" fill="url(#orbC)"/>
+    <rect class="shine" x="0" y="-60" width="260" height="480" fill="url(#shine)"/>
+
+    <use href="#spark" class="spark" x="250" y="70"/>
+    <use href="#spark" class="spark s1" x="820" y="80"/>
+    <use href="#spark" class="spark s2" x="60" y="290"/>
+    <use href="#spark" class="spark s3" x="560" y="320"/>
+    <use href="#spark" class="spark s4" x="720" y="190"/>
+
+    <!-- 吉祥物气泡（矢量简化版） -->
+    <g class="mark">
+      <rect x="80" y="100" width="120" height="120" rx="34" fill="#fff" fill-opacity="0.96"/>
+      <path d="M110 140c0-14 12-24 30-24s30 10 30 24-12 24-30 24c-4 0-8 0-11-1l-13 9 3-12c-6-5-9-12-9-20z" fill="#5B5BD6"/>
+      <circle cx="129" cy="140" r="4" fill="#fff"/><circle cx="141" cy="140" r="4" fill="#fff"/><circle cx="153" cy="140" r="4" fill="#fff"/>
+      <text x="140" y="203" text-anchor="middle" class="f" font-size="13" font-weight="700" fill="#5B5BD6">LAN Chat</text>
+    </g>
+
+    <g class="f">
+      <g class="rise r1">
+        <rect x="248" y="58" width="132" height="30" rx="15" fill="#fff" fill-opacity="0.18" stroke="#fff" stroke-opacity="0.35"/>
+        <text x="314" y="78" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" letter-spacing="1">v1.3.0 · 新版本</text>
+      </g>
+      <text class="rise r2" x="248" y="138" font-size="44" font-weight="800" fill="#fff">全新 Aurora 界面</text>
+      <text class="rise r3" x="250" y="176" font-size="18" fill="#fff" fill-opacity="0.86">更清晰的层级、深色模式，以及一整套顺滑的动画。</text>
+
+      <g class="rise r4" font-size="15" font-weight="700">
+        <rect x="248" y="214" width="150" height="40" rx="12" fill="#23A55A"/>
+        <path d="M276 229a7 7 0 1 0 7 9 5.5 5.5 0 0 1-7-9z" fill="#fff"/>
+        <text x="333" y="239" text-anchor="middle" fill="#fff">深色模式</text>
+        <rect x="410" y="214" width="150" height="40" rx="12" fill="#fff" fill-opacity="0.16" stroke="#fff" stroke-opacity="0.3"/>
+        <use href="#spark" x="440" y="234" transform="translate(440 234) scale(0.9) translate(-440 -234)"/>
+        <text x="495" y="239" text-anchor="middle" fill="#fff">动画体验</text>
+        <rect x="572" y="214" width="178" height="40" rx="12" fill="#fff" fill-opacity="0.16" stroke="#fff" stroke-opacity="0.3"/>
+        <rect x="596" y="227" width="16" height="14" rx="3" fill="none" stroke="#fff" stroke-width="2"/>
+        <path d="M596 232h16" stroke="#fff" stroke-width="2"/>
+        <text x="671" y="239" text-anchor="middle" fill="#fff">版本更新卡片</text>
+      </g>
+      <text class="rise r5" x="250" y="300" font-size="13.5" fill="#fff" fill-opacity="0.72">TLS 传输 · MLS 端到端加密 · 房主审批每一次连接 — Windows x64</text>
+    </g>
+  </g>
+</svg>

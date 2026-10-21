@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { animatePopover } from '../animation/motion';
+import { Icon } from './Icon';
 
 type EmojiPickerProps = { onSelect(emoji: string): void; onClose(): void };
 
@@ -18,7 +19,7 @@ export function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
   useLayoutEffect(() => animatePopover(pickerRef.current), []);
   return (
     <div ref={pickerRef} className="emoji-picker" role="dialog" aria-label="表情选择器">
-      <div className="emoji-picker__header"><strong>选择表情</strong><button type="button" aria-label="关闭表情选择器" onClick={onClose}>×</button></div>
+      <div className="emoji-picker__header"><strong>选择表情</strong><button type="button" aria-label="关闭表情选择器" onClick={onClose}><Icon name="close" size={15} /></button></div>
       <div className="emoji-picker__tabs" role="tablist" aria-label="表情分类">
         {Object.keys(categories).map((name) => <button key={name} type="button" role="tab" aria-selected={category === name} onClick={() => setCategory(name)}>{name}</button>)}
       </div>

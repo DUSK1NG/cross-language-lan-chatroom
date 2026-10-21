@@ -1,4 +1,6 @@
 import type { BridgeState, MemberSummary } from '../bridge/types';
+import { Avatar } from './Avatar';
+import { Icon } from './Icon';
 
 type MemberPanelProps = {
   state: BridgeState;
@@ -16,11 +18,11 @@ export function MemberPanel({ state, className = '', localUserCode, onStartDirec
 
   return (
     <aside className={`member-panel ${className}`.trim()} data-testid="member-panel" data-motion="workspace-panel" aria-label="成员">
-      <div className="sidebar-heading"><div><p className="eyebrow">成员</p><h2>成员</h2></div><span className="member-count" aria-label="在线成员数量">{onlineCount}</span>{onClose && <button type="button" className="icon-button" aria-label="关闭成员列表" onClick={onClose}>×</button>}</div>
+      <div className="sidebar-heading"><div><p className="eyebrow">成员 · {state.members.length}</p><h2>成员</h2></div><span className="member-count" aria-label="在线成员数量">{onlineCount}</span>{onClose && <button type="button" className="icon-button" aria-label="关闭成员列表" onClick={onClose}><Icon name="close" /></button>}</div>
       <div className="member-list">
         {state.members.map((member) => (
-          <div className="member-row" key={member.userCode}>
-            {onViewProfile ? <button type="button" className="member-profile-button" aria-label={`查看 ${member.displayName}`} onClick={() => onViewProfile(member)}><span className="avatar">{member.displayName.slice(0, 1)}</span></button> : <span className="avatar">{member.displayName.slice(0, 1)}</span>}
+          <div className={`member-row${member.online ? '' : ' member-row--offline'}`} key={member.userCode}>
+            {onViewProfile ? <button type="button" className="member-profile-button" aria-label={`查看 ${member.displayName}`} onClick={() => onViewProfile(member)}><Avatar name={member.displayName} seed={member.userCode} size="small" /></button> : <Avatar name={member.displayName} seed={member.userCode} size="small" />}
             <span className="conversation-copy"><strong>{member.displayName}</strong><small>#{member.userCode}</small></span>
             <span className={`presence-dot ${member.online ? 'presence-dot--online' : ''}`} aria-label={member.online ? '在线' : '离线'} />
             {member.admin && <small className="member-admin-badge">管理员</small>}

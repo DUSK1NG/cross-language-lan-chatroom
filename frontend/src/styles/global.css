@@ -1,4 +1,7 @@
-/* T3 入口：三个 partial，全部消费 tokens.css 的 --t-* 令牌。 */
+/* Aurora 入口：令牌 → 页面 → 工作区 → 动效 → 发行版卡片，全部消费 tokens.css 的 --t-* 令牌。 */
 @import './tokens.css';
 @import './pages.css';
 @import './workspace.css';
+@import './motion.css';
+@import './release.css';
+@import './cards.css';

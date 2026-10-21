@@ -6,6 +6,7 @@ import { attachmentErrorCopy, type AttachmentUploadState } from '../bridge/attac
 import { useAttachmentUploads } from '../state/useAttachmentUploads';
 import { CommandFeedback } from './CommandFeedback';
 import { EmojiPicker } from './EmojiPicker';
+import { Icon } from './Icon';
 
 export type QuoteDraft = { displayName: string; content: string };
 
@@ -136,13 +137,13 @@ export function MessageComposer({ state, bridge, quote = null, onClearQuote, dra
         </div>
       )}
       <form className="message-composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        <textarea ref={textareaRef} aria-label="消息输入框" rows={2} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={onComposerKeyDown} placeholder="输入消息…" />
+        <textarea ref={textareaRef} aria-label="消息输入框" rows={1} value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={onComposerKeyDown} placeholder={active ? `发送到 ${active.kind === 'room' ? `#${active.title}` : active.title}…  Enter 发送，Shift+Enter 换行` : '输入消息…'} />
         <button className="attach-button" type="button" aria-label="添加附件"
           title={active?.kind === 'room' ? '发送附件' : '附件暂仅支持频道会话'}
           disabled={!active || active.kind !== 'room'}
-          onClick={chooseUpload}>📎</button>
-        <button className="emoji-button" type="button" aria-label="表情" onClick={() => setEmojiOpen((open) => !open)}>☺</button>
-        <button className="send-button" type="submit" aria-label="发送消息" disabled={!draft.trim() || pendingCommandIdRef.current !== null}>↗</button>
+          onClick={chooseUpload}><Icon name="attach" /></button>
+        <button className="emoji-button" type="button" aria-label="表情" aria-expanded={emojiOpen} onClick={() => setEmojiOpen((open) => !open)}><Icon name="smile" /></button>
+        <button className="send-button" type="submit" aria-label="发送消息" disabled={!draft.trim() || pendingCommandIdRef.current !== null}><Icon name="send" size={17} /></button>
       </form>
       {emojiOpen && <EmojiPicker onSelect={insertEmoji} onClose={() => setEmojiOpen(false)} />}
     </div>
@@ -179,7 +180,7 @@ function UploadCard({ commandId, upload, onRemove, onRetry }: {
   const percent = progress === undefined ? undefined : `${(progress * 100).toFixed(progress > 0 && progress < 0.01 ? 2 : 1)}%`;
   return (
     <div className={`upload-card${failed ? ' upload-card--failed' : ''}`} data-testid={`attachment-card-${commandId}`}>
-      <span className="upload-card__badge" aria-hidden="true">📎</span>
+      <span className="upload-card__badge" aria-hidden="true"><Icon name={failed ? 'alert' : 'file'} size={18} /></span>
       <span className="upload-card__body">
         {failed && <>
           <span className="upload-card__title">附件发送失败</span>
@@ -216,7 +217,7 @@ function UploadCard({ commandId, upload, onRemove, onRetry }: {
       {!failed && <button className="upload-card__remove" type="button"
         aria-label={choosing ? `取消选择 ${commandId}` : `取消上传 ${commandId}`}
         title={choosing ? undefined : '取消命令待对齐：仅隐藏预览卡'}
-        onClick={onRemove}>✕</button>}
+        onClick={onRemove}><Icon name="close" size={14} /></button>}
     </div>
   );
 }

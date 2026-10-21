@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { createCommand } from '../bridge/chatBridge';
 import type { BridgeState, ChatBridgeClient } from '../bridge/types';
@@ -7,6 +7,12 @@ import { WorkspacePage } from './WorkspacePage';
 import { SettingsPage } from './SettingsPage';
 import { inferPrivateKeyPath } from './hostPaths';
 import { useFrameTelemetry } from '../performance/useFrameTelemetry';
+import { useAppSettings, useResolvedTheme } from '../state/appSettings';
+import { Icon, type IconName } from '../components/Icon';
+import catBrandMark from '../assets/lan-chat-cat.png';
+import { animatePage, animateStagger, setMotionScale } from '../animation/motion';
+import { ReleaseNotesCard } from '../changelog/ReleaseNotesCard';
+import { hasSeenRelease, markReleaseSeen } from '../changelog/releaseNotes';
 import '../styles/global.css';
 
 type AppProps = { bridge: ChatBridgeClient };
@@ -16,12 +22,18 @@ const discoveryRefreshIntervalMs = 3000;
 export function App({ bridge }: AppProps) {
   const state = useBridgeState(bridge);
   useFrameTelemetry(bridge);
+  const settings = useAppSettings();
+  useResolvedTheme(settings.theme);
   const [page, setPage] = useState(state.navigation.page);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('remote');
   const hostAvailable = state.hostDefaults?.available !== false;
   const hostUnavailableReason = state.hostDefaults?.unavailableReason || '此安装包不包含本地服务端';
 
   const effectsEnabled = state.performance?.effectsEnabled !== false;
+  const [releaseOpen, setReleaseOpen] = useState(() => !hasSeenRelease());
+  const closeRelease = useCallback(() => { markReleaseSeen(); setReleaseOpen(false); }, []);
+
+  useEffect(() => { setMotionScale(state.performance?.animationDurationScale); }, [state.performance?.animationDurationScale]);
 
   useEffect(() => {
     document.documentElement.dataset.effects = effectsEnabled ? 'on' : 'off';
@@ -31,32 +43,41 @@ export function App({ bridge }: AppProps) {
     if (state.connection.phase === 'connected' && page !== 'settings') setPage('workspace');
   }, [state.connection.phase]);
 
+  let content;
   if (page === 'connect') {
-    return <RemoteConnectionPage bridge={bridge} state={state} mode={connectionMode} onBack={() => setPage('mode')} />;
-  }
-
-  if (page === 'host') {
-    return <LocalHostPage bridge={bridge} state={state} onBack={() => setPage('mode')} />;
-  }
-
-  if (page === 'settings') {
-    return <SettingsPage bridge={bridge} state={state} onBack={() => setPage('workspace')} />;
-  }
-
-  if (page === 'workspace' && (state.connection.phase === 'connected' || state.connection.phase === 'reconnecting')) {
-    return <WorkspacePage bridge={bridge} state={state} onSettings={() => setPage('settings')} />;
+    content = <RemoteConnectionPage bridge={bridge} state={state} mode={connectionMode} onBack={() => setPage('mode')} />;
+  } else if (page === 'host') {
+    content = <LocalHostPage bridge={bridge} state={state} onBack={() => setPage('mode')} />;
+  } else if (page === 'settings') {
+    content = <SettingsPage bridge={bridge} state={state} onBack={() => setPage('workspace')} onShowReleaseNotes={() => setReleaseOpen(true)} />;
+  } else if (page === 'workspace' && (state.connection.phase === 'connected' || state.connection.phase === 'reconnecting')) {
+    content = <WorkspacePage bridge={bridge} state={state} onSettings={() => setPage('settings')} />;
+  } else {
+    content = (
+      <ModeSelectionPage
+        onRemote={() => { setConnectionMode('remote'); setPage('connect'); }}
+        onGuest={() => { setConnectionMode('guest'); setPage('connect'); }}
+        onTunnel={() => { setConnectionMode('tunnel'); setPage('connect'); }}
+        onLocalHost={() => setPage('host')}
+        hostAvailable={hostAvailable}
+        hostUnavailableReason={hostUnavailableReason}
+      />
+    );
   }
 
   return (
-    <ModeSelectionPage
-      onRemote={() => { setConnectionMode('remote'); setPage('connect'); }}
-      onGuest={() => { setConnectionMode('guest'); setPage('connect'); }}
-      onTunnel={() => { setConnectionMode('tunnel'); setPage('connect'); }}
-      onLocalHost={() => setPage('host')}
-      hostAvailable={hostAvailable}
-      hostUnavailableReason={hostUnavailableReason}
-    />
+    <>
+      {content}
+      {releaseOpen && <ReleaseNotesCard onClose={closeRelease} />}
+    </>
   );
+}
+
+/** Animates every non-workspace page on mount (the workspace has its own surface entrance). */
+function usePageEntrance<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => animatePage(ref.current), []);
+  return ref;
 }
 
 function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvailable, hostUnavailableReason }: {
@@ -67,36 +88,60 @@ function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvail
   hostAvailable: boolean;
   hostUnavailableReason: string;
 }) {
+  const cards: { label: string; icon: IconName; title: string; copy: string; onClick: () => void; disabled?: boolean; featured?: boolean }[] = [
+    { label: 'local-host-mode', icon: 'home', title: '创建本地聊天室', copy: hostAvailable ? '当前电脑启动 Go Server，作为 Host' : hostUnavailableReason, onClick: onLocalHost, disabled: !hostAvailable, featured: true },
+    { label: 'guest-mode', icon: 'wifi', title: '加入局域网聊天室', copy: '作为 Guest 连接另一台电脑上的 Host', onClick: onGuest, featured: true },
+    { label: 'remote-mode', icon: 'server', title: '远程服务器', copy: '连接已经部署好的 Go Server', onClick: onRemote },
+    { label: 'tunnel-mode', icon: 'tunnel', title: '通过 TCP 隧道加入', copy: '使用外部隧道提供的地址、端口和公开证书', onClick: onTunnel }
+  ];
+  const shellRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const stopCards = animateStagger(shellRef.current, '.mode-card', { delay: 0.08 });
+    const stopHero = animateStagger(shellRef.current, '.mode-hero > *', { distance: 16 });
+    return () => { stopCards(); stopHero(); };
+  }, []);
   return (
-    <main className="app-shell mode-shell">
+    <main ref={shellRef} className="app-shell mode-shell">
+      <section className="mode-hero" aria-label="LAN Chat 简介">
+        <img className="mode-hero__mark" src={catBrandMark} alt="" />
+        <p className="mode-hero__name">LAN Chat</p>
+        <p className="mode-hero__tagline">只在你信任的网络里，安静地聊天。</p>
+        <ul className="mode-hero__points">
+          <li><Icon name="shield" size={16} />TLS 传输 · 证书指纹校验</li>
+          <li><Icon name="lock" size={16} />MLS 端到端加密频道与附件</li>
+          <li><Icon name="users" size={16} />房主审批每一次成员连接</li>
+        </ul>
+      </section>
       <section className="mode-panel">
         <p className="eyebrow">LAN CHAT / LOCAL WORKSPACE</p>
         <h1>选择聊天方式</h1>
         <p className="lede">安全、稳定的 Go + Qt 局域网聊天</p>
         <div className="mode-grid">
-          <button className="mode-card" type="button" aria-label="remote-mode" onClick={onRemote}>
-            <span className="mode-icon" aria-hidden="true">↗</span>
-            <strong>远程服务器</strong>
-            <span>连接已经部署好的 Go Server</span>
-          </button>
-          <button className="mode-card" type="button" aria-label="local-host-mode" onClick={onLocalHost} disabled={!hostAvailable}>
-            <span className="mode-icon" aria-hidden="true">⌂</span>
-            <strong>创建本地聊天室</strong>
-            <span>{hostAvailable ? '当前电脑启动 Go Server，作为 Host' : hostUnavailableReason}</span>
-          </button>
-          <button className="mode-card" type="button" aria-label="guest-mode" onClick={onGuest}>
-            <span className="mode-icon" aria-hidden="true">◌</span>
-            <strong>加入局域网聊天室</strong>
-            <span>作为 Guest 连接另一台电脑上的 Host</span>
-          </button>
-          <button className="mode-card" type="button" aria-label="tunnel-mode" onClick={onTunnel}>
-            <span className="mode-icon" aria-hidden="true">⇄</span>
-            <strong>通过 TCP 隧道加入</strong>
-            <span>使用外部隧道提供的地址、端口和公开证书</span>
-          </button>
+          {cards.map((card) => (
+            <button key={card.label} className={`mode-card${card.featured ? ' mode-card--featured' : ''}`} type="button" aria-label={card.label} onClick={card.onClick} disabled={card.disabled}>
+              <span className="mode-icon" aria-hidden="true"><Icon name={card.icon} size={20} /></span>
+              <span className="mode-card__text">
+                <strong>{card.title}</strong>
+                <span>{card.copy}</span>
+              </span>
+              <span className="mode-card__go" aria-hidden="true"><Icon name="arrowRight" size={16} /></span>
+            </button>
+          ))}
         </div>
       </section>
     </main>
+  );
+}
+
+function PageHeader({ eyebrow, title, onBack, busy }: { eyebrow: string; title: string; onBack: () => void; busy: boolean }) {
+  return (
+    <header className="page-header">
+      <button className="icon-button page-header__back" type="button" aria-label="返回模式选择" title="返回" onClick={onBack} disabled={busy}><Icon name="back" /></button>
+      <div>
+        <p className="eyebrow">{eyebrow}</p>
+        <h1>{title}</h1>
+      </div>
+    </header>
   );
 }
 
@@ -168,17 +213,17 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
     setManualEntry(false);
   }
 
+  const pageRef = usePageEntrance<HTMLElement>();
   return (
     <main className="app-shell connect-shell">
-      <section className="connect-panel">
-        <p className="eyebrow">SECURE CONNECTION</p>
-        <h1>{tunnel ? '通过 TCP 隧道加入' : (guest ? '加入局域网聊天室' : '连接远程服务器')}</h1>
+      <section ref={pageRef} className="connect-panel">
+        <PageHeader eyebrow="SECURE CONNECTION" title={tunnel ? '通过 TCP 隧道加入' : (guest ? '加入局域网聊天室' : '连接远程服务器')} onBack={onBack} busy={busy} />
         <ConnectionStatus state={state} />
         <p className="connection-help">
           {tunnel ? '填写外部隧道提供的主机和端口，并使用房主的公开证书。隧道令牌和私钥只保留在外部隧道工具中。' : (guest ? '自动发现局域网或同一虚拟局域网内的房主；IPv4 变化后会持续重新发现。手动连接仍可作为备用方式。' : '填写已经启动 Go Server 的电脑 IPv4 和端口。')}
         </p>
         {tunnel && <section className="tunnel-guide" aria-label="tunnel-connection-guide">
-          <strong>安全边界</strong>
+          <strong><Icon name="shield" size={15} />安全边界</strong>
           <p>LAN Chat 只建立 TLS 聊天连接，不启动或配置隧道，也不会读取隧道令牌、私钥或配置文件。</p>
         </section>}
         {guest && (
@@ -189,9 +234,9 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
                 <strong>附近聊天室</strong>
                 <small>{discovery.scanning ? '正在搜索局域网和虚拟局域网聊天室…' : '自动发现同一局域网或虚拟局域网内的房主'}</small>
               </div>
-              <button className="secondary-button" type="button" aria-label="refresh-lan-hosts"
+              <button className="secondary-button button--with-icon" type="button" aria-label="refresh-lan-hosts"
                 onClick={() => bridge.dispatch(createCommand('session.discoverLanHosts', {}))} disabled={busy}>
-                刷新
+                <Icon name="refresh" size={15} />刷新
               </button>
             </div>
             {discovery.hosts.length === 0 ? (
@@ -202,8 +247,9 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
                   <button className={`lan-host-card${selectedHostId === host.id && !manualEntry ? ' lan-host-card--selected' : ''}`}
                     type="button" key={host.id} aria-label={`select-lan-host-${host.hostName}`}
                     aria-pressed={selectedHostId === host.id && !manualEntry} onClick={() => selectHost(host.id)} disabled={busy}>
-                    <span><strong>{host.hostName}</strong><small>{host.serverIp}:{host.serverPort}</small></span>
-                    <span className="lan-host-card__trust">{host.known ? '已信任' : '首次确认'}</span>
+                    <span className="lan-host-card__icon" aria-hidden="true"><Icon name="server" size={18} /></span>
+                    <span className="lan-host-card__copy"><strong>{host.hostName}</strong><small>{host.serverIp}:{host.serverPort}</small></span>
+                    <span className={`lan-host-card__trust${host.known ? ' lan-host-card__trust--known' : ''}`}>{host.known ? '已信任' : '首次确认'}</span>
                   </button>
                 ))}
               </div>
@@ -288,11 +334,11 @@ function LocalHostPage({ bridge, state, onBack }: {
     }));
   }
 
+  const pageRef = usePageEntrance<HTMLElement>();
   return (
     <main className="app-shell connect-shell">
-      <section className="connect-panel host-panel">
-        <p className="eyebrow">LOCAL HOST</p>
-        <h1>创建本地聊天室</h1>
+      <section ref={pageRef} className="connect-panel host-panel">
+        <PageHeader eyebrow="LOCAL HOST" title="创建本地聊天室" onBack={onBack} busy={busy} />
         <ConnectionStatus state={state} />
         <p className="connection-help">程序会启动本地 Go Server，再自动连接到本机聊天室。其他电脑可通过 Guest 加入。</p>
         <div className="form-grid">

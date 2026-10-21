@@ -4,6 +4,8 @@ import type { BridgeCommand, ChatBridgeClient, MessageAttachment, MessageItem as
 import { createCommand } from '../bridge/chatBridge';
 import { CommandFeedback } from './CommandFeedback';
 import { animateMessage } from '../animation/motion';
+import { avatarTone } from './Avatar';
+import { Icon } from './Icon';
 
 type MessageItemProps = {
   message: MessageItemData;
@@ -32,7 +34,9 @@ export const MessageItem = memo(function MessageItem({ message, bridge, grouped 
   const messageRef = useRef<HTMLElement>(null);
 
   useEffect(() => () => pendingUnsubscribeRef.current?.(), []);
-  useLayoutEffect(() => animateEntry ? animateMessage(messageRef.current) : undefined, [message.messageId, animateEntry]);
+  useLayoutEffect(() => animateEntry
+    ? animateMessage(messageRef.current, message.systemMessage ? 'system' : message.selfMessage ? 'self' : 'peer')
+    : undefined, [message.messageId, animateEntry]);
 
   const [firstLine = '', ...remainingLines] = message.content.split('\n');
   const isQuotedMessage = firstLine.startsWith('> ') && remainingLines.length > 0;
@@ -59,10 +63,10 @@ export const MessageItem = memo(function MessageItem({ message, bridge, grouped 
 
   return (
     <article ref={messageRef} className={`message ${message.selfMessage ? 'message--self' : 'message--peer'}${grouped ? ' message--grouped' : ''}${message.systemMessage ? ' message--system' : ''}`} data-testid={`message-${message.messageId}`}>
-      {!message.systemMessage && !message.selfMessage && <span className="message-avatar" aria-hidden="true">{message.displayName.slice(0, 1)}</span>}
+      {!message.systemMessage && !message.selfMessage && <span className={`message-avatar avatar--tone-${avatarTone(message.userCode || message.displayName)}`} aria-hidden="true">{message.displayName.slice(0, 1).toUpperCase()}</span>}
       <div className="message-cluster">
         {message.systemMessage ? <p className="message-system-text" data-testid={`message-content-${message.messageId}`}>{message.content}</p> : <>
-          {!grouped && <div className="message-who">{message.displayName}</div>}
+          {!grouped && !message.selfMessage && <div className={`message-who message-who--tone-${avatarTone(message.userCode || message.displayName)}`}>{message.displayName}</div>}
           <div className="message-bubble">
             {message.attachment && <AttachmentCard attachment={message.attachment} bridge={bridge} />}
             {isQuotedMessage && <blockquote className="message-quote message-content--wrap" data-testid={`message-quote-${message.messageId}`}>{quotedText}</blockquote>}
@@ -118,7 +122,7 @@ function AttachmentCard({ attachment, bridge }: { attachment: MessageAttachment;
       <button className="message-attachment__download" type="button" aria-label={`下载 ${attachment.fileName}`}
         disabled={expired || invalid}
         onClick={() => bridge.dispatch(createCommand('attachment.download', { attachmentId: attachment.attachmentId, chunkIndex: 0 }))}
-        title={expired || invalid ? statusCopy : '下载附件'}>↓</button>
+        title={expired || invalid ? statusCopy : '下载附件'}><Icon name="download" size={16} /></button>
     </div>
   );
 }
