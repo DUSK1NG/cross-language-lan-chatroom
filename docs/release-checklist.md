@@ -54,9 +54,11 @@ $zip = Join-Path $PWD 'release\LANChat-Windows-x64.zip'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
 $forbidden = $archive.Entries | Where-Object {
-  $_.FullName -match '\.(key|pem|crt|db)$' -or
-  $_.FullName -match '(^|/)(frontend|server-go|client-cpp)/' -or
-  $_.FullName -match '(^|/)(node_modules|\.tools)/'
+  $path = $_.FullName.Replace('\', '/')
+  $path -match '\.(key|pem|crt|db)$' -or
+  $path -match '(^|/)(frontend|client-cpp)/' -or
+  $path -match '(^|/)(node_modules|\.tools)/' -or
+  ($path -match '(^|/)server-go/' -and $path -notin @('server-go/', 'server-go/chat-server.exe'))
 }
 $archive.Dispose()
 if ($forbidden) { $forbidden.FullName; throw '发布 ZIP 含不应交付的文件。' }
