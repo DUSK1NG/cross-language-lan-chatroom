@@ -70,6 +70,10 @@ jobs:
   cpp-gui-windows:
     name: C++ GUI (Windows)
     runs-on: windows-latest
+    # The Windows GUI build pulls Qt WebEngine (large) and is sensitive to the
+    # aqtinstall mirror serving Qt 6.11.2. Per design D2.4 it runs only on pushes
+    # to master and on tags, so PRs stay fast and deterministic on cpp-core.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
