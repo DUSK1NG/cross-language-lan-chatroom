@@ -5,7 +5,8 @@
 - [ ] 1. 依赖与版本基线（分支 `feat/01-stability-baseline`）
   - [x] 1.1 用 `pnpm-lock.yaml` 的解析版本替换 `frontend/package.json` 中全部 `"latest"`；`pnpm install --frozen-lockfile` 通过且锁文件无变化。_R4.1_
     > 证据：`package.json` 的 12 个 `"latest"` 改为锁文件解析出的精确版本（如 react 19.2.8、vite 8.2.2、vitest 4.1.11）；锁文件仅 `specifier:` 行随之更新，所有 `version:` 解析结果不变。`pnpm install --frozen-lockfile` 通过；`npx tsc --noEmit` 无错误；`npx vitest --run` = 16 文件 / 132 测试全绿；`npx vite build` 成功（随后删除 dist）。
-  - [ ] 1.2 新增 `scripts/check-version.mjs` 及其最小自测（构造不一致输入应退出 1）；接入 `.github/workflows/ci.yml` 的 frontend 作业。_R4.5_
+  - [x] 1.2 新增 `scripts/check-version.mjs` 及其最小自测（构造不一致输入应退出 1）；接入 `.github/workflows/ci.yml` 的 frontend 作业。_R4.5_
+    > 证据：`scripts/check-version.mjs`（纯 Node，无依赖）读取 `installer/LANChat.iss`、`scripts/package-installer.ps1`、`frontend/src/changelog/releaseNotes.ts` 三处版本号，不一致则退出码 1；`scripts/check-version.test.mjs` 用 `node --test` 喂入不一致 fixture 断言退出码 1（4 个用例全过）。CI frontend 作业新增 `node ../scripts/check-version.mjs` 步骤（该作业 working-directory 为 frontend）。真实仓库运行输出「版本一致：1.3.0」退出码 0。
   - [ ] 1.3 新增 `frontend/src/app/ErrorBoundary.tsx` + `unhandledrejection` 处理；先写 vitest：子组件抛错时渲染错误页且「重试」可点击。_R5.1 R5.2_
   - [ ] 1.4 bridge 增加 `diagnostics.frontendError` 命令：`bridge_protocol.cpp` 白名单校验（字段 `name`、`stack`，各 ≤ 2048 字节）+ `bridge_protocol_tests.cpp` 用例；仅在连接日志开启时写日志。_D5_
 
