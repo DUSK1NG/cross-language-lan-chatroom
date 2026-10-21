@@ -4,11 +4,25 @@
 #include <QDir>
 #include <QFileInfo>
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <mutex>
 
 namespace OpenSslRuntime {
+
+#ifndef _WIN32
+
+// The OpenSSL DLL loader shim only applies to the packaged Windows build,
+// where Qt WebEngine ships its own TLS stack. On other platforms the system
+// loader already resolves the correct OpenSSL, so preparation is a no-op.
+bool prepare(QString* error) {
+    Q_UNUSED(error);
+    return true;
+}
+
+#else
 
 bool prepare(QString* error) {
     static std::once_flag configured;
@@ -49,5 +63,7 @@ bool prepare(QString* error) {
     }
     return ready;
 }
+
+#endif  // _WIN32
 
 }  // namespace OpenSslRuntime

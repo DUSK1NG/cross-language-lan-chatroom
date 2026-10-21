@@ -4,7 +4,6 @@
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-#include <ws2tcpip.h>
 
 #include <array>
 #include <utility>
