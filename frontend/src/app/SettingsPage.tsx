@@ -2,12 +2,13 @@ import { createCommand } from '../bridge/chatBridge';
 import type { BridgeState, ChatBridgeClient } from '../bridge/types';
 import { saveAppSettings, useAppSettings, type ThemePreference } from '../state/appSettings';
 import { Icon } from '../components/Icon';
+import { currentRelease } from '../changelog/releaseNotes';
 
-type SettingsPageProps = { bridge: ChatBridgeClient; state: BridgeState; onBack(): void };
+type SettingsPageProps = { bridge: ChatBridgeClient; state: BridgeState; onBack(): void; onShowReleaseNotes?(): void };
 
 const performanceDiagnosticsEnabled = import.meta.env.VITE_ENABLE_PERFORMANCE_DIAGNOSTICS !== 'false';
 
-export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
+export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: SettingsPageProps) {
   const settings = useAppSettings();
   const update = <K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) => saveAppSettings({ ...settings, [key]: value });
   const themeOptions: { value: ThemePreference; label: string }[] = [
@@ -43,6 +44,15 @@ export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
           </div>
           <label className="settings-row settings-toggle"><span>显示发送时间</span><input type="checkbox" aria-label="显示发送时间" checked={settings.showSendTime} onChange={(event) => update('showSendTime', event.target.checked)} /></label>
         </section>
+        {onShowReleaseNotes && <section className="settings-group">
+          <h2>关于</h2>
+          <div className="settings-row">
+            <span>LAN Chat {currentRelease.version} · {currentRelease.codename}</span>
+            <button className="secondary-button settings-release-button" type="button" onClick={onShowReleaseNotes}>
+              <Icon name="sparkle" size={15} />版本说明
+            </button>
+          </div>
+        </section>}
         <section className="settings-group">
           <h2>连接</h2>
           <div className="settings-row"><span>当前身份</span><span className="settings-value">{state.identity.displayName}#{state.identity.userCode}</span></div>

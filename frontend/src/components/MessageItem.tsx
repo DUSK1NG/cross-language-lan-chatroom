@@ -34,7 +34,9 @@ export const MessageItem = memo(function MessageItem({ message, bridge, grouped 
   const messageRef = useRef<HTMLElement>(null);
 
   useEffect(() => () => pendingUnsubscribeRef.current?.(), []);
-  useLayoutEffect(() => animateEntry ? animateMessage(messageRef.current) : undefined, [message.messageId, animateEntry]);
+  useLayoutEffect(() => animateEntry
+    ? animateMessage(messageRef.current, message.systemMessage ? 'system' : message.selfMessage ? 'self' : 'peer')
+    : undefined, [message.messageId, animateEntry]);
 
   const [firstLine = '', ...remainingLines] = message.content.split('\n');
   const isQuotedMessage = firstLine.startsWith('> ') && remainingLines.length > 0;

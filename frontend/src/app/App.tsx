@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { createCommand } from '../bridge/chatBridge';
 import type { BridgeState, ChatBridgeClient } from '../bridge/types';
@@ -10,6 +10,9 @@ import { useFrameTelemetry } from '../performance/useFrameTelemetry';
 import { useAppSettings, useResolvedTheme } from '../state/appSettings';
 import { Icon, type IconName } from '../components/Icon';
 import catBrandMark from '../assets/lan-chat-cat.png';
+import { animatePage, animateStagger, setMotionScale } from '../animation/motion';
+import { ReleaseNotesCard } from '../changelog/ReleaseNotesCard';
+import { hasSeenRelease, markReleaseSeen } from '../changelog/releaseNotes';
 import '../styles/global.css';
 
 type AppProps = { bridge: ChatBridgeClient };
@@ -27,6 +30,10 @@ export function App({ bridge }: AppProps) {
   const hostUnavailableReason = state.hostDefaults?.unavailableReason || '此安装包不包含本地服务端';
 
   const effectsEnabled = state.performance?.effectsEnabled !== false;
+  const [releaseOpen, setReleaseOpen] = useState(() => !hasSeenRelease());
+  const closeRelease = useCallback(() => { markReleaseSeen(); setReleaseOpen(false); }, []);
+
+  useEffect(() => { setMotionScale(state.performance?.animationDurationScale); }, [state.performance?.animationDurationScale]);
 
   useEffect(() => {
     document.documentElement.dataset.effects = effectsEnabled ? 'on' : 'off';
@@ -36,32 +43,41 @@ export function App({ bridge }: AppProps) {
     if (state.connection.phase === 'connected' && page !== 'settings') setPage('workspace');
   }, [state.connection.phase]);
 
+  let content;
   if (page === 'connect') {
-    return <RemoteConnectionPage bridge={bridge} state={state} mode={connectionMode} onBack={() => setPage('mode')} />;
-  }
-
-  if (page === 'host') {
-    return <LocalHostPage bridge={bridge} state={state} onBack={() => setPage('mode')} />;
-  }
-
-  if (page === 'settings') {
-    return <SettingsPage bridge={bridge} state={state} onBack={() => setPage('workspace')} />;
-  }
-
-  if (page === 'workspace' && (state.connection.phase === 'connected' || state.connection.phase === 'reconnecting')) {
-    return <WorkspacePage bridge={bridge} state={state} onSettings={() => setPage('settings')} />;
+    content = <RemoteConnectionPage bridge={bridge} state={state} mode={connectionMode} onBack={() => setPage('mode')} />;
+  } else if (page === 'host') {
+    content = <LocalHostPage bridge={bridge} state={state} onBack={() => setPage('mode')} />;
+  } else if (page === 'settings') {
+    content = <SettingsPage bridge={bridge} state={state} onBack={() => setPage('workspace')} onShowReleaseNotes={() => setReleaseOpen(true)} />;
+  } else if (page === 'workspace' && (state.connection.phase === 'connected' || state.connection.phase === 'reconnecting')) {
+    content = <WorkspacePage bridge={bridge} state={state} onSettings={() => setPage('settings')} />;
+  } else {
+    content = (
+      <ModeSelectionPage
+        onRemote={() => { setConnectionMode('remote'); setPage('connect'); }}
+        onGuest={() => { setConnectionMode('guest'); setPage('connect'); }}
+        onTunnel={() => { setConnectionMode('tunnel'); setPage('connect'); }}
+        onLocalHost={() => setPage('host')}
+        hostAvailable={hostAvailable}
+        hostUnavailableReason={hostUnavailableReason}
+      />
+    );
   }
 
   return (
-    <ModeSelectionPage
-      onRemote={() => { setConnectionMode('remote'); setPage('connect'); }}
-      onGuest={() => { setConnectionMode('guest'); setPage('connect'); }}
-      onTunnel={() => { setConnectionMode('tunnel'); setPage('connect'); }}
-      onLocalHost={() => setPage('host')}
-      hostAvailable={hostAvailable}
-      hostUnavailableReason={hostUnavailableReason}
-    />
+    <>
+      {content}
+      {releaseOpen && <ReleaseNotesCard onClose={closeRelease} />}
+    </>
   );
+}
+
+/** Animates every non-workspace page on mount (the workspace has its own surface entrance). */
+function usePageEntrance<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => animatePage(ref.current), []);
+  return ref;
 }
 
 function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvailable, hostUnavailableReason }: {
@@ -78,8 +94,14 @@ function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvail
     { label: 'remote-mode', icon: 'server', title: '远程服务器', copy: '连接已经部署好的 Go Server', onClick: onRemote },
     { label: 'tunnel-mode', icon: 'tunnel', title: '通过 TCP 隧道加入', copy: '使用外部隧道提供的地址、端口和公开证书', onClick: onTunnel }
   ];
+  const shellRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const stopCards = animateStagger(shellRef.current, '.mode-card', { delay: 0.08 });
+    const stopHero = animateStagger(shellRef.current, '.mode-hero > *', { distance: 16 });
+    return () => { stopCards(); stopHero(); };
+  }, []);
   return (
-    <main className="app-shell mode-shell">
+    <main ref={shellRef} className="app-shell mode-shell">
       <section className="mode-hero" aria-label="LAN Chat 简介">
         <img className="mode-hero__mark" src={catBrandMark} alt="" />
         <p className="mode-hero__name">LAN Chat</p>
@@ -191,9 +213,10 @@ function RemoteConnectionPage({ bridge, state, mode, onBack }: {
     setManualEntry(false);
   }
 
+  const pageRef = usePageEntrance<HTMLElement>();
   return (
     <main className="app-shell connect-shell">
-      <section className="connect-panel">
+      <section ref={pageRef} className="connect-panel">
         <PageHeader eyebrow="SECURE CONNECTION" title={tunnel ? '通过 TCP 隧道加入' : (guest ? '加入局域网聊天室' : '连接远程服务器')} onBack={onBack} busy={busy} />
         <ConnectionStatus state={state} />
         <p className="connection-help">
@@ -311,9 +334,10 @@ function LocalHostPage({ bridge, state, onBack }: {
     }));
   }
 
+  const pageRef = usePageEntrance<HTMLElement>();
   return (
     <main className="app-shell connect-shell">
-      <section className="connect-panel host-panel">
+      <section ref={pageRef} className="connect-panel host-panel">
         <PageHeader eyebrow="LOCAL HOST" title="创建本地聊天室" onBack={onBack} busy={busy} />
         <ConnectionStatus state={state} />
         <p className="connection-help">程序会启动本地 Go Server，再自动连接到本机聊天室。其他电脑可通过 Guest 加入。</p>

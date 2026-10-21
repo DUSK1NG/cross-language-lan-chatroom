@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -51,8 +51,15 @@ export function useAppSettings() {
 
 /** Resolves the theme preference and keeps `<html data-theme>` in sync, following the OS when set to "system". */
 export function useResolvedTheme(preference: ThemePreference) {
+  const firstRunRef = useRef(true);
   useEffect(() => {
     const root = document.documentElement;
+    // Cross-fade colours only when the user actually switches theme, never on first paint.
+    if (!firstRunRef.current) {
+      root.classList.add('theme-transition');
+      window.setTimeout(() => root.classList.remove('theme-transition'), 360);
+    }
+    firstRunRef.current = false;
     const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
     const apply = () => {
       root.dataset.theme = preference === 'system' ? (media?.matches ? 'dark' : 'light') : preference;

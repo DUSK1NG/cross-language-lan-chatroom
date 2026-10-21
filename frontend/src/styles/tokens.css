@@ -41,7 +41,8 @@
   --t-hero: linear-gradient(150deg, #5B5BD6 0%, #7A5AF8 48%, #3E7BFA 100%);
   --t-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
   --t-mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
-  --t-fast: 160ms;
+  --t-motion-scale: 1;
+  --t-fast: calc(160ms * var(--t-motion-scale));
   --t-sidebar-width: 300px;
 
   /* 头像色调：soft 背景 + 强调前景，8 档按用户代码稳定分配 */
