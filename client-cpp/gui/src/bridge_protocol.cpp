@@ -26,6 +26,16 @@ bool booleanValue(const QJsonObject& object, const char* key) {
     return object.value(QLatin1String(key)).isBool();
 }
 
+// A string field that is present and whose UTF-8 encoding does not exceed maxBytes.
+// When requireNonEmpty is false an empty string is accepted (e.g. an empty component stack).
+bool boundedUtf8String(const QJsonObject& object, const char* key, int maxBytes, bool requireNonEmpty) {
+    const QJsonValue value = object.value(QLatin1String(key));
+    if (!value.isString()) return false;
+    const QString text = value.toString();
+    if (requireNonEmpty && text.trimmed().isEmpty()) return false;
+    return text.toUtf8().size() <= maxBytes;
+}
+
 bool integerValue(const QJsonObject& object, const char* key) {
     const QJsonValue value = object.value(QLatin1String(key));
     return value.isDouble() && value.toInt() >= 1 && value.toInt() <= 65535;
@@ -188,6 +198,12 @@ bool validatePayload(const QString& type, const QJsonObject& payload) {
     }
     if (type == QStringLiteral("settings.setConnectionLogging")) {
         return booleanValue(payload, "enabled");
+    }
+    if (type == QStringLiteral("diagnostics.frontendError")) {
+        // Front-end crash report: error name and stack/component stack only, no
+        // message content. Each field is capped at 2048 UTF-8 bytes (design D5).
+        return boundedUtf8String(payload, "name", 2048, /*requireNonEmpty=*/true) &&
+               boundedUtf8String(payload, "stack", 2048, /*requireNonEmpty=*/false);
     }
     if (type == QStringLiteral("performance.reportFrameTimes")) {
         return boundedFrameTimes(payload);
