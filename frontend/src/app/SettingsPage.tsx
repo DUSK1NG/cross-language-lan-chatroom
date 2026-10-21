@@ -1,6 +1,7 @@
 import { createCommand } from '../bridge/chatBridge';
 import type { BridgeState, ChatBridgeClient } from '../bridge/types';
-import { saveAppSettings, useAppSettings } from '../state/appSettings';
+import { saveAppSettings, useAppSettings, type ThemePreference } from '../state/appSettings';
+import { Icon } from '../components/Icon';
 
 type SettingsPageProps = { bridge: ChatBridgeClient; state: BridgeState; onBack(): void };
 
@@ -8,7 +9,10 @@ const performanceDiagnosticsEnabled = import.meta.env.VITE_ENABLE_PERFORMANCE_DI
 
 export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
   const settings = useAppSettings();
-  const update = (key: keyof typeof settings, value: boolean) => saveAppSettings({ ...settings, [key]: value });
+  const update = <K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) => saveAppSettings({ ...settings, [key]: value });
+  const themeOptions: { value: ThemePreference; label: string }[] = [
+    { value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' }
+  ];
   const endpoint = `${state.savedConnection.serverIp || '未设置'}:${state.savedConnection.serverPort || '—'}`;
   const performance = state.performance;
   const graphics = state.graphics;
@@ -21,11 +25,22 @@ export function SettingsPage({ bridge, state, onBack }: SettingsPageProps) {
     <main className="app-shell settings-shell" data-testid="settings-scroll-container">
       <section className="settings-panel" aria-label="设置">
         <header className="settings-header">
-          <button className="secondary-button settings-back" type="button" aria-label="返回聊天" onClick={onBack}>‹</button>
+          <button className="icon-button settings-back" type="button" aria-label="返回聊天" onClick={onBack}><Icon name="back" /></button>
           <div><p className="eyebrow">界面设置</p><h1>设置</h1></div>
         </header>
         <section className="settings-group">
           <h2>界面</h2>
+          <div className="settings-row">
+            <span>外观主题</span>
+            <div className="theme-switch" role="radiogroup" aria-label="外观主题">
+              {themeOptions.map((option) => (
+                <button key={option.value} type="button" role="radio" aria-checked={settings.theme === option.value}
+                  className={`theme-switch__option theme-switch__option--${option.value}`} onClick={() => update('theme', option.value)}>
+                  <span className="theme-switch__swatch" aria-hidden="true" />{option.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="settings-row settings-toggle"><span>显示发送时间</span><input type="checkbox" aria-label="显示发送时间" checked={settings.showSendTime} onChange={(event) => update('showSendTime', event.target.checked)} /></label>
         </section>
         <section className="settings-group">

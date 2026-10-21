@@ -3,6 +3,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { BridgeState, ChatBridgeClient, MessageItem as MessageItemData } from '../bridge/types';
 import { MessageItem } from './MessageItem';
 import { useAppSettings } from '../state/appSettings';
+import { Icon } from './Icon';
 
 type MessageTimelineProps = {
   state: BridgeState;
@@ -139,7 +140,7 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
     <div className="message-timeline-shell">
       <section ref={timelineRef} className="message-timeline" data-testid="message-timeline" aria-label="消息时间线" onScroll={handleScroll}>
         {messages.length === 0 ? (
-          <div className="empty-state"><span className="empty-glyph">✦</span><p>暂无消息，开始聊天吧。</p></div>
+          <div className="empty-state"><span className="empty-glyph" aria-hidden="true"><Icon name="chat" size={28} /></span><strong>这里还很安静</strong><p>暂无消息，开始聊天吧。</p></div>
         ) : <>
           <div className="date-pill" aria-hidden="true">今天</div>
           {historyLoading && <div className="history-loading" role="status">正在加载更早的消息…</div>}
@@ -152,7 +153,7 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
           })}
         </>}
       </section>
-      {newMessageCount > 0 && <button className="timeline-new-messages" type="button" onClick={scrollToLatest} aria-label={`查看 ${newMessageCount} 条新消息`}>↓ {newMessageCount} 条新消息</button>}
+      {newMessageCount > 0 && <button className="timeline-new-messages" type="button" onClick={scrollToLatest} aria-label={`查看 ${newMessageCount} 条新消息`}><Icon name="download" size={14} />{newMessageCount} 条新消息</button>}
     </div>
   );
 }

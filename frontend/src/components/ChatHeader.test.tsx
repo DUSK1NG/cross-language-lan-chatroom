@@ -35,7 +35,7 @@ describe('ChatHeader', () => {
       navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby', mls: true } }
     })} onMembers={() => undefined} membersOpen={false} />);
 
-    expect(screen.getByText('端到端加密').closest('.e2ee-chip')?.textContent).toContain('🔒');
+    expect(screen.getByText('端到端加密').closest('.e2ee-chip')?.querySelector('svg.e2ee-chip__icon')).not.toBeNull();
 
     rerender(<ChatHeader state={headerState()} onMembers={() => undefined} membersOpen={false} />);
     expect(screen.queryByText('端到端加密')).not.toBeInTheDocument();

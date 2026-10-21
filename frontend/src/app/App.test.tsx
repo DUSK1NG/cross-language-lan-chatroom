@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createFakeBridge } from '../bridge/chatBridge';
@@ -201,7 +201,7 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument();
   });
 
-  it('offers no dark-theme toggle and never writes data-theme', async () => {
+  it('offers a system/light/dark theme switch that drives data-theme', async () => {
     localStorage.clear();
     document.documentElement.removeAttribute('data-theme');
     const bridge = createFakeBridge({
@@ -211,10 +211,16 @@ describe('App', () => {
     });
     render(<App bridge={bridge} />);
     await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
+    expect(document.documentElement.dataset.theme).toBe('light');
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
 
-    expect(screen.queryByLabelText('深色主题')).not.toBeInTheDocument();
-    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+    const themes = screen.getByRole('radiogroup', { name: '外观主题' });
+    expect(within(themes).getByRole('radio', { name: '跟随系统' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(themes).getByRole('radio', { name: '深色' }));
+
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'));
+    expect(within(themes).getByRole('radio', { name: '深色' })).toHaveAttribute('aria-checked', 'true');
+    expect(JSON.parse(localStorage.getItem('lan-chat.settings') ?? '{}').theme).toBe('dark');
   });
 
   it('persists the send-time setting from the settings page', async () => {
