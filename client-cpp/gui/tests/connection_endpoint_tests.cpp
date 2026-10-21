@@ -1,5 +1,4 @@
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include "platform_socket.hpp"
 
 #include <QtTest>
 
