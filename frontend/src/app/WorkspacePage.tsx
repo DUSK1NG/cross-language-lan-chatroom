@@ -12,6 +12,10 @@ import { MessageTimeline } from '../components/MessageTimeline';
 import { ModalSurface } from '../components/ModalSurface';
 import { CommandFeedback, type CommandFeedbackProps } from '../components/CommandFeedback';
 import { animateWorkspacePanels } from '../animation/motion';
+import { ProfileCard } from '../components/ProfileCard';
+import { ConnectionToast } from '../components/ConnectionToast';
+import { Avatar } from '../components/Avatar';
+import { Icon } from '../components/Icon';
 
 type WorkspacePageProps = { bridge: ChatBridgeClient; state: BridgeState; onSettings?: () => void };
 type AdminAction = 'mute' | 'kick';
@@ -213,13 +217,11 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
       </section>
       <MemberPanel state={state} className={`member-drawer${memberDrawerOpen ? ' member-drawer--open' : ''}`} localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onClose={() => setMemberDrawerOpen(false)} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} />
       <IdentityCard state={state} />
+      <ConnectionToast phase={state.connection.phase} />
       {sidebarOpen && <ModalSurface title={section === 'rooms' ? '群聊导航' : '私信导航'} onClose={() => setSidebarOpen(false)}><ConversationSidebar bridge={bridge} state={state} section={section} onSectionChange={setSection} onCreateRoom={openCreateRoom} /></ModalSurface>}
-      {memberProfile && <ModalSurface title="成员资料" onClose={() => setMemberProfile(null)}>
-        <div className="admin-profile">
-          <strong>{memberProfile.displayName}#{memberProfile.userCode}</strong>
-          <p>{memberProfile.admin ? '管理员' : '普通成员'} · {memberProfile.online ? '在线' : '离线'}</p>
-        </div>
-        <div className="admin-actions">
+      {memberProfile && <ModalSurface title="成员资料" variant="card" onClose={() => setMemberProfile(null)}>
+        <ProfileCard member={memberProfile} isSelf={memberProfile.userCode === state.identity.userCode}>
+        <div className="admin-actions profile-card__actions">
           {memberProfile.userCode !== state.identity.userCode && <button className="secondary-button" type="button" onClick={() => startDirect(memberProfile)}>私聊</button>}
           {canManageRoom && memberProfile.userCode !== state.identity.userCode && !memberProfile.admin && <>
             <button className="secondary-button" type="button" onClick={() => requestAdminAction('mute', memberProfile)}>禁言/解禁</button>
@@ -227,6 +229,7 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
           </>}
         </div>
         <CommandFeedback {...adminFeedback} />
+        </ProfileCard>
       </ModalSurface>}
       {memberToManage && <ModalSurface title="成员管理" onClose={() => setMemberToManage(null)}>
         <div className="admin-profile"><strong>{memberToManage.displayName}#{memberToManage.userCode}</strong><p>请选择要执行的管理操作。</p></div>
@@ -256,7 +259,15 @@ export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps)
       {connectionApprovalOpen && <ModalSurface title="连接审批" onClose={() => setConnectionApprovalOpen(false)} dismissible={!hasBlockingConnectionApproval}>
         {(state.connectionApprovals ?? []).length === 0 ? <p className="settings-note">没有待确认的成员连接。</p> : <div className="connection-approval-list">
           {(state.connectionApprovals ?? []).map((request) => <div className="connection-approval-item" key={request.id}>
-            <strong>{request.displayName}#{request.userCode}</strong>
+            <div className="connection-approval-item__head">
+              <span className="connection-approval-item__ring" aria-hidden="true">
+                <Avatar name={request.displayName} seed={request.userCode} />
+              </span>
+              <span className="connection-approval-item__who">
+                <strong>{request.displayName}#{request.userCode}</strong>
+                <small><Icon name="wifi" size={12} />请求加入聊天室</small>
+              </span>
+            </div>
             <p>该成员正在请求连接。请先通过可信渠道核对身份；批准后会立即进入聊天室。</p>
             <div className="admin-actions">
               <button className="secondary-button" type="button" onClick={() => resolveConnectionApproval(request.id, request.userCode, false)}>拒绝</button>

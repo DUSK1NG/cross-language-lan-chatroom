@@ -3,7 +3,8 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { BridgeState, ChatBridgeClient, MessageItem as MessageItemData } from '../bridge/types';
 import { MessageItem } from './MessageItem';
 import { useAppSettings } from '../state/appSettings';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
+import { animateStagger } from '../animation/motion';
 
 type MessageTimelineProps = {
   state: BridgeState;
@@ -140,7 +141,7 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
     <div className="message-timeline-shell">
       <section ref={timelineRef} className="message-timeline" data-testid="message-timeline" aria-label="消息时间线" onScroll={handleScroll}>
         {messages.length === 0 ? (
-          <div className="empty-state"><span className="empty-glyph" aria-hidden="true"><Icon name="chat" size={28} /></span><strong>这里还很安静</strong><p>暂无消息，开始聊天吧。</p></div>
+          <WelcomeCard conversation={state.navigation.activeConversation} />
         ) : <>
           <div className="date-pill" aria-hidden="true">今天</div>
           {historyLoading && <div className="history-loading" role="status">正在加载更早的消息…</div>}
@@ -154,6 +155,41 @@ export function MessageTimeline({ state, bridge, onQuote, canRecall }: MessageTi
         </>}
       </section>
       {newMessageCount > 0 && <button className="timeline-new-messages" type="button" onClick={scrollToLatest} aria-label={`查看 ${newMessageCount} 条新消息`}><Icon name="download" size={14} />{newMessageCount} 条新消息</button>}
+    </div>
+  );
+}
+
+/** 空会话时的欢迎卡片：浮动图标 + 逐个入场的提示小卡。 */
+function WelcomeCard({ conversation }: { conversation: BridgeState['navigation']['activeConversation'] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const key = conversation ? `${conversation.kind}:${conversation.id}` : '';
+  useLayoutEffect(() => animateStagger(ref.current, '.welcome-card__tip', { delay: 0.12, distance: 10 }), [key]);
+  const isRoom = conversation?.kind === 'room';
+  const title = conversation ? (isRoom ? `欢迎来到 #${conversation.title}` : `和 ${conversation.title} 的私信`) : '这里还很安静';
+  const tips: { icon: IconName; title: string; detail: string }[] = [
+    { icon: conversation?.mls ? 'lock' : 'shield', title: conversation?.mls ? '端到端加密' : 'TLS 加密传输', detail: conversation?.mls ? '只有会话成员能读取消息与附件' : '消息经 TLS 加密后在局域网内传输' },
+    isRoom
+      ? { icon: 'attach', title: '发送附件', detail: '文件加密分块上传，断线可续传' }
+      : { icon: 'chat', title: '离线也能收到', detail: '对方离线时消息会在上线后送达' },
+    { icon: 'smile', title: '引用与表情', detail: '悬停消息即可引用回复，Enter 发送' }
+  ];
+  return (
+    <div ref={ref} className="welcome-card" data-testid="welcome-card">
+      <span className="welcome-card__glyph" aria-hidden="true">
+        <span className="welcome-card__ring" />
+        <Icon name={isRoom ? 'hash' : 'chat'} size={30} />
+      </span>
+      <strong className="welcome-card__title">{title}</strong>
+      <p className="welcome-card__lede">暂无消息，开始聊天吧。</p>
+      <div className="welcome-card__tips">
+        {tips.map((tip) => (
+          <div key={tip.title} className="welcome-card__tip">
+            <span className="welcome-card__tip-icon" aria-hidden="true"><Icon name={tip.icon} size={16} /></span>
+            <strong>{tip.title}</strong>
+            <span>{tip.detail}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
