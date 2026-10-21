@@ -7,12 +7,22 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Test Network Widgets WebEngineWidgets WebChannel)
-find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
-find_package(Threads REQUIRED)
-
+option(LAN_CHAT_BUILD_GUI "Build the Qt WebEngine GUI" ON)
 option(LAN_CHAT_ENABLE_MLSPP "Build the MLS++ client adapter and tests" OFF)
 option(LAN_CHAT_ENABLE_TEST_HOOKS "Enable explicit test-only runtime hooks" OFF)
+
+# The GUI executable, its WebEngine host and the GUI-only tests need the full
+# Qt widget/WebEngine stack. The headless "core" build (LAN_CHAT_BUILD_GUI=OFF)
+# exercises the pure-logic libraries and their tests, which only depend on
+# Qt Core/Network/Test, OpenSSL and Threads. Keeping the component list minimal
+# in that mode lets CI run on a machine that has only qt6-base-dev installed.
+if(LAN_CHAT_BUILD_GUI)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Test Network Widgets WebEngineWidgets WebChannel)
+else()
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Core Test Network)
+endif()
+find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
+find_package(Threads REQUIRED)
 
 if(LAN_CHAT_ENABLE_MLSPP)
     if(NOT DEFINED MLSPP_SOURCE_DIR OR NOT EXISTS "${MLSPP_SOURCE_DIR}/CMakeLists.txt")
@@ -141,16 +151,19 @@ endif()
 qt_standard_project_setup(REQUIRES 6.5)
 qt_policy(SET QTP0004 NEW)
 
-qt_add_executable(lan-chat-gui
-    src/main.cpp
+# ---------------------------------------------------------------------------
+# lan_chat_core: the pure-logic sources shared by the GUI executable and the
+# headless tests. Everything here builds against Qt Core/Network/Test, OpenSSL
+# and Threads only (no Gui/Widgets/WebEngine/WebChannel), so it is available in
+# both LAN_CHAT_BUILD_GUI=ON and =OFF builds. The GUI executable links it; the
+# GUI-only sources (web UI host, controller, graphics helpers) stay in the
+# executable target below.
+# ---------------------------------------------------------------------------
+add_library(lan_chat_core STATIC
     src/bridge_protocol.cpp
     src/bridge_protocol.hpp
-    src/chat_bridge.cpp
-    src/chat_bridge.hpp
     src/chat_model.cpp
     src/chat_model.hpp
-    src/graphics_info.cpp
-    src/graphics_info.hpp
     src/host_path_resolver.cpp
     src/host_path_resolver.hpp
     src/local_host_bootstrap.cpp
@@ -163,49 +176,85 @@ qt_add_executable(lan-chat-gui
     src/network_diagnostics.hpp
     src/performance_profile.cpp
     src/performance_profile.hpp
-    src/gui_connection_worker.cpp
-    src/gui_connection_worker.hpp
+    src/performance_benchmark_gate.cpp
+    src/performance_benchmark_gate.hpp
+    src/reconnect_policy.cpp
+    src/reconnect_policy.hpp
     src/attachments/attachment_crypto.cpp
     src/attachments/attachment_crypto.hpp
     src/attachments/transfer_client.cpp
     src/attachments/transfer_client.hpp
     src/attachments/attachment_transfer_state.cpp
     src/attachments/attachment_transfer_state.hpp
-    src/reconnect_policy.cpp
-    src/reconnect_policy.hpp
-    src/gui_chat_controller.cpp
-    src/gui_chat_controller.hpp
+    src/attachments/attachment_manifest.cpp
+    src/attachments/attachment_manifest.hpp
+    src/attachments/attachment_download_assembler.cpp
+    src/attachments/attachment_download_assembler.hpp
     ../src/auth.cpp
     ../src/connection.cpp
     ../src/message.cpp
     ../src/protocol.cpp
 )
 
-target_link_libraries(lan-chat-gui PRIVATE
+target_link_libraries(lan_chat_core PUBLIC
+    Qt6::Core
     Qt6::Network
-    ws2_32
     Threads::Threads
     OpenSSL::SSL
     OpenSSL::Crypto
 )
+if(WIN32)
+    target_link_libraries(lan_chat_core PUBLIC ws2_32)
+endif()
+
+target_include_directories(lan_chat_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
+)
 
 if(LAN_CHAT_ENABLE_MLSPP)
-    target_sources(lan-chat-gui PRIVATE
+    target_sources(lan_chat_core PRIVATE
         src/crypto/mls_client.cpp
         src/crypto/mls_client.hpp
-        src/attachments/attachment_crypto.cpp
-        src/attachments/attachment_crypto.hpp
-        src/attachments/transfer_client.cpp
-        src/attachments/transfer_client.hpp
-        src/attachments/attachment_transfer_state.cpp
-        src/attachments/attachment_transfer_state.hpp
-        src/attachments/attachment_manifest.cpp
-        src/attachments/attachment_manifest.hpp
         src/attachments/attachment_mls_group_id.cpp
         src/attachments/attachment_mls_group_id.hpp
-        src/attachments/attachment_download_assembler.cpp
-        src/attachments/attachment_download_assembler.hpp
     )
+    target_link_libraries(lan_chat_core PUBLIC mlspp)
+    target_compile_definitions(lan_chat_core PUBLIC LAN_CHAT_ENABLE_MLSPP=1)
+endif()
+
+# ---------------------------------------------------------------------------
+# GUI executable and GUI-only tests (LAN_CHAT_BUILD_GUI=ON only).
+# ---------------------------------------------------------------------------
+if(LAN_CHAT_BUILD_GUI)
+
+qt_add_executable(lan-chat-gui
+    src/main.cpp
+    src/chat_bridge.cpp
+    src/chat_bridge.hpp
+    src/graphics_info.cpp
+    src/graphics_info.hpp
+    src/gui_connection_worker.cpp
+    src/gui_connection_worker.hpp
+    src/gui_chat_controller.cpp
+    src/gui_chat_controller.hpp
+)
+
+target_link_libraries(lan-chat-gui PRIVATE
+    lan_chat_core
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Network
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)
+if(WIN32)
+    target_link_libraries(lan-chat-gui PRIVATE ws2_32)
+endif()
+
+if(LAN_CHAT_ENABLE_MLSPP)
     target_link_libraries(lan-chat-gui PRIVATE mlspp)
     target_compile_definitions(lan-chat-gui PRIVATE LAN_CHAT_ENABLE_MLSPP=1)
 endif()
@@ -232,6 +281,14 @@ target_include_directories(lan-chat-launcher PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+endif() # LAN_CHAT_BUILD_GUI (executables)
+
+enable_testing()
+
+# ---------------------------------------------------------------------------
+# Headless tests: available in both GUI=ON and GUI=OFF builds. These only need
+# Qt Core/Network/Test, OpenSSL and Threads.
+# ---------------------------------------------------------------------------
 qt_add_executable(bridge-protocol-tests
     tests/bridge_protocol_tests.cpp
     src/bridge_protocol.cpp
@@ -247,7 +304,6 @@ target_include_directories(bridge-protocol-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-enable_testing()
 add_test(NAME bridge-protocol-tests COMMAND bridge-protocol-tests)
 
 qt_add_executable(attachment-crypto-tests
@@ -310,24 +366,6 @@ target_link_libraries(attachment-manifest-tests PRIVATE Qt6::Core Qt6::Test)
 target_include_directories(attachment-manifest-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME attachment-manifest-tests COMMAND attachment-manifest-tests)
 
-if(LAN_CHAT_ENABLE_MLSPP)
-    qt_add_executable(mls-client-tests
-        tests/mls_client_tests.cpp
-        src/crypto/mls_client.cpp
-        src/crypto/mls_client.hpp
-        src/attachments/attachment_mls_group_id.cpp
-        src/attachments/attachment_mls_group_id.hpp
-    )
-    target_link_libraries(mls-client-tests PRIVATE
-        Qt6::Test
-        mlspp
-    )
-    target_include_directories(mls-client-tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
-    add_test(NAME mls-client-tests COMMAND mls-client-tests)
-endif()
-
 qt_add_executable(connection-endpoint-tests
     tests/connection_endpoint_tests.cpp
     ../src/auth.cpp
@@ -338,11 +376,13 @@ qt_add_executable(connection-endpoint-tests
 
 target_link_libraries(connection-endpoint-tests PRIVATE
     Qt6::Test
-    ws2_32
     Threads::Threads
     OpenSSL::SSL
     OpenSSL::Crypto
 )
+if(WIN32)
+    target_link_libraries(connection-endpoint-tests PRIVATE ws2_32)
+endif()
 
 target_include_directories(connection-endpoint-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
@@ -350,24 +390,6 @@ target_include_directories(connection-endpoint-tests PRIVATE
 )
 
 add_test(NAME connection-endpoint-tests COMMAND connection-endpoint-tests)
-
-qt_add_executable(graphics-info-tests
-    tests/graphics_info_tests.cpp
-    src/graphics_info.cpp
-    src/graphics_info.hpp
-)
-
-target_link_libraries(graphics-info-tests PRIVATE
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Test
-)
-
-target_include_directories(graphics-info-tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-add_test(NAME graphics-info-tests COMMAND graphics-info-tests)
 
 qt_add_executable(chat-model-tests
     tests/chat_model_tests.cpp
@@ -385,94 +407,6 @@ target_include_directories(chat-model-tests PRIVATE
 )
 
 add_test(NAME chat-model-tests COMMAND chat-model-tests)
-
-qt_add_executable(chat-bridge-tests
-    tests/chat_bridge_tests.cpp
-    src/chat_bridge.cpp
-    src/chat_bridge.hpp
-    src/graphics_info.cpp
-    src/graphics_info.hpp
-    src/performance_profile.cpp
-    src/performance_profile.hpp
-    src/bridge_protocol.cpp
-    src/bridge_protocol.hpp
-    src/chat_model.cpp
-    src/chat_model.hpp
-    src/host_path_resolver.cpp
-    src/host_path_resolver.hpp
-    src/openssl_runtime.cpp
-    src/openssl_runtime.hpp
-    src/network_diagnostics.cpp
-    src/network_diagnostics.hpp
-    src/gui_chat_controller.cpp
-    src/gui_chat_controller.hpp
-    src/gui_connection_worker.cpp
-    src/gui_connection_worker.hpp
-    src/reconnect_policy.cpp
-    src/reconnect_policy.hpp
-    src/lan_discovery_service.cpp
-    src/lan_discovery_service.hpp
-    ../src/auth.cpp
-    ../src/connection.cpp
-    ../src/message.cpp
-    ../src/protocol.cpp
-)
-
-target_link_libraries(chat-bridge-tests PRIVATE
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-    Qt6::Test
-    Qt6::Network
-    ws2_32
-    Threads::Threads
-    OpenSSL::SSL
-    OpenSSL::Crypto
-)
-
-if(LAN_CHAT_ENABLE_MLSPP)
-    target_sources(chat-bridge-tests PRIVATE
-        src/crypto/mls_client.cpp
-        src/crypto/mls_client.hpp
-        src/attachments/attachment_crypto.cpp
-        src/attachments/attachment_crypto.hpp
-        src/attachments/transfer_client.cpp
-        src/attachments/transfer_client.hpp
-        src/attachments/attachment_transfer_state.cpp
-        src/attachments/attachment_transfer_state.hpp
-        src/attachments/attachment_manifest.cpp
-        src/attachments/attachment_manifest.hpp
-        src/attachments/attachment_mls_group_id.cpp
-        src/attachments/attachment_mls_group_id.hpp
-        src/attachments/attachment_download_assembler.cpp
-        src/attachments/attachment_download_assembler.hpp
-    )
-    target_link_libraries(chat-bridge-tests PRIVATE mlspp)
-    target_compile_definitions(chat-bridge-tests PRIVATE LAN_CHAT_ENABLE_MLSPP=1)
-    if(LAN_CHAT_ENABLE_TEST_HOOKS)
-        target_compile_definitions(chat-bridge-tests PRIVATE LAN_CHAT_ENABLE_TEST_HOOKS=1)
-    endif()
-endif()
-
-# Qt WebEngine also brings its own TLS stack. Loading the vcpkg OpenSSL DLLs
-# during process startup can select the wrong copy and crash before the UI is
-# drawn. Delay-load them instead; GuiConnectionWorker selects the dedicated
-# runtime directory immediately before the first TLS or discovery operation.
-if(MSVC)
-    target_link_libraries(lan-chat-gui PRIVATE delayimp)
-    target_link_options(lan-chat-gui PRIVATE
-        "/DELAYLOAD:libssl-3-x64.dll"
-        "/DELAYLOAD:libcrypto-3-x64.dll"
-    )
-endif()
-
-target_include_directories(chat-bridge-tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
-)
-
-add_test(NAME chat-bridge-tests COMMAND chat-bridge-tests)
 
 qt_add_executable(reconnect-policy-tests
     tests/reconnect_policy_tests.cpp
@@ -599,6 +533,142 @@ target_include_directories(lan-discovery-service-tests PRIVATE
 
 add_test(NAME lan-discovery-service-tests COMMAND lan-discovery-service-tests)
 
+if(LAN_CHAT_ENABLE_MLSPP)
+    qt_add_executable(mls-client-tests
+        tests/mls_client_tests.cpp
+        src/crypto/mls_client.cpp
+        src/crypto/mls_client.hpp
+        src/attachments/attachment_mls_group_id.cpp
+        src/attachments/attachment_mls_group_id.hpp
+    )
+    target_link_libraries(mls-client-tests PRIVATE
+        Qt6::Test
+        mlspp
+    )
+    target_include_directories(mls-client-tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME mls-client-tests COMMAND mls-client-tests)
+endif()
+
+# ---------------------------------------------------------------------------
+# GUI-only tests (need Qt Gui/Widgets/WebEngine/WebChannel).
+# ---------------------------------------------------------------------------
+if(LAN_CHAT_BUILD_GUI)
+
+qt_add_executable(graphics-info-tests
+    tests/graphics_info_tests.cpp
+    src/graphics_info.cpp
+    src/graphics_info.hpp
+)
+
+target_link_libraries(graphics-info-tests PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Test
+)
+
+target_include_directories(graphics-info-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+add_test(NAME graphics-info-tests COMMAND graphics-info-tests)
+
+qt_add_executable(chat-bridge-tests
+    tests/chat_bridge_tests.cpp
+    src/chat_bridge.cpp
+    src/chat_bridge.hpp
+    src/graphics_info.cpp
+    src/graphics_info.hpp
+    src/performance_profile.cpp
+    src/performance_profile.hpp
+    src/bridge_protocol.cpp
+    src/bridge_protocol.hpp
+    src/chat_model.cpp
+    src/chat_model.hpp
+    src/host_path_resolver.cpp
+    src/host_path_resolver.hpp
+    src/openssl_runtime.cpp
+    src/openssl_runtime.hpp
+    src/network_diagnostics.cpp
+    src/network_diagnostics.hpp
+    src/gui_chat_controller.cpp
+    src/gui_chat_controller.hpp
+    src/gui_connection_worker.cpp
+    src/gui_connection_worker.hpp
+    src/reconnect_policy.cpp
+    src/reconnect_policy.hpp
+    src/lan_discovery_service.cpp
+    src/lan_discovery_service.hpp
+    ../src/auth.cpp
+    ../src/connection.cpp
+    ../src/message.cpp
+    ../src/protocol.cpp
+)
+
+target_link_libraries(chat-bridge-tests PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Test
+    Qt6::Network
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)
+if(WIN32)
+    target_link_libraries(chat-bridge-tests PRIVATE ws2_32)
+endif()
+
+if(LAN_CHAT_ENABLE_MLSPP)
+    target_sources(chat-bridge-tests PRIVATE
+        src/crypto/mls_client.cpp
+        src/crypto/mls_client.hpp
+        src/attachments/attachment_crypto.cpp
+        src/attachments/attachment_crypto.hpp
+        src/attachments/transfer_client.cpp
+        src/attachments/transfer_client.hpp
+        src/attachments/attachment_transfer_state.cpp
+        src/attachments/attachment_transfer_state.hpp
+        src/attachments/attachment_manifest.cpp
+        src/attachments/attachment_manifest.hpp
+        src/attachments/attachment_mls_group_id.cpp
+        src/attachments/attachment_mls_group_id.hpp
+        src/attachments/attachment_download_assembler.cpp
+        src/attachments/attachment_download_assembler.hpp
+    )
+    target_link_libraries(chat-bridge-tests PRIVATE mlspp)
+    target_compile_definitions(chat-bridge-tests PRIVATE LAN_CHAT_ENABLE_MLSPP=1)
+    if(LAN_CHAT_ENABLE_TEST_HOOKS)
+        target_compile_definitions(chat-bridge-tests PRIVATE LAN_CHAT_ENABLE_TEST_HOOKS=1)
+    endif()
+endif()
+
+# Qt WebEngine also brings its own TLS stack. Loading the vcpkg OpenSSL DLLs
+# during process startup can select the wrong copy and crash before the UI is
+# drawn. Delay-load them instead; GuiConnectionWorker selects the dedicated
+# runtime directory immediately before the first TLS or discovery operation.
+if(MSVC)
+    target_link_libraries(lan-chat-gui PRIVATE delayimp)
+    target_link_options(lan-chat-gui PRIVATE
+        "/DELAYLOAD:libssl-3-x64.dll"
+        "/DELAYLOAD:libcrypto-3-x64.dll"
+    )
+endif()
+
+target_include_directories(chat-bridge-tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party
+)
+
+add_test(NAME chat-bridge-tests COMMAND chat-bridge-tests)
+
+endif() # LAN_CHAT_BUILD_GUI (GUI-only tests, part 1)
+
+# ---------------------------------------------------------------------------
+# CTest runtime PATH wiring (needed on Windows to locate Qt/OpenSSL DLLs).
+# ---------------------------------------------------------------------------
 # CTest on Windows does not inherit the interactive PowerShell PATH used by
 # the direct test commands. Provide the Qt and build directories explicitly so
 # QtGui/QtQuick test processes can locate their runtime DLLs.
@@ -616,12 +686,12 @@ if(LAN_CHAT_ENABLE_MLSPP)
         PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_TEST_RUNTIME_PATH_ESCAPED}"
     )
 endif()
+
+# Headless tests present in every configuration.
 set_tests_properties(
     bridge-protocol-tests
     connection-endpoint-tests
-    graphics-info-tests
     chat-model-tests
-    chat-bridge-tests
     reconnect-policy-tests
     network-diagnostics-tests
     performance-benchmark-gate-tests
@@ -637,15 +707,29 @@ set_tests_properties(
     PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_TEST_RUNTIME_PATH_ESCAPED}"
 )
 set_tests_properties(
-    chat-bridge-tests
-    PROPERTIES ENVIRONMENT
-        "PATH=${LAN_CHAT_TEST_RUNTIME_PATH_ESCAPED};LAN_CHAT_OPENSSL_RUNTIME_DIR=${LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR}"
-)
-set_tests_properties(
     connection-endpoint-tests
     PROPERTIES ENVIRONMENT
         "PATH=${LAN_CHAT_TEST_RUNTIME_PATH_ESCAPED}"
 )
+
+if(LAN_CHAT_BUILD_GUI)
+    set_tests_properties(
+        graphics-info-tests
+        chat-bridge-tests
+        PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_TEST_RUNTIME_PATH_ESCAPED}"
+    )
+    set_tests_properties(
+        chat-bridge-tests
+        PROPERTIES ENVIRONMENT
+            "PATH=${LAN_CHAT_TEST_RUNTIME_PATH_ESCAPED};LAN_CHAT_OPENSSL_RUNTIME_DIR=${LAN_CHAT_OPENSSL_TEST_RUNTIME_DIR}"
+    )
+endif()
+
+# ---------------------------------------------------------------------------
+# Frontend bundle + WebEngine host (GUI only). The headless core build does not
+# need the React dist, so skip it entirely when LAN_CHAT_BUILD_GUI=OFF.
+# ---------------------------------------------------------------------------
+if(LAN_CHAT_BUILD_GUI)
 
 set(LAN_CHAT_FRONTEND_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../frontend/dist" CACHE PATH
     "Absolute React release dist directory")
@@ -716,3 +800,5 @@ set_tests_properties(
 set_target_properties(lan-chat-gui PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
+
+endif() # LAN_CHAT_BUILD_GUI (frontend bundle + WebEngine host)

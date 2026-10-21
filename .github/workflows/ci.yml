@@ -48,6 +48,67 @@ jobs:
           pnpm test -- --run
           pnpm run build
 
+  cpp-core:
+    name: C++ core (headless)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Qt base, OpenSSL and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev libssl-dev cmake ninja-build
+      - name: Configure (GUI off)
+        run: cmake -S client-cpp/gui -B build/cpp-core -G Ninja -DLAN_CHAT_BUILD_GUI=OFF
+      - name: Build
+        run: cmake --build build/cpp-core --parallel
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build/cpp-core --output-on-failure
+
+  cpp-gui-windows:
+    name: C++ GUI (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Qt (WebEngine)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.11.2
+          arch: win64_msvc2022_64
+          modules: qtwebengine qtwebchannel qtpositioning
+          cache: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Set up pnpm
+        run: npm install --global pnpm@11.19.0
+      - name: Install OpenSSL (choco)
+        shell: pwsh
+        run: choco install openssl --no-progress -y
+      - name: Resolve OpenSSL root
+        id: openssl
+        shell: pwsh
+        run: |
+          $candidates = @(
+            'C:\Program Files\OpenSSL-Win64',
+            'C:\Program Files\OpenSSL'
+          )
+          $root = $candidates | Where-Object { Test-Path (Join-Path $_ 'include\openssl\ssl.h') } | Select-Object -First 1
+          if (-not $root) { throw 'OpenSSL root with include\openssl\ssl.h was not found.' }
+          Write-Host "OpenSSL root: $root"
+          "root=$root" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      - name: Build and test (build-modern.ps1 -Action Test)
+        shell: pwsh
+        env:
+          LAN_CHAT_QT_PREFIX: ${{ env.QT_ROOT_DIR }}
+          LAN_CHAT_OPENSSL_ROOT: ${{ steps.openssl.outputs.root }}
+          QT_QPA_PLATFORM: offscreen
+        run: .\scripts\build-modern.ps1 -Action Test
+
   source-launcher:
     name: Windows source launcher
     runs-on: windows-latest
