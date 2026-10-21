@@ -215,7 +215,7 @@ describe('MessageComposer', () => {
     expect(card).toHaveTextContent('50.0%');
     expect(card).toHaveTextContent('47.0 KiB / 94.0 KiB');
     expect(card).toHaveTextContent('1 块 / 2 块');
-    expect(card).toHaveTextContent('🔒 端到端加密');
+    expect(card).toHaveTextContent('端到端加密');
     expect(card.querySelector('.progress-fill')).toHaveStyle({ transform: 'scaleX(0.5)' });
     expect(card.querySelector('.progress-fill')).not.toHaveClass('progress-fill--indeterminate');
     expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
@@ -260,7 +260,7 @@ describe('MessageComposer', () => {
 
     const card = screen.getByTestId(`attachment-card-${commandId}`);
     expect(card).toHaveTextContent('续传中');
-    expect(card).toHaveTextContent('⚡ 连接中断，已保存 3 块');
+    expect(card).toHaveTextContent('连接中断，已保存 3 块');
     expect(card.querySelector('.progress-fill')).toHaveClass('progress-fill--indeterminate');
   });
 

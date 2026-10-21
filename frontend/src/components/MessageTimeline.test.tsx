@@ -124,6 +124,31 @@ describe('MessageTimeline motion budget', () => {
     expect(timeline.scrollTop).toBe(1000);
   });
 
+  it('marks the first message that arrived while scrolled up with a 新消息 divider', () => {
+    const firstState = { ...baseState, activeMessages: [receivedMessage('history-1')] };
+    const { rerender } = render(<MessageTimeline bridge={createFakeBridge(firstState)} state={firstState} />);
+    const timeline = screen.getByTestId('message-timeline');
+    setScrollableGeometry(timeline, 0);
+    fireEvent.scroll(timeline);
+
+    const nextState = { ...firstState, activeMessages: [...firstState.activeMessages, receivedMessage('new-1'), receivedMessage('new-2')] };
+    rerender(<MessageTimeline bridge={createFakeBridge(nextState)} state={nextState} />);
+
+    const dividers = screen.getAllByRole('separator', { name: '以下为新消息' });
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0].nextElementSibling).toBe(screen.getByTestId('message-new-1'));
+  });
+
+  it('shows no 新消息 divider while following the latest message', () => {
+    const firstState = { ...baseState, activeMessages: [receivedMessage('history-1')] };
+    const { rerender } = render(<MessageTimeline bridge={createFakeBridge(firstState)} state={firstState} />);
+
+    const nextState = { ...firstState, activeMessages: [...firstState.activeMessages, receivedMessage('new-1')] };
+    rerender(<MessageTimeline bridge={createFakeBridge(nextState)} state={nextState} />);
+
+    expect(screen.queryByRole('separator', { name: '以下为新消息' })).not.toBeInTheDocument();
+  });
+
   it('groups consecutive messages from the same author', () => {
     const state = {
       ...baseState,

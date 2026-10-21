@@ -204,7 +204,7 @@ function UploadCard({ commandId, upload, onRemove, onRetry }: {
             {!finalizing && <span> · {formatTransferBytes(speed)}/s</span>}
           </span>}
           <span className={`upload-card__meta${upload.phase === 'resuming' ? ' upload-card__meta--warn' : ''}`}>
-            {upload.phase === 'resuming' ? `⚡ 连接中断，已保存 ${upload.receivedChunks} 块` : `${upload.receivedChunks} 块`}{totalChunks ? ` / ${totalChunks} 块` : ''} · 🔒 端到端加密
+            {upload.phase === 'resuming' ? `连接中断，已保存 ${upload.receivedChunks} 块` : `${upload.receivedChunks} 块`}{totalChunks ? ` / ${totalChunks} 块` : ''} · 端到端加密
           </span>
           <div className="progress-track" role="progressbar" aria-label={`附件上传进度 ${commandId}`}
             aria-valuemin={0} aria-valuemax={totalChunks ?? 0} aria-valuenow={upload.receivedChunks}

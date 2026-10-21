@@ -41,7 +41,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return (
       <main className="app-shell mode-shell bridge-error-shell">
         <section className="mode-panel bridge-error-panel">
-          <p className="eyebrow">LAN CHAT / RUNTIME ERROR</p>
           <h1>界面遇到问题</h1>
           <p className="status-line status-line--error" role="alert">
             页面渲染时出现异常。可以重试，或返回模式选择重新开始。

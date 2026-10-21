@@ -22,14 +22,9 @@
 
 .profile-card__banner {
   position: relative; height: 104px; overflow: hidden; isolation: isolate;
-  background: linear-gradient(135deg, var(--pc-fg), color-mix(in srgb, var(--pc-fg) 55%, #7C3AED));
+  background: var(--pc-bg);
 }
-.profile-card__glow {
-  position: absolute; inset: -40% -20%; z-index: -1;
-  background: radial-gradient(circle at 30% 40%, rgba(255, 255, 255, 0.4), transparent 40%),
-              radial-gradient(circle at 75% 70%, rgba(255, 255, 255, 0.22), transparent 38%);
-  animation: pc-drift calc(9s * var(--t-motion-scale, 1)) ease-in-out infinite alternate;
-}
+.profile-card__glow { display: none; }
 @keyframes pc-drift { to { transform: translate(-12%, 8%) rotate(8deg); } }
 .profile-card__dot { position: absolute; border-radius: 50%; background: rgba(255, 255, 255, 0.5); }
 .profile-card__dot--a { width: 8px; height: 8px; left: 18%; top: 28%; animation: pc-float calc(4s * var(--t-motion-scale, 1)) ease-in-out infinite; }
@@ -44,14 +39,7 @@
   animation: pc-avatar-in calc(520ms * var(--t-motion-scale, 1)) cubic-bezier(0.34, 1.56, 0.64, 1) 80ms both;
 }
 @keyframes pc-avatar-in { from { transform: scale(0.6) translateY(10px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
-.profile-card__avatar--online::after {
-  /* 旋转的渐变光环，只在在线时出现 */
-  content: ''; position: absolute; inset: -9px; border-radius: 50%; z-index: -1;
-  background: conic-gradient(from 0deg, var(--t-online), transparent 30%, var(--pc-fg) 55%, transparent 80%, var(--t-online));
-  -webkit-mask: radial-gradient(closest-side, transparent 84%, #000 86%);
-  mask: radial-gradient(closest-side, transparent 84%, #000 86%);
-  animation: t-spin calc(6s * var(--t-motion-scale, 1)) linear infinite;
-}
+.profile-card__avatar--online::after { content: none; }
 .profile-card__presence {
   position: absolute; right: 4px; bottom: 6px; width: 22px; height: 22px; border-radius: 50%;
   background: var(--t-ink-3); border: 5px solid var(--t-surface-raised);
@@ -79,13 +67,7 @@
   position: relative; overflow: hidden;
   animation: t-rise calc(300ms * var(--t-motion-scale, 1)) ease-out both;
 }
-.connection-approval-item::before {
-  /* 顶部流光条提示“等待处理” */
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px;
-  background: linear-gradient(90deg, transparent, var(--t-accent), transparent);
-  transform: translateX(-100%);
-  animation: ca-sweep calc(2.2s * var(--t-motion-scale, 1)) ease-in-out infinite;
-}
+.connection-approval-item::before { content: none; }
 @keyframes ca-sweep { to { transform: translateX(100%); } }
 .connection-approval-item__head { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
 .connection-approval-item__ring { position: relative; display: inline-flex; flex: none; margin: 6px; }
@@ -109,7 +91,7 @@
   background: var(--t-surface-raised); border: 1px solid var(--t-line); box-shadow: var(--t-shadow-lg);
   animation: ct-in calc(420ms * var(--t-motion-scale, 1)) cubic-bezier(0.34, 1.4, 0.64, 1) both;
 }
-.connection-toast--leaving { animation: ct-out calc(280ms * var(--t-motion-scale, 1)) ease-in both; }
+.connection-toast--leaving { animation: ct-out calc(280ms * var(--t-motion-scale, 1)) var(--t-ease-out) both; }
 @keyframes ct-in { from { opacity: 0; transform: translateX(28px) scale(0.96); } to { opacity: 1; transform: translateX(0) scale(1); } }
 @keyframes ct-out { to { opacity: 0; transform: translateX(28px) scale(0.96); } }
 .connection-toast__icon {

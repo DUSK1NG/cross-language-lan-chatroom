@@ -43,3 +43,11 @@ fileMatchPattern: "frontend/**"
 
 ## 6. 验收方式
 每个视觉/动效改动在 PR 中附：浅色、深色、820px 窄屏截图；动效改动附关键帧采样（如 Playwright 读取 `getComputedStyle(...).transform` 的 3 个时间点）以及 reduced-motion 下 `document.getAnimations().length === 0` 的证据。
+
+## 7. 当前视觉方向：achromatic-ledger（2026-10-21 定）
+依据 taste-skill 的 app-screens 规则（<https://github.com/Leonxlnx/taste-skill>），由 `draw.mjs --app --kind workspace` 发牌，seed 1573981768。
+- **界面框架无色**：导航激活项为中性灰药丸，主按钮近黑（深色主题为白），图标为灰色描边、不放进有色方块。
+- **唯一色相 `--t-accent`（#1d5fbf / 深色 #6ea2ec）只用于需要注意的数据**：未读数、"新消息"分隔线、新消息提示按钮、焦点环。不用于按钮、导航、气泡。
+- **气泡**：对方白底 1px 边，自己低彩度墨色浅底（#e3e7ed / 深色 #26292e）；无阴影；最大宽度 520px（阅读行宽）。时间与正文 flex 换行，短消息同行。圆角按段内位置：发送侧与相邻消息相接处 4px，其余 14px。
+- **字体**：Geist（随包，`frontend/src/assets/fonts/`，OFL），中文回落 Microsoft YaHei UI。
+- **禁止**：渐变、毛玻璃、紫/靛色、emoji 作为界面元素、eyebrow 小标签、静止元素阴影。检查：`node <taste-skill>/scripts/inspect.mjs --app` 应为 0 FAIL。
