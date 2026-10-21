@@ -201,6 +201,10 @@ add_library(lan_chat_core STATIC
     src/attachments/attachment_manifest.hpp
     src/attachments/attachment_download_assembler.cpp
     src/attachments/attachment_download_assembler.hpp
+    # group-id is a SHA256-based string helper with no MLS dependency and is used
+    # by gui_connection_worker.cpp outside LAN_CHAT_ENABLE_MLSPP guards.
+    src/attachments/attachment_mls_group_id.cpp
+    src/attachments/attachment_mls_group_id.hpp
     ../src/auth.cpp
     ../src/connection.cpp
     ../src/message.cpp
@@ -228,8 +232,6 @@ if(LAN_CHAT_ENABLE_MLSPP)
     target_sources(lan_chat_core PRIVATE
         src/crypto/mls_client.cpp
         src/crypto/mls_client.hpp
-        src/attachments/attachment_mls_group_id.cpp
-        src/attachments/attachment_mls_group_id.hpp
     )
     target_link_libraries(lan_chat_core PUBLIC mlspp)
     target_compile_definitions(lan_chat_core PUBLIC LAN_CHAT_ENABLE_MLSPP=1)
@@ -611,6 +613,23 @@ qt_add_executable(chat-bridge-tests
     src/reconnect_policy.hpp
     src/lan_discovery_service.cpp
     src/lan_discovery_service.hpp
+    # Attachment transfer sources are referenced unconditionally by
+    # gui_connection_worker.cpp (the send-chunk path uses AttachmentTransferState
+    # and TransferClient::encrypt_next_chunk outside any LAN_CHAT_ENABLE_MLSPP
+    # guard), so they must be compiled even when MLS++ is OFF. Only mls_client is
+    # genuinely MLS-only (added in the block below).
+    src/attachments/attachment_crypto.cpp
+    src/attachments/attachment_crypto.hpp
+    src/attachments/transfer_client.cpp
+    src/attachments/transfer_client.hpp
+    src/attachments/attachment_transfer_state.cpp
+    src/attachments/attachment_transfer_state.hpp
+    src/attachments/attachment_manifest.cpp
+    src/attachments/attachment_manifest.hpp
+    src/attachments/attachment_mls_group_id.cpp
+    src/attachments/attachment_mls_group_id.hpp
+    src/attachments/attachment_download_assembler.cpp
+    src/attachments/attachment_download_assembler.hpp
     ../src/auth.cpp
     ../src/connection.cpp
     ../src/message.cpp
@@ -635,18 +654,6 @@ if(LAN_CHAT_ENABLE_MLSPP)
     target_sources(chat-bridge-tests PRIVATE
         src/crypto/mls_client.cpp
         src/crypto/mls_client.hpp
-        src/attachments/attachment_crypto.cpp
-        src/attachments/attachment_crypto.hpp
-        src/attachments/transfer_client.cpp
-        src/attachments/transfer_client.hpp
-        src/attachments/attachment_transfer_state.cpp
-        src/attachments/attachment_transfer_state.hpp
-        src/attachments/attachment_manifest.cpp
-        src/attachments/attachment_manifest.hpp
-        src/attachments/attachment_mls_group_id.cpp
-        src/attachments/attachment_mls_group_id.hpp
-        src/attachments/attachment_download_assembler.cpp
-        src/attachments/attachment_download_assembler.hpp
     )
     target_link_libraries(chat-bridge-tests PRIVATE mlspp)
     target_compile_definitions(chat-bridge-tests PRIVATE LAN_CHAT_ENABLE_MLSPP=1)
