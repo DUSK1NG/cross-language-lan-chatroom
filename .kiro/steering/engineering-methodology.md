@@ -17,7 +17,7 @@ inclusion: always
 
 ## 3. 不可破坏的安全不变量
 以下来自现有代码与交接文档，任何任务都**不得削弱**；若任务看起来需要突破，按决策门处理：
-- 前端不接触**文件路径与密钥**（`frontend/src/components/MessageComposer.tsx:106-107`）。经用户 2026-10-21 批准修订：前端可以通过会话内有效、可作废的 `lanchat-media://` 不透明令牌显示已解密的媒体；明文只存在于当前用户应用缓存目录，文件名随机，默认在退出时清除（规格 03 D1）。
+- 前端不接触**文件路径与密钥**（`frontend/src/components/composer/Composer.tsx` 的 `chooseUpload` 只派发命令，由 C++ 选择、加密、分块）。经用户 2026-10-21 批准修订：前端可以通过会话内有效、可作废的 `lanchat-media://` 不透明令牌显示已解密的媒体；明文只存在于当前用户应用缓存目录，文件名随机，默认在退出时清除（规格 03 D1）。
 - manifest 只经 MLS 保护后传输，密钥永不进入 bridge/UI（`client-cpp/gui/src/attachments/attachment_manifest.hpp:9-10`）。
 - 服务端永不获得明文文件名、MIME、缩略图或密钥（`server-go/attachment_store.go:47-48,74-75`）。
 - 入站附件命令使用字段白名单（`docs/handover/2026-09-01-encrypted-attachments.md:24`）。

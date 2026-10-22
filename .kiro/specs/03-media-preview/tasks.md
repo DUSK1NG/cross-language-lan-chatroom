@@ -37,7 +37,7 @@
   - [ ] 6.1 失败测试（Go）→ 作用域迁移（旧行加 `room:` 前缀）与 dm 成员检查（第三人被拒）、dm 配额 2 GiB、init 白名单仍拒绝 `file_path`。_R5.2 R5.5_
   - [ ] 6.2 失败测试（Go）→ 离线私信保留 `crypto` 字段；如不保留则修复。_R5.4_
   - [ ] 6.3 C++：`chooseAndUploadAttachment` 支持 `peerUserCode`、作用域键进入 group id 与 AAD、manifest 走 `private_chat`；接收端作用域一致性校验；旧附件仍可解密的回归测试。_R5.3 D8_
-  - [ ] 6.4 前端：私信会话启用附件按钮与媒体预览；更新 `MessageComposer.test.tsx` 中「仅频道」的断言为新行为。_R5.1_
+  - [ ] 6.4 前端：私信会话启用附件按钮与媒体预览；更新 `components/composer/Composer.test.tsx` 中「仅频道」的断言为新行为。_R5.1_
 
 - [ ] 7. 验收门
   - [ ] 7.1 按 `requirements.md` 验收清单 1–7 在两台 Windows 电脑执行并记录到 `docs/release-checklist.md`。

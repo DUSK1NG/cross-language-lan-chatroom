@@ -1,300 +1,298 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Settings, Upload } from 'lucide-react';
 
 import { createCommand } from '../bridge/chatBridge';
-import type { BridgeState, ChatBridgeClient, MemberSummary } from '../bridge/types';
-import { ChatHeader } from '../components/ChatHeader';
-import { ConversationSidebar } from '../components/ConversationSidebar';
-import type { WorkspaceSection } from '../components/ConversationSidebar';
-import { IdentityCard } from '../components/IdentityCard';
-import { MemberPanel } from '../components/MemberPanel';
-import { MessageComposer, type QuoteDraft } from '../components/MessageComposer';
-import { MessageTimeline } from '../components/MessageTimeline';
-import { ModalSurface } from '../components/ModalSurface';
-import { CommandFeedback, type CommandFeedbackProps } from '../components/CommandFeedback';
-import { animateWorkspacePanels } from '../animation/motion';
-import { ProfileCard } from '../components/ProfileCard';
-import { ConnectionToast } from '../components/ConnectionToast';
-import { Avatar } from '../components/Avatar';
-import { Icon } from '../components/Icon';
+import type { BridgeState, ChatBridgeClient, ConnectionApprovalRequest, MemberSummary, MessageItem } from '../bridge/types';
+import { ConversationSidebar } from '../components/sidebar/ConversationSidebar';
+import { buildEntries, isActive, type ConversationFilter } from '../components/sidebar/conversations';
+import { ChatHeader } from '../components/chat/ChatHeader';
+import { ConnectionBanner } from '../components/chat/ConnectionBanner';
+import { MessageList, conversationKey } from '../components/chat/MessageList';
+import { parseQuote } from '../components/chat/MessageBubble';
+import { Composer, type QuoteDraft } from '../components/composer/Composer';
+import { InfoPanel } from '../components/shell/InfoPanel';
+import { ResizeHandle, useSidebarWidth } from '../components/shell/ResizeHandle';
+import { ApprovalDialog } from '../components/dialogs/ApprovalDialog';
+import { AdminConfirmDialog, CreateRoomDialog, MemberDialog, RoomManageDialog, type AdminAction } from '../components/dialogs/RoomDialogs';
+import { Avatar } from '../components/ui/avatar';
+import { IconButton } from '../components/ui/icon-button';
+import type { CommandFeedbackProps } from '../components/CommandFeedback';
+import { useHotkeys } from '../hooks/useHotkeys';
+import { compactQuery, narrowQuery, useMediaQuery } from '../hooks/useMediaQuery';
+import { cn } from '../lib/cn';
+import { ease } from '../lib/motion';
 
-type WorkspacePageProps = { bridge: ChatBridgeClient; state: BridgeState; onSettings?: () => void };
-type AdminAction = 'mute' | 'kick';
+type WorkspacePageProps = { bridge: ChatBridgeClient; state: BridgeState; onSettings?: () => void; onReconnect?: () => void; theme?: 'dark' | 'light' };
 
-const roomNamePattern = /^[A-Za-z0-9_]{1,32}$/;
+const idle: CommandFeedbackProps = { status: 'idle', message: '' };
 
-export function WorkspacePage({ bridge, state, onSettings }: WorkspacePageProps) {
-  const workspaceRef = useRef<HTMLElement>(null);
-  const [memberDrawerOpen, setMemberDrawerOpen] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [roomManageOpen, setRoomManageOpen] = useState(false);
-  const [connectionApprovalOpen, setConnectionApprovalOpen] = useState(false);
-  const [memberToManage, setMemberToManage] = useState<MemberSummary | null>(null);
-  const [memberProfile, setMemberProfile] = useState<MemberSummary | null>(null);
-  const [pendingAdminAction, setPendingAdminAction] = useState<{ action: AdminAction; member: MemberSummary } | null>(null);
-  const [memberCode, setMemberCode] = useState('');
-  const [section, setSection] = useState<WorkspaceSection>('rooms');
-  const [draft, setDraft] = useState('');
+/** Subscribe once to the result of one command; returns an unsubscribe. */
+function onResult(bridge: ChatBridgeClient, id: string, handle: (ok: boolean, message?: string) => void) {
+  const unsubscribe = bridge.subscribeCommandResult((result) => {
+    if (result.id !== id) return;
+    unsubscribe();
+    handle(result.ok, result.error?.message);
+  });
+  return unsubscribe;
+}
+
+/**
+ * Three-column workspace (spec §2): conversation list (260–420px, resizable) · chat ·
+ * optional 340px info panel. <900px the panel overlays; <700px list and chat alternate.
+ */
+export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 'dark' }: WorkspacePageProps) {
+  const narrow = useMediaQuery(narrowQuery);
+  const compact = useMediaQuery(compactQuery);
+  const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
+  const [phoneView, setPhoneView] = useState<'list' | 'chat'>('list');
+  const [filter, setFilter] = useState<ConversationFilter>('rooms');
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [quote, setQuote] = useState<QuoteDraft | null>(null);
-  const [focusComposerAtEndToken, setFocusComposerAtEndToken] = useState(0);
-  const [createRoomOpen, setCreateRoomOpen] = useState(false);
-  const [roomName, setRoomName] = useState('');
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [roomFeedback, setRoomFeedback] = useState<CommandFeedbackProps>({ status: 'idle', message: '' });
-  const [roomActionFeedback, setRoomActionFeedback] = useState<CommandFeedbackProps>({ status: 'idle', message: '' });
-  const [adminFeedback, setAdminFeedback] = useState<CommandFeedbackProps>({ status: 'idle', message: '' });
-  const pendingRoomCommandIdRef = useRef<string | null>(null);
-  const pendingRoomUnsubscribeRef = useRef<(() => void) | null>(null);
-  const pendingRoomActionIdRef = useRef<string | null>(null);
-  const pendingRoomActionUnsubscribeRef = useRef<(() => void) | null>(null);
-  const pendingAdminActionIdRef = useRef<string | null>(null);
-  const pendingAdminActionUnsubscribeRef = useRef<(() => void) | null>(null);
+  const [focusToken, setFocusToken] = useState(0);
+  const [uploadToken, setUploadToken] = useState(0);
+  const [dragging, setDragging] = useState(false);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createPending, setCreatePending] = useState(false);
+  const [createFeedback, setCreateFeedback] = useState(idle);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [managePending, setManagePending] = useState(false);
+  const [manageFeedback, setManageFeedback] = useState(idle);
+  const [approvalsOpen, setApprovalsOpen] = useState(false);
+  const [profile, setProfile] = useState<MemberSummary | null>(null);
+  const [pendingAdmin, setPendingAdmin] = useState<{ action: AdminAction; member: MemberSummary } | null>(null);
+  const [adminPending, setAdminPending] = useState(false);
+  const [adminFeedback, setAdminFeedback] = useState(idle);
+  const subscriptions = useRef(new Set<() => void>());
+  useEffect(() => () => { subscriptions.current.forEach((unsubscribe) => unsubscribe()); }, []);
+  const track = (unsubscribe: () => void) => {
+    subscriptions.current.add(unsubscribe);
+    return () => { subscriptions.current.delete(unsubscribe); unsubscribe(); };
+  };
+
+  const active = state.navigation.activeConversation;
+  const key = conversationKey(state);
+  const activeRoom = active?.kind === 'room' ? active.id : '';
   const canManageRoom = state.identity.admin || state.permissions.activeRoomCanManage;
-  const hasBlockingConnectionApproval = state.identity.admin && (state.connectionApprovals?.length ?? 0) > 0;
+  const approvals = state.connectionApprovals ?? [];
 
-  useLayoutEffect(() => animateWorkspacePanels(workspaceRef.current!), []);
-
+  // Unread a conversation had just before it was opened (the bridge zeroes it on selection).
+  const unreadSnapshot = useRef(new Map<string, number>());
+  const entryKey = useRef(key);
+  const entryUnread = useRef(0);
+  if (entryKey.current !== key) {
+    entryUnread.current = unreadSnapshot.current.get(key) ?? 0;
+    entryKey.current = key;
+  }
   useEffect(() => {
-    if (!memberDrawerOpen && !sidebarOpen && !createRoomOpen && !roomManageOpen && !connectionApprovalOpen && !memberToManage && !memberProfile && !pendingAdminAction) return undefined;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (hasBlockingConnectionApproval) return;
-      setMemberDrawerOpen(false);
-      setSidebarOpen(false);
-      setRoomManageOpen(false);
-      setConnectionApprovalOpen(false);
-      setMemberToManage(null);
-      setMemberProfile(null);
-      setPendingAdminAction(null);
-      if (!pendingRoomCommandIdRef.current) setCreateRoomOpen(false);
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [memberDrawerOpen, sidebarOpen, createRoomOpen, roomManageOpen, connectionApprovalOpen, memberToManage, memberProfile, pendingAdminAction, hasBlockingConnectionApproval]);
+    const snapshot = new Map<string, number>();
+    state.rooms.forEach((room) => snapshot.set(`room:${room.roomName}`, room.unreadCount));
+    state.directMessages.forEach((direct) => snapshot.set(`dm:${direct.userCode}`, direct.unreadCount));
+    unreadSnapshot.current = snapshot;
+  }, [state.rooms, state.directMessages]);
 
-  useEffect(() => () => {
-    pendingRoomUnsubscribeRef.current?.();
-    pendingRoomActionUnsubscribeRef.current?.();
-    pendingAdminActionUnsubscribeRef.current?.();
-  }, []);
+  // Per-conversation drafts; switching conversations restores each one and drops the reply.
+  const draft = drafts[key] ?? '';
+  const setDraft = useCallback((value: string) => setDrafts((current) => ({ ...current, [key]: value })), [key]);
+  useEffect(() => { setQuote(null); setHistoryQuery(''); setSearchOpen(false); }, [key]);
 
+  // A new member request opens the approval dialog for the owner.
+  const approvalCount = useRef(0);
   useEffect(() => {
-    if (state.identity.admin && (state.connectionApprovals?.length ?? 0) > 0) {
-      setConnectionApprovalOpen(true);
-    }
-  }, [state.connectionApprovals?.length, state.identity.admin]);
+    if (state.identity.admin && approvals.length > approvalCount.current) setApprovalsOpen(true);
+    approvalCount.current = approvals.length;
+  }, [approvals.length, state.identity.admin]);
 
-  const validRoomName = roomNamePattern.test(roomName.trim());
+  const selectFromList = () => { if (narrow) setPhoneView('chat'); };
 
-  function openCreateRoom() {
-    setRoomFeedback({ status: 'idle', message: '' });
-    setCreateRoomOpen(true);
-  }
+  const startDirect = (member: MemberSummary) => {
+    bridge.dispatch(createCommand('conversation.openPrivate', { displayName: member.displayName, userCode: member.userCode }));
+    setProfile(null);
+    if (narrow) setPhoneView('chat');
+  };
 
-  function openRoomManage() {
-    setMemberCode('');
-    setRoomActionFeedback({ status: 'idle', message: '' });
-    setRoomManageOpen(true);
-  }
-
-  function closeCreateRoom() {
-    if (pendingRoomCommandIdRef.current) return;
-    setCreateRoomOpen(false);
-  }
-
-  function submitCreateRoom() {
-    const room = roomName.trim();
-    if (!roomNamePattern.test(room) || pendingRoomCommandIdRef.current) return;
-
-    const command = createCommand('room.create', { room, isPrivate });
-    pendingRoomCommandIdRef.current = command.id;
-    setRoomFeedback({ status: 'pending', message: '正在创建频道…' });
-    const unsubscribe = bridge.subscribeCommandResult((result) => {
-      if (result.id !== command.id || pendingRoomCommandIdRef.current !== command.id) return;
-      unsubscribe();
-      if (pendingRoomUnsubscribeRef.current === unsubscribe) pendingRoomUnsubscribeRef.current = null;
-      pendingRoomCommandIdRef.current = null;
-      if (!result.ok) {
-        setRoomFeedback({ status: 'error', message: result.error?.message ?? '创建频道失败。' });
-        return;
-      }
-      bridge.dispatch(createCommand('directory.refreshRooms', {}));
-      bridge.dispatch(createCommand('conversation.selectRoom', { room }));
-      setRoomName('');
-      setIsPrivate(false);
-      setRoomFeedback({ status: 'idle', message: '' });
-      setCreateRoomOpen(false);
-    });
-    pendingRoomUnsubscribeRef.current = unsubscribe;
-    bridge.dispatch(command);
-  }
-
-  function startDirect(member: { displayName: string; userCode: string }) {
-    bridge.dispatch(createCommand('conversation.openPrivate', {
-      displayName: member.displayName,
-      userCode: member.userCode
-    }));
-  }
-
-  function sendRoomAction(action: string) {
-    const activeRoom = state.navigation.activeConversation?.kind === 'room' ? state.navigation.activeConversation.id : '';
-    if (!activeRoom || pendingRoomActionIdRef.current || (action !== 'delete' && !memberCode.trim())) return;
-    const command = createCommand('room.action', { action, room: activeRoom, ...(memberCode.trim() ? { targetUserCode: memberCode.trim() } : {}) });
-    pendingRoomActionIdRef.current = command.id;
-    setRoomActionFeedback({ status: 'pending', message: '正在执行操作…' });
-    const unsubscribe = bridge.subscribeCommandResult((result) => {
-      if (result.id !== command.id || pendingRoomActionIdRef.current !== command.id) return;
-      unsubscribe();
-      if (pendingRoomActionUnsubscribeRef.current === unsubscribe) pendingRoomActionUnsubscribeRef.current = null;
-      pendingRoomActionIdRef.current = null;
-      if (!result.ok) {
-        setRoomActionFeedback({ status: 'error', message: result.error?.message ?? '操作失败。' });
-        return;
-      }
-      setMemberCode('');
-      setRoomActionFeedback({ status: 'success', message: '操作成功。' });
-      if (action === 'delete') {
-        setRoomManageOpen(false);
-        bridge.dispatch(createCommand('conversation.selectRoom', { room: 'lobby' }));
-      }
-    });
-    pendingRoomActionUnsubscribeRef.current = unsubscribe;
-    bridge.dispatch(command);
-  }
-
-  function requestAdminAction(action: AdminAction, member: MemberSummary) {
-    setAdminFeedback({ status: 'idle', message: '' });
-    setPendingAdminAction({ action, member });
-  }
-
-  function confirmAdminAction() {
-    if (!pendingAdminAction || pendingAdminActionIdRef.current) return;
-    const { action, member } = pendingAdminAction;
-    const command = createCommand('admin.action', { action, targetUserCode: member.userCode });
-    pendingAdminActionIdRef.current = command.id;
-    setAdminFeedback({ status: 'pending', message: '正在执行操作…' });
-    const unsubscribe = bridge.subscribeCommandResult((result) => {
-      if (result.id !== command.id || pendingAdminActionIdRef.current !== command.id) return;
-      unsubscribe();
-      if (pendingAdminActionUnsubscribeRef.current === unsubscribe) pendingAdminActionUnsubscribeRef.current = null;
-      pendingAdminActionIdRef.current = null;
-      setPendingAdminAction(null);
-      setAdminFeedback(result.ok
-        ? { status: 'success', message: '操作成功。' }
-        : { status: 'error', message: result.error?.message ?? '操作失败。' });
-    });
-    pendingAdminActionUnsubscribeRef.current = unsubscribe;
-    bridge.dispatch(command);
-  }
-
-  function resolveConnectionApproval(id: string, userCode: string, approve: boolean) {
-    bridge.dispatch(createCommand('admin.action', {
-      action: approve ? 'approve_connection' : 'deny_connection', targetUserCode: userCode, messageId: id
-    }));
-  }
-
-  const quoteMessage = useCallback((message: { displayName: string; content: string }) => {
-    const [, ...replyLines] = message.content.split('\n');
-    const reply = message.content.startsWith('> ') && replyLines.length > 0
-      ? replyLines.join('\n')
-      : message.content;
-    setQuote({ displayName: message.displayName, content: reply });
-    setFocusComposerAtEndToken((token) => token + 1);
+  const quoteMessage = useCallback((message: MessageItem) => {
+    setQuote({ displayName: message.displayName, content: parseQuote(message.content).body });
+    setFocusToken((token) => token + 1);
   }, []);
+  const canRecall = useCallback((message: MessageItem) => state.identity.admin || message.userCode === state.identity.userCode, [state.identity.admin, state.identity.userCode]);
 
-  function updateHistoryQuery(query: string) {
+  const updateHistoryQuery = (query: string) => {
     setHistoryQuery(query);
     bridge.dispatch(createCommand('history.search', { query }));
-  }
+  };
+
+  const submitCreate = (room: string, isPrivate: boolean, reset: () => void) => {
+    const command = createCommand('room.create', { room, isPrivate });
+    setCreatePending(true);
+    setCreateFeedback({ status: 'pending', message: '正在创建频道…' });
+    const stop = track(onResult(bridge, command.id, (ok, message) => {
+      stop();
+      setCreatePending(false);
+      if (!ok) { setCreateFeedback({ status: 'error', message: message ?? '创建频道失败。' }); return; }
+      bridge.dispatch(createCommand('directory.refreshRooms', {}));
+      bridge.dispatch(createCommand('conversation.selectRoom', { room }));
+      reset();
+      setCreateFeedback(idle);
+      setCreateOpen(false);
+    }));
+    bridge.dispatch(command);
+  };
+
+  const roomAction = (action: 'invite' | 'remove_member' | 'delete', memberCode: string, reset: () => void) => {
+    if (!activeRoom || managePending) return;
+    const command = createCommand('room.action', { action, room: activeRoom, ...(memberCode ? { targetUserCode: memberCode } : {}) });
+    setManagePending(true);
+    setManageFeedback({ status: 'pending', message: '正在执行操作…' });
+    const stop = track(onResult(bridge, command.id, (ok, message) => {
+      stop();
+      setManagePending(false);
+      if (!ok) { setManageFeedback({ status: 'error', message: message ?? '操作失败。' }); return; }
+      reset();
+      setManageFeedback({ status: 'success', message: '操作成功。' });
+      if (action === 'delete') {
+        setManageOpen(false);
+        bridge.dispatch(createCommand('conversation.selectRoom', { room: 'lobby' }));
+      }
+    }));
+    bridge.dispatch(command);
+  };
+
+  const confirmAdmin = () => {
+    if (!pendingAdmin || adminPending) return;
+    const command = createCommand('admin.action', { action: pendingAdmin.action, targetUserCode: pendingAdmin.member.userCode });
+    setAdminPending(true);
+    setAdminFeedback({ status: 'pending', message: '正在执行操作…' });
+    const stop = track(onResult(bridge, command.id, (ok, message) => {
+      stop();
+      setAdminPending(false);
+      setPendingAdmin(null);
+      setAdminFeedback(ok ? { status: 'success', message: '操作成功。' } : { status: 'error', message: message ?? '操作失败。' });
+    }));
+    bridge.dispatch(command);
+  };
+
+  const resolveApproval = (request: ConnectionApprovalRequest, approve: boolean) => {
+    bridge.dispatch(createCommand('admin.action', { action: approve ? 'approve_connection' : 'deny_connection', targetUserCode: request.userCode, messageId: request.id }));
+  };
+
+  const openManage = () => { setManageFeedback(idle); setManageOpen(true); };
+  const openCreate = () => { setCreateFeedback(idle); setCreateOpen(true); };
+  const refresh = () => { bridge.dispatch(createCommand('directory.refreshRooms', {})); bridge.dispatch(createCommand('directory.refreshUsers', {})); };
+
+  const order = useMemo(() => buildEntries(state, filter, ''), [state, filter]);
+  const stepConversation = (delta: number) => {
+    if (order.length === 0) return;
+    const current = order.findIndex((entry) => isActive(entry, active));
+    const next = order[(current + delta + order.length) % order.length];
+    bridge.dispatch(next.kind === 'room'
+      ? createCommand('conversation.selectRoom', { room: next.room.roomName })
+      : createCommand('conversation.selectDirect', { userCode: next.direct.userCode }));
+  };
+
+  const anyDialog = createOpen || manageOpen || approvalsOpen || profile !== null || pendingAdmin !== null;
+  useHotkeys({
+    focusSearch: (event) => {
+      const search = document.querySelector<HTMLInputElement>('[data-hotkey="search"]');
+      if (!search) return;
+      event.preventDefault();
+      if (narrow) setPhoneView('list');
+      search.focus();
+    },
+    searchChat: (event) => { if (!active) return; event.preventDefault(); setSearchOpen(true); },
+    prevConversation: (event) => { event.preventDefault(); stepConversation(-1); },
+    nextConversation: (event) => { event.preventDefault(); stepConversation(1); },
+    escape: () => {
+      if (anyDialog) return;            // Radix dialogs handle their own Esc (and blocking ones refuse it)
+      if (searchOpen) { updateHistoryQuery(''); setSearchOpen(false); return; }
+      if (infoOpen) setInfoOpen(false);
+    }
+  });
+
+  const onDragOver = (event: DragEvent) => {
+    if (active?.kind !== 'room' || !event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    setDragging(true);
+  };
+  const onDrop = (event: DragEvent) => {
+    event.preventDefault();
+    setDragging(false);
+    // The page may not read local files (attachment contract), so a drop opens the native picker.
+    if (active?.kind === 'room') setUploadToken((token) => token + 1);
+  };
+
+  const showList = !narrow || phoneView === 'list';
+  const showChat = !narrow || phoneView === 'chat';
 
   return (
-    <main ref={workspaceRef} className="app-shell workspace-shell">
-      <ConversationSidebar bridge={bridge} state={state} section={section} onSectionChange={setSection} onCreateRoom={openCreateRoom} onSettings={onSettings} onOpenSidebar={() => setSidebarOpen(true)} />
-      <section className="chat-region" data-motion="workspace-panel">
-        <ChatHeader state={state} onMembers={() => setMemberDrawerOpen((open) => !open)} membersOpen={memberDrawerOpen} canManage={canManageRoom} onManageRoom={openRoomManage} onConnectionApprovals={() => setConnectionApprovalOpen(true)} historyQuery={historyQuery} onHistoryQueryChange={updateHistoryQuery} />
-        <MessageTimeline bridge={bridge} state={state} onQuote={quoteMessage} canRecall={(message) => state.identity.admin || message.userCode === state.identity.userCode} />
-        <MessageComposer bridge={bridge} state={state} quote={quote} onClearQuote={() => setQuote(null)} draft={draft} onDraftChange={setDraft} onCommandResult={() => undefined} focusAtEndToken={focusComposerAtEndToken} />
-      </section>
-      <MemberPanel state={state} className={`member-drawer${memberDrawerOpen ? ' member-drawer--open' : ''}`} localUserCode={state.identity.userCode} onStartDirect={startDirect} onViewProfile={setMemberProfile} canManage={canManageRoom} onClose={() => setMemberDrawerOpen(false)} onManageMember={(member) => { setAdminFeedback({ status: 'idle', message: '' }); setMemberToManage(member); }} />
-      <IdentityCard state={state} />
-      <ConnectionToast phase={state.connection.phase} />
-      {sidebarOpen && <ModalSurface title={section === 'rooms' ? '群聊导航' : '私信导航'} onClose={() => setSidebarOpen(false)}><ConversationSidebar bridge={bridge} state={state} section={section} onSectionChange={setSection} onCreateRoom={openCreateRoom} /></ModalSurface>}
-      {memberProfile && <ModalSurface title="成员资料" variant="card" onClose={() => setMemberProfile(null)}>
-        <ProfileCard member={memberProfile} isSelf={memberProfile.userCode === state.identity.userCode}>
-        <div className="admin-actions profile-card__actions">
-          {memberProfile.userCode !== state.identity.userCode && <button className="secondary-button" type="button" onClick={() => startDirect(memberProfile)}>私聊</button>}
-          {canManageRoom && memberProfile.userCode !== state.identity.userCode && !memberProfile.admin && <>
-            <button className="secondary-button" type="button" onClick={() => requestAdminAction('mute', memberProfile)}>禁言/解禁</button>
-            <button className="danger-button" type="button" onClick={() => requestAdminAction('kick', memberProfile)}>踢出</button>
-          </>}
+    <main className="flex h-full w-full overflow-hidden bg-bg text-ink">
+      {showList && (
+        <div className="relative flex h-full shrink-0 flex-col border-r border-divider bg-sidebar" style={{ width: narrow ? '100%' : sidebarWidth }}>
+          <ConversationSidebar state={state} bridge={bridge} filter={filter} onFilterChange={setFilter} onCreateRoom={openCreate}
+            onSettings={onSettings} onConnectionApprovals={() => setApprovalsOpen(true)} onManageRoom={openManage}
+            canManageRoom={canManageRoom && Boolean(activeRoom)} onSelected={selectFromList}
+            footer={<IdentityCard state={state} onSettings={onSettings} />} />
+          {!narrow && <ResizeHandle width={sidebarWidth} onWidthChange={setSidebarWidth} />}
         </div>
-        <CommandFeedback {...adminFeedback} />
-        </ProfileCard>
-      </ModalSurface>}
-      {memberToManage && <ModalSurface title="成员管理" onClose={() => setMemberToManage(null)}>
-        <div className="admin-profile"><strong>{memberToManage.displayName}#{memberToManage.userCode}</strong><p>请选择要执行的管理操作。</p></div>
-        <div className="admin-actions">
-          <button className="secondary-button" type="button" disabled={pendingAdminActionIdRef.current !== null} onClick={() => requestAdminAction('mute', memberToManage)}>禁言/解禁</button>
-          <button className="danger-button" type="button" disabled={pendingAdminActionIdRef.current !== null} onClick={() => requestAdminAction('kick', memberToManage)}>踢出</button>
-        </div>
-        <CommandFeedback {...adminFeedback} />
-      </ModalSurface>}
-      {roomManageOpen && <ModalSurface title="频道管理" onClose={() => setRoomManageOpen(false)}>
-        <p className="settings-note">管理 #{state.navigation.activeConversation?.kind === 'room' ? state.navigation.activeConversation.id : ''}</p>
-        <input className="admin-member-input" aria-label="成员代码" placeholder="成员代码，例如 B001" value={memberCode} onChange={(event) => setMemberCode(event.target.value)} />
-        <CommandFeedback {...roomActionFeedback} />
-        <div className="admin-actions">
-          <button className="secondary-button" type="button" disabled={!memberCode.trim() || pendingRoomActionIdRef.current !== null} onClick={() => sendRoomAction('invite')}>邀请成员</button>
-          <button className="secondary-button" type="button" disabled={!memberCode.trim() || pendingRoomActionIdRef.current !== null} onClick={() => sendRoomAction('remove_member')}>移除成员</button>
-          <button className="danger-button" type="button" disabled={pendingRoomActionIdRef.current !== null} onClick={() => sendRoomAction('delete')}>删除频道</button>
-        </div>
-      </ModalSurface>}
-      {pendingAdminAction && <ModalSurface title={pendingAdminAction.action === 'kick' ? '确认踢出成员' : '确认切换禁言'} onClose={() => setPendingAdminAction(null)}>
-        <div className="admin-profile"><strong>{pendingAdminAction.member.displayName}#{pendingAdminAction.member.userCode}</strong><p>{pendingAdminAction.action === 'kick' ? '确定要将该成员踢出当前频道吗？' : '确定要切换该成员的禁言状态吗？'}</p></div>
-        <div className="admin-actions">
-          <button className="secondary-button" type="button" onClick={() => setPendingAdminAction(null)}>取消</button>
-          <button className={pendingAdminAction.action === 'kick' ? 'danger-button' : 'primary-button'} type="button" disabled={pendingAdminActionIdRef.current !== null} onClick={confirmAdminAction}>确认</button>
-        </div>
-      </ModalSurface>}
-      {connectionApprovalOpen && <ModalSurface title="连接审批" onClose={() => setConnectionApprovalOpen(false)} dismissible={!hasBlockingConnectionApproval}>
-        {(state.connectionApprovals ?? []).length === 0 ? <p className="settings-note">没有待确认的成员连接。</p> : <div className="connection-approval-list">
-          {(state.connectionApprovals ?? []).map((request) => <div className="connection-approval-item" key={request.id}>
-            <div className="connection-approval-item__head">
-              <span className="connection-approval-item__ring" aria-hidden="true">
-                <Avatar name={request.displayName} seed={request.userCode} />
-              </span>
-              <span className="connection-approval-item__who">
-                <strong>{request.displayName}#{request.userCode}</strong>
-                <small><Icon name="wifi" size={12} />请求加入聊天室</small>
-              </span>
-            </div>
-            <p>该成员正在请求连接。请先通过可信渠道核对身份；批准后会立即进入聊天室。</p>
-            <div className="admin-actions">
-              <button className="secondary-button" type="button" onClick={() => resolveConnectionApproval(request.id, request.userCode, false)}>拒绝</button>
-              <button className="primary-button" type="button" onClick={() => resolveConnectionApproval(request.id, request.userCode, true)}>允许连接</button>
-            </div>
-          </div>)}
-        </div>}
-      </ModalSurface>}
-      {createRoomOpen && (
-        <ModalSurface title="新建频道" onClose={closeCreateRoom}>
-          <form className="room-form" onSubmit={(event) => { event.preventDefault(); submitCreateRoom(); }}>
-            <label className="room-form__field">频道名称
-              <input aria-label="频道名称" value={roomName} onChange={(event) => setRoomName(event.target.value)} autoFocus />
-            </label>
-            {roomName && !validRoomName && <p className="room-form__hint">只能使用字母、数字和下划线，长度 1-32 位</p>}
-            <label className="room-form__check">
-              <input aria-label="私有频道" type="checkbox" checked={isPrivate} onChange={(event) => setIsPrivate(event.target.checked)} />
-              私有频道
-            </label>
-            <CommandFeedback {...roomFeedback} />
-            <div className="room-form__actions">
-              <button type="button" className="secondary-button" onClick={closeCreateRoom} disabled={pendingRoomCommandIdRef.current !== null}>取消</button>
-              <button type="submit" className="primary-button" aria-label="确认新建频道" disabled={!validRoomName || pendingRoomCommandIdRef.current !== null}>创建</button>
-            </div>
-          </form>
-        </ModalSurface>
       )}
+      {showChat && (
+        <section className="relative flex h-full min-w-0 flex-1" aria-label="聊天">
+          <div className="relative flex min-w-0 flex-1 flex-col" onDragOver={onDragOver} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
+            <ChatHeader state={state} infoOpen={infoOpen} onToggleInfo={() => setInfoOpen((open) => !open)} canManage={canManageRoom}
+              onManageRoom={openManage} onConnectionApprovals={() => setApprovalsOpen(true)} onRefresh={refresh}
+              historyQuery={historyQuery} onHistoryQueryChange={updateHistoryQuery} searchOpen={searchOpen} onSearchOpenChange={setSearchOpen}
+              onBack={narrow ? () => setPhoneView('list') : undefined} />
+            <ConnectionBanner connection={state.connection} onReconnect={onReconnect} />
+            <MessageList state={state} bridge={bridge} onQuote={quoteMessage} canRecall={canRecall} entryUnread={entryUnread.current} />
+            <Composer state={state} bridge={bridge} quote={quote} onClearQuote={() => setQuote(null)} draft={draft} onDraftChange={setDraft}
+              onCommandResult={() => undefined} focusAtEndToken={focusToken} uploadRequestToken={uploadToken} theme={theme} />
+            <AnimatePresence>
+              {dragging && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease }}
+                  className="pointer-events-none absolute inset-4 z-40 flex flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-accent bg-bg/90 text-accent-text">
+                  <Upload size={32} aria-hidden="true" />
+                  <p className="text-title font-semibold">松开以发送附件</p>
+                  <p className="text-small text-ink-2">将打开文件选择窗口确认要加密发送的文件</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+          <InfoPanel state={state} open={infoOpen} overlay={compact} onClose={() => setInfoOpen(false)} onStartDirect={startDirect}
+            onViewProfile={(member) => { setAdminFeedback(idle); setProfile(member); }} canManage={canManageRoom}
+            onManageMember={(member) => { setAdminFeedback(idle); setProfile(member); }} onManageRoom={openManage} />
+        </section>
+      )}
+
+      <CreateRoomDialog open={createOpen} onOpenChange={setCreateOpen} pending={createPending} feedback={createFeedback} onSubmit={submitCreate} />
+      <RoomManageDialog open={manageOpen} onOpenChange={setManageOpen} room={activeRoom} pending={managePending} feedback={manageFeedback} onAction={roomAction} />
+      <ApprovalDialog open={approvalsOpen} onOpenChange={setApprovalsOpen} requests={approvals} onResolve={resolveApproval} />
+      <MemberDialog member={profile} localUserCode={state.identity.userCode} canManage={canManageRoom} feedback={adminFeedback} pending={adminPending}
+        onOpenChange={(open) => { if (!open) setProfile(null); }} onDirect={startDirect}
+        onAdmin={(action, member) => { setAdminFeedback(idle); setPendingAdmin({ action, member }); }} />
+      <AdminConfirmDialog pendingAction={pendingAdmin} busy={adminPending} onCancel={() => setPendingAdmin(null)} onConfirm={confirmAdmin} />
     </main>
+  );
+}
+
+/** The local identity and connection state at the foot of the conversation list. */
+function IdentityCard({ state, onSettings }: { state: BridgeState; onSettings?: () => void }) {
+  const connected = state.connection.phase === 'connected';
+  // The banner above the messages carries the detailed reconnect text; the card only names the phase.
+  const status = connected ? state.connection.statusText
+    : state.connection.phase === 'reconnecting' || state.connection.phase === 'connecting' ? '连接中…' : '未连接';
+  return (
+    <div data-testid="identity-card" className="flex h-16 shrink-0 items-center gap-3 border-t border-divider px-4">
+      <Avatar name={state.identity.displayName} seed={state.identity.userCode} size={36} online={connected} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <strong className="truncate text-body font-semibold text-ink">{state.identity.displayName} #{state.identity.userCode}</strong>
+        <small className={cn('truncate text-small', connected ? 'text-ink-2' : 'text-warning')}>{status}</small>
+      </span>
+      {state.identity.admin && <span className="shrink-0 rounded-sm bg-accent-soft px-2 text-small text-accent-text">管理员</span>}
+      {onSettings && <IconButton label="设置" size="sm" onClick={onSettings} tooltip="设置" ><Settings size={18} aria-hidden="true" /></IconButton>}
+    </div>
   );
 }

@@ -1,7 +1,2 @@
-/* Aurora 入口：令牌 → 页面 → 工作区 → 动效 → 发行版卡片，全部消费 tokens.css 的 --t-* 令牌。 */
-@import './tokens.css';
-@import './pages.css';
-@import './workspace.css';
-@import './motion.css';
-@import './release.css';
-@import './cards.css';
+/* 样式入口：tokens.css（唯一颜色/尺寸来源）→ app.css（Tailwind 主题映射与工具类）。 */
+@import './app.css';

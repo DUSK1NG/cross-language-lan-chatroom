@@ -9,6 +9,7 @@ private slots:
     void acceptsLoopbackDevelopmentUrl();
     void rejectsNonLoopbackDevelopmentUrl();
     void exposesFixedReleaseUrl();
+    void opensOnlyPlainWebLinksExternally();
 };
 
 void WebUiHostTests::acceptsLoopbackDevelopmentUrl() {
@@ -25,6 +26,16 @@ void WebUiHostTests::rejectsNonLoopbackDevelopmentUrl() {
 
 void WebUiHostTests::exposesFixedReleaseUrl() {
     QCOMPARE(WebUiHost::releaseUrl(), QUrl("qrc:/frontend/index.html"));
+}
+
+void WebUiHostTests::opensOnlyPlainWebLinksExternally() {
+    QVERIFY(WebUiHost::opensExternally(QUrl("https://example.com/docs")));
+    QVERIFY(WebUiHost::opensExternally(QUrl("http://192.168.1.20:8080/")));
+    QVERIFY(!WebUiHost::opensExternally(QUrl("qrc:/frontend/index.html")));
+    QVERIFY(!WebUiHost::opensExternally(QUrl("file:///C:/Windows/system32/calc.exe")));
+    QVERIFY(!WebUiHost::opensExternally(QUrl("javascript:alert(1)")));
+    QVERIFY(!WebUiHost::opensExternally(QUrl("https://user:secret@example.com/")));
+    QVERIFY(!WebUiHost::opensExternally(QUrl("https://")));
 }
 
 QTEST_APPLESS_MAIN(WebUiHostTests)

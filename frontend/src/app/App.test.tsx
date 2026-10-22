@@ -213,6 +213,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
     expect(document.documentElement.dataset.theme).toBe('light');
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
 
     const themes = screen.getByRole('radiogroup', { name: '外观主题' });
     expect(within(themes).getByRole('radio', { name: '跟随系统' })).toHaveAttribute('aria-checked', 'true');
@@ -233,9 +234,13 @@ describe('App', () => {
     render(<App bridge={bridge} />);
     await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '显示发送时间' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+    const sendTime = screen.getByRole('switch', { name: '显示发送时间' });
+    expect(sendTime).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(sendTime);
 
     expect(localStorage.getItem('lan-chat.showSendTime')).toBe('false');
+    expect(screen.getByRole('switch', { name: '显示发送时间' })).toHaveAttribute('aria-checked', 'false');
   });
 
   it('shows the active Go TLS server and endpoint in settings', async () => {
@@ -272,10 +277,14 @@ describe('App', () => {
     render(<App bridge={bridge} />);
     await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
 
     expect(screen.getByText('Direct3D 11 / RHI')).toBeInTheDocument();
     expect(screen.getByText('60.0 FPS')).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: '性能等级' }), { target: { value: 'Power Saving' } });
+    const performanceMode = screen.getByRole('combobox', { name: '性能等级' });
+    expect(performanceMode).toHaveTextContent('均衡');
+    fireEvent.keyDown(performanceMode, { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('option', { name: '省电' }));
 
     expect(bridge.commands.at(-1)).toMatchObject({
       type: 'settings.setPerformanceMode',
@@ -295,10 +304,48 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
 
     expect(screen.getByTestId('settings-scroll-container')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox', { name: '记录连接日志' }));
+    fireEvent.click(screen.getByRole('button', { name: '隐私与安全' }));
+    fireEvent.click(screen.getByRole('switch', { name: '记录连接日志' }));
     expect(bridge.commands.at(-1)).toMatchObject({
       type: 'settings.setConnectionLogging',
       payload: { enabled: true }
     });
+  });
+  it('applies accent, message size and bubble radius presets from the appearance settings', async () => {
+    localStorage.clear();
+    const bridge = createFakeBridge({
+      ...disconnectedState,
+      connection: { phase: 'connected', statusText: '已连接', retryable: false },
+      navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } }
+    });
+    render(<App bridge={bridge} />);
+    await waitFor(() => expect(document.documentElement.dataset.accent).toBe('blue'));
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '外观' }));
+
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '强调色' })).getByRole('radio', { name: '紫' }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '消息字号' })).getByRole('radio', { name: '大' }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: '气泡圆角' })).getByRole('radio', { name: '小圆角' }));
+
+    await waitFor(() => expect(document.documentElement.dataset.accent).toBe('violet'));
+    expect(document.documentElement.dataset.messageSize).toBe('large');
+    expect(document.documentElement.dataset.bubbleRadius).toBe('small');
+    expect(JSON.parse(localStorage.getItem('lan-chat.settings') ?? '{}')).toMatchObject({ accent: 'violet', messageSize: 'large', bubbleRadius: 'small' });
+  });
+
+  it('marks the notification settings as not yet available and returns to the chat', async () => {
+    const bridge = createFakeBridge({
+      ...disconnectedState,
+      connection: { phase: 'connected', statusText: '已连接', retryable: false },
+      navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } }
+    });
+    render(<App bridge={bridge} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '通知' }));
+    expect(screen.getByText(/暂未开放/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回聊天' }));
+    expect(screen.getByRole('heading', { name: '# lobby' })).toBeInTheDocument();
   });
 });

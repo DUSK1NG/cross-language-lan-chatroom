@@ -45,6 +45,7 @@ jobs:
         run: |
           npm install --global pnpm@11.19.0
           pnpm install --frozen-lockfile
+          pnpm run lint
           pnpm test -- --run
           pnpm run build
 

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createFakeBridge } from '../bridge/chatBridge';
@@ -34,36 +34,73 @@ const workspaceState: BridgeState = {
   savedConnection: { serverIp: '127.0.0.1', serverPort: 8888, username: 'Alice', userCode: 'A001', caFile: '' }
 };
 
+const manyRooms: BridgeState = {
+  ...workspaceState,
+  rooms: [...workspaceState.rooms, ...['design', 'ops', 'release', 'random'].map((roomName) => ({ roomName, memberCount: 3, unreadCount: 0 }))]
+};
+
+/** Radix menu triggers open from the keyboard in jsdom (pointer events carry no button state). */
+function openMenu(name: string) {
+  fireEvent.keyDown(screen.getByRole('button', { name }), { key: 'Enter' });
+}
+
+function openInfoPanel() {
+  fireEvent.click(screen.getByRole('button', { name: '会话信息' }));
+  return screen.getByTestId('member-panel');
+}
+
+function matchWidth(maxWidth: number) {
+  const original = window.matchMedia;
+  window.matchMedia = ((query: string) => {
+    const limit = /max-width:\s*(\d+)px/.exec(query);
+    return {
+      matches: limit ? maxWidth <= Number(limit[1]) : false, media: query, onchange: null,
+      addEventListener: () => undefined, removeEventListener: () => undefined,
+      addListener: () => undefined, removeListener: () => undefined, dispatchEvent: () => false
+    } as MediaQueryList;
+  }) as typeof window.matchMedia;
+  return () => { window.matchMedia = original; };
+}
+
 describe('WorkspacePage', () => {
   afterEach(cleanup);
 
-  it('renders four regions and keeps the identity card outside the message scroller', () => {
-    const bridge = createFakeBridge(workspaceState);
-
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+  it('renders the list, chat and identity regions and keeps the identity card outside the message scroller', () => {
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
 
     expect(screen.getByTestId('conversation-sidebar')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'LAN Chat 猫咪标识' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '群' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('message-timeline')).toBeInTheDocument();
-    expect(screen.getByTestId('member-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('identity-card')).toHaveClass('identity-card--fixed');
+    expect(screen.getByRole('tab', { name: '群聊' })).toHaveAttribute('aria-selected', 'true');
+    const timeline = screen.getByTestId('message-timeline');
+    const identity = screen.getByTestId('identity-card');
+    expect(within(screen.getByTestId('conversation-sidebar')).getByTestId('identity-card')).toBe(identity);
+    expect(timeline.contains(identity)).toBe(false);
+    expect(screen.queryByTestId('member-panel')).not.toBeInTheDocument();
+    expect(openInfoPanel()).toHaveAttribute('data-state', 'open');
   });
 
   it('aligns self messages as a cluster and wraps long content', () => {
-    const bridge = createFakeBridge(workspaceState);
-
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
 
     expect(screen.getByTestId('message-m-1')).toHaveClass('message--self');
     expect(screen.getByTestId('message-m-2')).toHaveClass('message--peer');
     expect(screen.getByTestId('message-content-m-2')).toHaveClass('message-content--wrap');
   });
 
+  it('shows member and online counts in the header subtitle', () => {
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={{
+      ...workspaceState,
+      members: [...workspaceState.members, { displayName: 'Cara', userCode: 'C003', online: false, admin: false }]
+    }} />);
+
+    expect(screen.getByText('3 名成员，2 人在线')).toBeInTheDocument();
+  });
+
   it('searches and clears the active conversation history through the bridge', () => {
     const bridge = createFakeBridge(workspaceState);
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
 
+    fireEvent.click(screen.getByRole('button', { name: '搜索消息' }));
     fireEvent.change(screen.getByRole('textbox', { name: '搜索当前会话' }), { target: { value: 'hello' } });
     fireEvent.click(screen.getByRole('button', { name: '清除消息搜索' }));
 
@@ -73,12 +110,20 @@ describe('WorkspacePage', () => {
     ]);
   });
 
+  it('opens the message search with Ctrl+F', () => {
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
+
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
+
+    expect(screen.getByRole('textbox', { name: '搜索当前会话' })).toHaveFocus();
+  });
+
   it('isolates room and direct-message actions through typed bridge commands', () => {
     const bridge = createFakeBridge(workspaceState);
 
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
     fireEvent.click(screen.getByRole('button', { name: 'room-study' }));
-    fireEvent.click(screen.getByRole('button', { name: '私' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '私聊' }));
     fireEvent.click(screen.getByRole('button', { name: 'direct-bob' }));
 
     expect(bridge.commands.map(({ type, payload }) => ({ type, payload }))).toEqual([
@@ -87,7 +132,7 @@ describe('WorkspacePage', () => {
     ]);
   });
 
-  it('separates 群 and 私 navigation lists', async () => {
+  it('separates 群聊 and 私聊 navigation lists', () => {
     const bridge = createFakeBridge(workspaceState);
     const { rerender } = render(<WorkspacePage bridge={bridge} state={workspaceState} />);
 
@@ -95,7 +140,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByRole('button', { name: 'room-lobby' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: 'direct-bob' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '私' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '私聊' }));
 
     expect(screen.getByRole('button', { name: 'direct-bob' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'direct-bob' }));
@@ -106,40 +151,39 @@ describe('WorkspacePage', () => {
     expect(screen.getByRole('button', { name: 'direct-bob' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: 'room-study' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '群' }));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '群聊' }));
     expect(screen.getByRole('button', { name: 'room-study' })).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: '全部' }));
+    expect(screen.getByRole('button', { name: 'room-study' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'direct-bob' })).toBeInTheDocument();
   });
 
-  it('opens settings from the Chinese workspace navigation', () => {
-    const bridge = createFakeBridge(workspaceState);
+  it('opens settings from the identity card and from the main menu', async () => {
     const onSettings = vi.fn();
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} onSettings={onSettings} />);
 
-    render(<WorkspacePage bridge={bridge} state={workspaceState} onSettings={onSettings} />);
-    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(within(screen.getByTestId('identity-card')).getByRole('button', { name: '设置' }));
+    openMenu('打开菜单');
+    fireEvent.click(await screen.findByRole('menuitem', { name: '设置' }));
 
-    expect(onSettings).toHaveBeenCalledOnce();
+    expect(onSettings).toHaveBeenCalledTimes(2);
   });
 
-  it('opens the member drawer from the member action', () => {
-    const bridge = createFakeBridge(workspaceState);
+  it('opens the info panel with the member list from the header', () => {
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
 
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
-    fireEvent.click(screen.getByRole('button', { name: 'members-toggle' }));
-
-    const drawer = screen.getByTestId('member-panel');
-    expect(drawer).toHaveClass('member-drawer--open');
-    expect(within(drawer).getByText('Bob')).toBeInTheDocument();
+    const panel = openInfoPanel();
+    expect(within(panel).getByText('Bob')).toBeInTheDocument();
   });
 
   it('opens a private conversation for another member but not the local member', () => {
     const bridge = createFakeBridge(workspaceState);
-
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
-    fireEvent.click(screen.getByRole('button', { name: 'members-toggle' }));
 
-    const drawer = screen.getByTestId('member-panel');
-    expect(within(drawer).queryByRole('button', { name: 'direct-Alice' })).not.toBeInTheDocument();
-    fireEvent.click(within(drawer).getByRole('button', { name: 'direct-Bob' }));
+    const panel = openInfoPanel();
+    expect(within(panel).queryByRole('button', { name: 'direct-Alice' })).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'direct-Bob' }));
     expect(bridge.commands).toContainEqual(expect.objectContaining({
       type: 'conversation.openPrivate',
       payload: { displayName: 'Bob', userCode: 'B002' }
@@ -147,12 +191,10 @@ describe('WorkspacePage', () => {
   });
 
   it('keeps one read-only quote while leaving the reply editable', () => {
-    const bridge = createFakeBridge(workspaceState);
-
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
     const composer = screen.getByLabelText('消息输入框') as HTMLTextAreaElement;
     fireEvent.change(composer, { target: { value: 'Follow-up' } });
-    fireEvent.click(screen.getAllByRole('button', { name: '引用' })[1]);
+    fireEvent.click(within(screen.getByTestId('message-m-2')).getByRole('button', { name: '回复' }));
 
     expect(screen.getByTestId('composer-quote')).toHaveTextContent('> Bob: A very long message that must remain readable when the viewport is narrow.');
     expect(composer).toHaveValue('Follow-up');
@@ -160,7 +202,7 @@ describe('WorkspacePage', () => {
     expect(composer.selectionStart).toBe(composer.value.length);
     expect(composer.selectionEnd).toBe(composer.value.length);
 
-    fireEvent.click(screen.getAllByRole('button', { name: '引用' })[0]);
+    fireEvent.click(within(screen.getByTestId('message-m-1')).getByRole('button', { name: '回复' }));
     expect(screen.getByTestId('composer-quote')).toHaveTextContent('> Alice: self message');
     expect(screen.getByTestId('composer-quote')).not.toHaveTextContent('Bob');
     expect(composer).toHaveValue('Follow-up');
@@ -174,76 +216,78 @@ describe('WorkspacePage', () => {
         content: '> Alice: HELLO\nHI', selfMessage: false, systemMessage: false
       }]
     };
-    const bridge = createFakeBridge(quotedWorkspaceState);
-
-    render(<WorkspacePage bridge={bridge} state={quotedWorkspaceState} />);
+    render(<WorkspacePage bridge={createFakeBridge(quotedWorkspaceState)} state={quotedWorkspaceState} />);
     const composer = screen.getByLabelText('消息输入框');
     fireEvent.change(composer, { target: { value: 'Follow-up' } });
-    fireEvent.click(within(screen.getByTestId('message-m-3')).getByRole('button', { name: '引用' }));
+    fireEvent.click(within(screen.getByTestId('message-m-3')).getByRole('button', { name: '回复' }));
 
     expect(composer).toHaveValue('Follow-up');
     expect(screen.getByTestId('composer-quote')).toHaveTextContent('> Bob: HI');
   });
 
   it('replaces the current quote instead of appending another quote', () => {
-    const bridge = createFakeBridge(workspaceState);
-
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
     const composer = screen.getByLabelText('消息输入框') as HTMLTextAreaElement;
-    fireEvent.click(within(screen.getByTestId('message-m-1')).getByRole('button', { name: '引用' }));
-    fireEvent.click(within(screen.getByTestId('message-m-2')).getByRole('button', { name: '引用' }));
+    fireEvent.click(within(screen.getByTestId('message-m-1')).getByRole('button', { name: '回复' }));
+    fireEvent.click(within(screen.getByTestId('message-m-2')).getByRole('button', { name: '回复' }));
 
     expect(screen.getByTestId('composer-quote')).toHaveTextContent('> Bob: A very long message that must remain readable when the viewport is narrow.');
     expect(screen.getByTestId('composer-quote')).not.toHaveTextContent('Alice');
     expect(composer).toHaveValue('');
   });
 
-  it('closes the member drawer with Escape', () => {
+  it('keeps a separate draft for every conversation', () => {
     const bridge = createFakeBridge(workspaceState);
+    const { rerender } = render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    fireEvent.change(screen.getByLabelText('消息输入框'), { target: { value: 'lobby draft' } });
 
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
-    fireEvent.click(screen.getByRole('button', { name: 'members-toggle' }));
-    expect(screen.getByTestId('member-panel')).toHaveClass('member-drawer--open');
-    fireEvent.keyDown(window, { key: 'Escape' });
+    const study: BridgeState = { ...workspaceState, navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'study', title: 'study' } } };
+    rerender(<WorkspacePage bridge={bridge} state={study} />);
+    expect(screen.getByLabelText('消息输入框')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('消息输入框'), { target: { value: 'study draft' } });
 
-    expect(screen.getByTestId('member-panel')).not.toHaveClass('member-drawer--open');
+    rerender(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    expect(screen.getByLabelText('消息输入框')).toHaveValue('lobby draft');
+    rerender(<WorkspacePage bridge={bridge} state={study} />);
+    expect(screen.getByLabelText('消息输入框')).toHaveValue('study draft');
   });
 
-  it('toggles the member drawer from the header action', () => {
-    const bridge = createFakeBridge(workspaceState);
+  it('closes the info panel with Escape', async () => {
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
+    openInfoPanel();
+    fireEvent.keyDown(window, { key: 'Escape' });
 
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
-    const toggle = screen.getByRole('button', { name: 'members-toggle' });
+    await waitFor(() => expect(screen.queryByTestId('member-panel')).not.toBeInTheDocument());
+  });
+
+  it('toggles the info panel from the header', async () => {
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
+    const toggle = screen.getByRole('button', { name: '会话信息' });
     fireEvent.click(toggle);
 
-    expect(screen.getByTestId('member-panel')).toHaveClass('member-drawer--open');
+    expect(screen.getByTestId('member-panel')).toHaveAttribute('data-state', 'open');
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
     fireEvent.click(toggle);
 
-    expect(screen.getByTestId('member-panel')).not.toHaveClass('member-drawer--open');
+    await waitFor(() => expect(screen.queryByTestId('member-panel')).not.toBeInTheDocument());
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('closes the member drawer with its close button', () => {
-    const bridge = createFakeBridge(workspaceState);
+  it('closes the info panel with its close button', async () => {
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
+    const panel = openInfoPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: '关闭信息面板' }));
 
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
-    fireEvent.click(screen.getByRole('button', { name: 'members-toggle' }));
-
-    const drawer = screen.getByTestId('member-panel');
-    fireEvent.click(within(drawer).getByRole('button', { name: '关闭成员列表' }));
-
-    expect(drawer).not.toHaveClass('member-drawer--open');
+    await waitFor(() => expect(screen.queryByTestId('member-panel')).not.toBeInTheDocument());
   });
 
   it('creates a private room then refreshes rooms on success', async () => {
     const bridge = createFakeBridge(workspaceState);
-
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
     fireEvent.click(screen.getByRole('button', { name: '新建频道' }));
     fireEvent.change(screen.getByLabelText('频道名称'), { target: { value: 'study_group' } });
-    fireEvent.click(screen.getByLabelText('私有频道'));
+    fireEvent.click(screen.getByRole('switch', { name: '私有频道' }));
     fireEvent.click(screen.getByRole('button', { name: '确认新建频道' }));
 
     expect(bridge.commands[0]).toMatchObject({
@@ -251,12 +295,11 @@ describe('WorkspacePage', () => {
       payload: { room: 'study_group', isPrivate: true }
     });
     await waitFor(() => expect(bridge.commands[1]).toMatchObject({ type: 'directory.refreshRooms', payload: {} }));
-    expect(screen.queryByRole('dialog', { name: '新建频道' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建频道' })).not.toBeInTheDocument());
   });
 
   it('keeps room details and prevents duplicate submissions until the command resolves', async () => {
     const bridge = createFakeBridge(workspaceState);
-
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
     fireEvent.click(screen.getByRole('button', { name: '新建频道' }));
     fireEvent.change(screen.getByLabelText('频道名称'), { target: { value: 'project' } });
@@ -268,13 +311,27 @@ describe('WorkspacePage', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建频道' })).not.toBeInTheDocument());
   });
 
-  it('filters the active 群 or 私 list with the search box', () => {
-    const bridge = createFakeBridge(workspaceState);
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+  it('hides the conversation search for short lists and filters longer ones', () => {
+    const { unmount } = render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
+    expect(screen.queryByRole('searchbox', { name: '搜索' })).not.toBeInTheDocument();
+    unmount();
 
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索群聊' }), { target: { value: 'study' } });
+    render(<WorkspacePage bridge={createFakeBridge(manyRooms)} state={manyRooms} />);
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索' }), { target: { value: 'study' } });
     expect(screen.getByRole('button', { name: 'room-study' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'room-lobby' })).not.toBeInTheDocument();
+  });
+
+  it('focuses the conversation search with Ctrl+K and steps conversations with Ctrl+↓', () => {
+    const bridge = createFakeBridge(manyRooms);
+    render(<WorkspacePage bridge={bridge} state={manyRooms} />);
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    expect(screen.getByRole('searchbox', { name: '搜索' })).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: 'ArrowDown', ctrlKey: true });
+    expect(bridge.commands.at(-1)).toMatchObject({ type: 'conversation.selectRoom' });
+    expect(bridge.commands.at(-1)?.payload).not.toEqual({ room: 'lobby' });
   });
 
   it('opens member administration actions for users when permitted', () => {
@@ -286,7 +343,7 @@ describe('WorkspacePage', () => {
     const bridge = createFakeBridge(state);
     render(<WorkspacePage bridge={bridge} state={state} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '管理 Bob' }));
+    fireEvent.click(within(openInfoPanel()).getByRole('button', { name: '管理 Bob' }));
     fireEvent.click(screen.getByRole('button', { name: '禁言/解禁' }));
 
     expect(screen.getByRole('dialog', { name: '确认切换禁言' })).toBeInTheDocument();
@@ -307,9 +364,9 @@ describe('WorkspacePage', () => {
     const bridge = createFakeBridge(state);
     render(<WorkspacePage bridge={bridge} state={state} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '连接审批' }));
     const dialog = screen.getByRole('dialog', { name: '连接审批' });
     expect(within(dialog).getByText('Cara#C003')).toBeInTheDocument();
+    expect(within(dialog).getByText(/用户名和用户代码不是密码/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '允许连接' }));
 
     expect(bridge.commands).toContainEqual(expect.objectContaining({
@@ -319,13 +376,14 @@ describe('WorkspacePage', () => {
   });
 
   it('opens connection approval immediately when an administrator receives a member request', () => {
-    const state: BridgeState = {
-      ...workspaceState,
-      identity: { ...workspaceState.identity, admin: true },
-      connectionApprovals: [{ id: '42', displayName: 'Cara', userCode: 'C003', requestedAt: '2026-08-24T10:00:00Z' }]
-    };
+    const state: BridgeState = { ...workspaceState, identity: { ...workspaceState.identity, admin: true }, connectionApprovals: [] };
     const bridge = createFakeBridge(state);
-    render(<WorkspacePage bridge={bridge} state={state} />);
+    const { rerender } = render(<WorkspacePage bridge={bridge} state={state} />);
+    expect(screen.queryByRole('dialog', { name: '连接审批' })).not.toBeInTheDocument();
+
+    rerender(<WorkspacePage bridge={bridge} state={{
+      ...state, connectionApprovals: [{ id: '42', displayName: 'Cara', userCode: 'C003', requestedAt: '2026-08-24T10:00:00Z' }]
+    }} />);
 
     expect(screen.getByRole('dialog', { name: '连接审批' })).toBeInTheDocument();
     expect(screen.getByText('Cara#C003')).toBeInTheDocument();
@@ -337,34 +395,28 @@ describe('WorkspacePage', () => {
       identity: { ...workspaceState.identity, admin: true },
       connectionApprovals: [{ id: '42', displayName: 'Cara', userCode: 'C003', requestedAt: '2026-08-24T10:00:00Z' }]
     };
-    const bridge = createFakeBridge(state);
-    render(<WorkspacePage bridge={bridge} state={state} />);
+    render(<WorkspacePage bridge={createFakeBridge(state)} state={state} />);
 
     const dialog = screen.getByRole('dialog', { name: '连接审批' });
-    fireEvent.click(dialog.parentElement!);
-    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.pointerDown(document.body);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
 
     expect(screen.getByRole('dialog', { name: '连接审批' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'close' })).not.toBeInTheDocument();
   });
 
   it('keeps the administrator connection approval inbox available when it is empty', () => {
-    const state: BridgeState = {
-      ...workspaceState,
-      identity: { ...workspaceState.identity, admin: true },
-      connectionApprovals: []
-    };
-    const bridge = createFakeBridge(state);
-    render(<WorkspacePage bridge={bridge} state={state} />);
+    const state: BridgeState = { ...workspaceState, identity: { ...workspaceState.identity, admin: true }, connectionApprovals: [] };
+    render(<WorkspacePage bridge={createFakeBridge(state)} state={state} />);
 
-    expect(screen.getByRole('button', { name: '连接审批' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '连接审批' }));
+    expect(within(screen.getByRole('dialog', { name: '连接审批' })).getByText('没有待确认的连接')).toBeInTheDocument();
   });
 
   it('opens a member profile with online state and admin badge', () => {
-    const bridge = createFakeBridge(workspaceState);
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '查看 Bob' }));
+    fireEvent.click(within(openInfoPanel()).getByRole('button', { name: '查看 Bob' }));
 
     const dialog = screen.getByRole('dialog', { name: '成员资料' });
     expect(within(dialog).getByText('Bob#B002')).toBeInTheDocument();
@@ -385,14 +437,16 @@ describe('WorkspacePage', () => {
   });
 
   it('shows completion feedback for channel actions', async () => {
-    const bridge = createFakeBridge({ ...workspaceState, permissions: { activeRoomCanManage: true } });
-    render(<WorkspacePage bridge={bridge} state={{ ...workspaceState, permissions: { activeRoomCanManage: true } }} />);
+    const state = { ...workspaceState, permissions: { activeRoomCanManage: true } };
+    render(<WorkspacePage bridge={createFakeBridge(state)} state={state} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '频道管理' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '成员代码' }), { target: { value: 'B003' } });
-    fireEvent.click(screen.getByRole('button', { name: '邀请成员' }));
+    openMenu('更多');
+    fireEvent.click(await screen.findByRole('menuitem', { name: '频道管理' }));
+    const dialog = screen.getByRole('dialog', { name: '频道管理' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '成员代码' }), { target: { value: 'B003' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '邀请成员' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent('操作成功');
+    expect(await within(dialog).findByRole('status')).toHaveTextContent('操作成功');
   });
 
   it('reports online members rather than total member records', () => {
@@ -402,34 +456,70 @@ describe('WorkspacePage', () => {
     };
     render(<WorkspacePage bridge={createFakeBridge(state)} state={state} />);
 
-    expect(screen.getByLabelText('在线成员数量')).toHaveTextContent('2');
-    expect(screen.getByText('2 名在线成员')).toBeInTheDocument();
+    expect(within(openInfoPanel()).getByLabelText('在线成员数量')).toHaveTextContent('2');
   });
 
-  it('opens navigation from the compact rail entry', () => {
-    const bridge = createFakeBridge(workspaceState);
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+  it('alternates between the list and the chat in a narrow window', () => {
+    const restore = matchWidth(600);
+    try {
+      const bridge = createFakeBridge(workspaceState);
+      render(<WorkspacePage bridge={bridge} state={workspaceState} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
+      expect(screen.getByTestId('conversation-sidebar')).toBeInTheDocument();
+      expect(screen.queryByTestId('message-timeline')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'room-study' }));
 
-    const dialog = screen.getByRole('dialog', { name: '群聊导航' });
-    expect(within(dialog).getByRole('button', { name: 'room-study' })).toBeInTheDocument();
+      expect(screen.getByTestId('message-timeline')).toBeInTheDocument();
+      expect(screen.queryByTestId('conversation-sidebar')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '返回会话列表' }));
+      expect(screen.getByTestId('conversation-sidebar')).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it('overlays the info panel with a scrim below 900px', async () => {
+    const restore = matchWidth(820);
+    try {
+      render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
+      expect(screen.queryByRole('button', { name: '返回会话列表' })).not.toBeInTheDocument();
+      const panel = openInfoPanel();
+      expect(panel.className).toContain('absolute');
+    } finally {
+      restore();
+    }
   });
 
   it('dispatches channel invite and removal actions from channel management', async () => {
-    const bridge = createFakeBridge({ ...workspaceState, permissions: { activeRoomCanManage: true } });
-    render(<WorkspacePage bridge={bridge} state={{ ...workspaceState, permissions: { activeRoomCanManage: true } }} />);
+    const state = { ...workspaceState, permissions: { activeRoomCanManage: true } };
+    const bridge = createFakeBridge(state);
+    render(<WorkspacePage bridge={bridge} state={state} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '频道管理' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '成员代码' }), { target: { value: 'B002' } });
-    fireEvent.click(screen.getByRole('button', { name: '邀请成员' }));
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('操作成功'));
-    fireEvent.change(screen.getByRole('textbox', { name: '成员代码' }), { target: { value: 'B003' } });
-    fireEvent.click(screen.getByRole('button', { name: '移除成员' }));
+    fireEvent.click(within(openInfoPanel()).getByRole('button', { name: '频道管理' }));
+    const dialog = screen.getByRole('dialog', { name: '频道管理' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '成员代码' }), { target: { value: 'B002' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '邀请成员' }));
+    await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('操作成功'));
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '成员代码' }), { target: { value: 'B003' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '移除成员' }));
 
     expect(bridge.commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'room.action', payload: { action: 'invite', room: 'lobby', targetUserCode: 'B002' } }),
       expect.objectContaining({ type: 'room.action', payload: { action: 'remove_member', room: 'lobby', targetUserCode: 'B003' } })
     ]));
+  });
+
+  it('asks for confirmation before deleting a channel', async () => {
+    const state = { ...workspaceState, permissions: { activeRoomCanManage: true } };
+    const bridge = createFakeBridge(state);
+    render(<WorkspacePage bridge={bridge} state={state} />);
+
+    fireEvent.click(within(openInfoPanel()).getByRole('button', { name: '频道管理' }));
+    const dialog = screen.getByRole('dialog', { name: '频道管理' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除频道' }));
+    expect(bridge.commands.some(({ type }) => type === 'room.action')).toBe(false);
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '确认删除 #lobby' })); });
+
+    expect(bridge.commands).toContainEqual(expect.objectContaining({ type: 'room.action', payload: { action: 'delete', room: 'lobby' } }));
   });
 });

@@ -71,6 +71,10 @@ int main(int argc, char* argv[]) {
                            hostAvailable ? QString() : hostUnavailableMessage);
     WebUiHost webUiHost;
     QWebEngineView webView;
+    // Links in messages open in the system browser instead of replacing the chat UI.
+    webView.setPage(new ExternalLinkPage(&webView));
+    // The responsive layout is designed down to 480 × 600 (single-column below 700px).
+    webView.setMinimumSize(480, 600);
     if (!webUiHost.registerBridge(webView.page(), &bridge)) {
         QMessageBox::critical(nullptr, QStringLiteral("LAN Chat"),
                               QStringLiteral("The modern UI bridge could not be initialized."));
