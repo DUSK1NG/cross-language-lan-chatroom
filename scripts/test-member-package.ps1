@@ -132,6 +132,9 @@ if ($Smoke) {
         if ($null -eq $guiProcess) {
             throw 'Runtime entry point did not start the modern GUI during smoke test.'
         }
+        if (-not (Test-Path -LiteralPath (Join-Path $hostDataDirectory 'web-ui\storage') -PathType Container)) {
+            throw 'Runtime smoke test did not create an isolated persistent UI profile.'
+        }
         if ($AllowLocalHost.IsPresent) {
             foreach ($relativePath in @(
                 'certs\server-lan.crt',

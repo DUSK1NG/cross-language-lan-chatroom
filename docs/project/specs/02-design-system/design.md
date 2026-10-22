@@ -1,9 +1,9 @@
 # 02 设计系统 — 设计
 
-> **已被取代（2026-10-21）**：前端已按 Telegram Desktop 深色风格重做（Tailwind + Radix + Framer Motion，移除 GSAP），现行规范见 `docs/ui-design-spec.md` 与 `.kiro/steering/design-language.md`。本规格中引用的 `animation/motion.ts`、`MessageTimeline.tsx` 等文件已不存在，仅作历史记录。
+> **已被取代（2026-10-21）**：前端已按 Telegram Desktop 深色风格重做（Tailwind + Radix + Framer Motion，移除 GSAP），现行规范见 `docs/ui-design-spec.md` 与 `docs/project/steering/design-language.md`。本规格中引用的 `animation/motion.ts`、`MessageTimeline.tsx` 等文件已不存在，仅作历史记录。
 
 ## D1 令牌（`frontend/src/styles/tokens.css`）
-在 `:root` 增加（数值见 `.kiro/steering/design-language.md`）：
+在 `:root` 增加（数值见 `docs/project/steering/design-language.md`）：
 ```css
 --t-text-xs … --t-text-2xl;  --t-leading-body: 1.6; --t-leading-title: 1.3; --t-leading-ui: 1.4;
 --t-weight-regular: 400; --t-weight-medium: 550; --t-weight-semibold: 650; --t-weight-bold: 750;

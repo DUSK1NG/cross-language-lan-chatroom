@@ -57,6 +57,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Qt base, OpenSSL and build tools
         run: |
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update
           sudo apt-get install -y qt6-base-dev libssl-dev cmake ninja-build
       - name: Configure (GUI off)

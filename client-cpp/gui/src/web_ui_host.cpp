@@ -41,8 +41,8 @@ bool WebUiHost::opensExternally(const QUrl& url) {
     return scheme == QStringLiteral("http") || scheme == QStringLiteral("https");
 }
 
-ExternalLinkPage::ExternalLinkPage(QObject* parent)
-    : QWebEnginePage(parent) {}
+ExternalLinkPage::ExternalLinkPage(QWebEngineProfile* profile, QObject* parent)
+    : QWebEnginePage(profile, parent) {}
 
 bool ExternalLinkPage::acceptNavigationRequest(const QUrl& url, NavigationType type, bool isMainFrame) {
     if (type != NavigationTypeLinkClicked) {

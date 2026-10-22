@@ -146,7 +146,7 @@
 
 ## 2026-10-21 不变量修订（媒体预览）
 
-经用户批准（`.kiro/specs/03-media-preview/tasks.md` 任务 1.1）：
+经用户批准（`docs/project/specs/03-media-preview/tasks.md` 任务 1.1）：
 
 - 前端仍**不接触文件路径与密钥**；manifest 与密钥仍只在 C++ 中经 MLS 保护处理。
 - 为支持 ≤ 100 MB 图片/视频的内联预览，前端可以通过会话内有效、可作废的 `lanchat-media://` 不透明令牌显示已解密的媒体。

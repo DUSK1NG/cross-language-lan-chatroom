@@ -1,6 +1,6 @@
 // 校验版本号三处来源一致（规格 01 D4 / R4.5）。无第三方依赖，仅用 Node 内建模块。
 //
-// 三处唯一来源（见 .kiro/steering/engineering-methodology.md §6）：
+// 三处唯一来源（见 docs/project/steering/engineering-methodology.md §6）：
 //   installer/LANChat.iss                   -> #define AppVersion "x.y.z"
 //   scripts/package-installer.ps1           -> [string]$Version = 'x.y.z'
 //   frontend/src/changelog/releaseNotes.ts  -> version: 'x.y.z'
