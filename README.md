@@ -31,14 +31,3 @@ Windows 局域网聊天程序，提供房主可自行启动的 TLS 服务端和�
 
 - 服务端：Go（`server-go/`）；客户端核心与桥接：C++/Qt（`client-cpp/`）；前端：React + Vite（`frontend/`）。
 - 本地验证：`frontend/` 下 `pnpm install && pnpm test -- --run && pnpm run build`；`server-go/` 下 `go test ./...`；C++ 测试见 `scripts/build-modern.ps1 -Action Test`（需 Windows + Qt WebEngine）。
-
-## 升级路线图
-
-规划以 Kiro 规格形式维护在 [`.kiro/specs/`](.kiro/specs/README.md)，工程方法论与设计语言见 [`.kiro/steering/`](.kiro/steering/)。
-
-| 规格 | 目标版本 | 内容 |
-|---|---|---|
-| 01 稳定性与发布 | 1.3.0 | 双机重连验收、附件下载链路加固、C++ 进 CI、依赖固定、tag 发布工作流、前端错误边界 |
-| 02 设计系统 | 1.3.0 | 字体/间距/动效/转场令牌与一致化 |
-| 03 媒体预览 | 1.4.0 | 图片/视频（≤ 100 MB）内联预览与灯箱、私信附件 |
-| 04 桌面通知 | 1.4.0 | 托盘、系统通知、免打扰、频道静音 |
