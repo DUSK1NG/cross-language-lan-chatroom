@@ -1,0 +1,129 @@
+/* Tailwind 入口。@theme 只把 tokens.css 的变量映射为工具类，不定义新颜色。 */
+@import "tailwindcss";
+@import "./tokens.css";
+
+@custom-variant dark (&:where(html:not([data-theme='light']) *));
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-chat-to: var(--bg-chat-to);
+  --color-sidebar: var(--bg-sidebar);
+  --color-hover: var(--bg-hover);
+  --color-active: var(--bg-active);
+  --color-elevated: var(--bg-elevated);
+  --color-input: var(--bg-input);
+  --color-code: var(--bg-code);
+  --color-bubble-out: var(--bubble-out);
+  --color-bubble-in: var(--bubble-in);
+  --color-bubble-out-meta: var(--bubble-out-meta);
+  --color-bubble-in-meta: var(--bubble-in-meta);
+  --color-read-tick: var(--read-tick-out);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-ink-3: var(--text-3);
+  --color-on-accent: var(--text-on-accent);
+  --color-on-active-2: var(--text-on-active-2);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-online: var(--online);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-muted-badge: var(--muted-badge);
+  --color-divider: var(--divider);
+  --color-control: var(--border-control);
+  --color-overlay: var(--overlay);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-bubble: var(--radius-bubble);
+  --radius-tail: var(--radius-bubble-tail);
+  --radius-card: var(--radius-card);
+
+  --shadow-dialog: var(--shadow-dialog);
+  --shadow-float: var(--shadow-float);
+
+  --font-sans: var(--font);
+  --font-mono: var(--font-mono);
+  --text-body: var(--text-body);
+  --text-small: var(--text-small);
+  --text-title: var(--text-title);
+  --text-name: var(--text-name);
+  --text-message: var(--message-font-size);
+
+  --ease-ui: var(--ease);
+}
+
+/* 间距只允许 4 的倍数：把 Tailwind 的 spacing 基数固定为 4px，
+   类名 p-1/2/3/4/6/8 即 4/8/12/16/24/32；0.5 即组内 2px。 */
+@theme {
+  --spacing: 4px;
+}
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    font-size: var(--text-body);
+    line-height: var(--leading-body);
+    color: var(--text);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  ::selection { background: var(--accent-soft); }
+  /* 全局 focus-visible：2px 强调色，偏移 2px */
+  :where(button, a, input, textarea, select, [role='button'], [role='tab'], [role='radio'], [role='menuitem'], [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* 细滚动条：仅悬停容器时显示 */
+  .scroll-thin { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+  .scroll-thin:hover { scrollbar-color: var(--border-control) transparent; }
+  .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: transparent; border-radius: 9999px; border: 2px solid transparent; background-clip: content-box; }
+  .scroll-thin:hover::-webkit-scrollbar-thumb { background-color: var(--border-control); }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+  .num { font-variant-numeric: tabular-nums; }
+  .transition-ui { transition-duration: var(--dur-hover); transition-timing-function: var(--ease); }
+  .press { transition: transform var(--dur-hover) var(--ease), background-color var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease), border-color var(--dur-hover) var(--ease); }
+  .press:active:not(:disabled) { transform: scale(0.97); }
+
+  /* 聊天区背景：渐变 + ≤4% 不透明度的点阵图案，不影响文字对比 */
+  .chat-wall {
+    background-color: var(--bg);
+    background-image: linear-gradient(180deg, var(--bg) 0%, var(--bg-chat-to) 100%);
+    position: relative;
+  }
+  .chat-wall::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    opacity: var(--pattern-opacity);
+    background-image: radial-gradient(circle at 12px 12px, var(--text) 1.2px, transparent 1.6px);
+    background-size: 24px 24px;
+  }
+
+  .visually-hidden {
+    position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+}
+
+/* 动效门控：性能档位关闭特效或系统减少动效时，过渡与动画直达终态。
+   prefers-reduced-motion 下 Framer Motion 由 MotionConfig reducedMotion="user" 仅保留淡入淡出。 */
+html[data-effects='off'] *, html[data-effects='off'] *::before, html[data-effects='off'] *::after {
+  animation: none !important; transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-property: opacity, color, background-color, border-color !important; }
+  .press:active:not(:disabled) { transform: none; }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
