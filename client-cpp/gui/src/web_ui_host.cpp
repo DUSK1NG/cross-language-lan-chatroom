@@ -1,5 +1,6 @@
 #include "web_ui_host.hpp"
 
+#include <QDesktopServices>
 #include <QWebChannel>
 #include <QWebEnginePage>
 #include <QWebEngineView>
@@ -30,6 +31,27 @@ bool WebUiHost::isDevelopmentUrlAllowed(const QUrl& url) {
 
 QUrl WebUiHost::releaseUrl() {
     return QUrl(QStringLiteral("qrc:/frontend/index.html"));
+}
+
+bool WebUiHost::opensExternally(const QUrl& url) {
+    if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty()) {
+        return false;
+    }
+    const QString scheme = url.scheme().toLower();
+    return scheme == QStringLiteral("http") || scheme == QStringLiteral("https");
+}
+
+ExternalLinkPage::ExternalLinkPage(QObject* parent)
+    : QWebEnginePage(parent) {}
+
+bool ExternalLinkPage::acceptNavigationRequest(const QUrl& url, NavigationType type, bool isMainFrame) {
+    if (type != NavigationTypeLinkClicked) {
+        return QWebEnginePage::acceptNavigationRequest(url, type, isMainFrame);
+    }
+    if (WebUiHost::opensExternally(url)) {
+        QDesktopServices::openUrl(url);
+    }
+    return false;
 }
 
 bool WebUiHost::loadDevelopment(QWebEngineView* view, const QUrl& url) const {
