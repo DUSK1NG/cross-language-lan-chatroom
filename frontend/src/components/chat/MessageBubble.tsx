@@ -132,11 +132,11 @@ export const MessageBubble = memo(function MessageBubble({
             {message.attachment && <div className="mb-1"><FileCard attachment={message.attachment} bridge={bridge} self={self} /></div>}
             {quote && (
               <blockquote data-testid={`message-quote-${message.messageId}`}
-                className={cn('message-quote mb-1 cursor-pointer rounded-sm border-l-[3px] py-1 pl-2 pr-2 text-small', self ? 'border-read-tick bg-on-accent/10' : 'border-accent bg-accent-soft')}
+                className={cn('message-quote mb-1 cursor-pointer rounded-sm border-l-[3px] py-1 pl-2 pr-2 text-small', self ? 'border-read-tick bg-quote-out-bg' : 'border-accent bg-quote-in-bg')}
                 onClick={() => onJumpToQuote?.(quote.author, quote.text)}>
                 {quote.author
-                  ? <><span className="visually-hidden">&gt; </span><strong className={cn('block truncate font-semibold', self ? 'text-on-accent' : 'text-accent-text')}>{quote.author}</strong><span className="visually-hidden">: </span><span className={cn('block truncate', metaClass)}>{quote.text}</span></>
-                  : <span className={cn('block truncate', metaClass)}>{quote.raw}</span>}
+                  ? <><span className="visually-hidden">&gt; </span><strong className={cn('block truncate font-semibold', self ? 'text-quote-out-name' : 'text-accent-text')}>{quote.author}</strong><span className="visually-hidden">: </span><span className={cn('block truncate', self ? 'text-quote-out-text' : 'text-bubble-in-meta')}>{quote.text}</span></>
+                  : <span className={cn('block truncate', self ? 'text-quote-out-text' : 'text-bubble-in-meta')}>{quote.raw}</span>}
               </blockquote>
             )}
             {(!quote || body) && (

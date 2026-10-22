@@ -19,6 +19,11 @@
   --bubble-in: #182533;
   --bubble-out-meta: rgba(255, 255, 255, 0.70);  /* 在 #2B5278 上 4.94:1（原次要色 #8B9BAB 仅 2.86:1） */
   --bubble-in-meta: #8B9BAB;
+  /* 气泡内引用块（全部预设已核算 ≥ 4.5:1）：作者名 / 原文 / 底色 */
+  --quote-out-name: #FFFFFF;
+  --quote-out-text: rgba(255, 255, 255, 0.85);
+  --quote-out-bg: rgba(255, 255, 255, 0.10);
+  --quote-in-bg: rgba(255, 255, 255, 0.04);
   --read-tick-out: #8CC8FF;       /* 自己气泡上的已读双勾 4.58:1（原强调色 2.19:1） */
 
   /* 文字 */
@@ -148,6 +153,10 @@ html[data-theme='light'] {
   --bubble-out-meta: #4D6A88;
   --bubble-in-meta: #5F6B76;
   --read-tick-out: #2F6BB0;
+  --quote-out-name: var(--accent-text); /* 各浅色预设的 accent-text 在对应浅色气泡上均 ≥ 4.5:1 */
+  --quote-out-text: var(--bubble-out-meta);
+  --quote-out-bg: rgba(255, 255, 255, 0.50);
+  --quote-in-bg: rgba(0, 0, 0, 0.04);
   --text-on-active-2: rgba(255, 255, 255, 0.82);
   --accent-text: #2F6BB0;
   --text: #0F1419;

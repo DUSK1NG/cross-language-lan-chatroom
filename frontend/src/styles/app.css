@@ -18,6 +18,10 @@
   --color-bubble-out-meta: var(--bubble-out-meta);
   --color-bubble-in-meta: var(--bubble-in-meta);
   --color-read-tick: var(--read-tick-out);
+  --color-quote-out-name: var(--quote-out-name);
+  --color-quote-out-bg: var(--quote-out-bg);
+  --color-quote-out-text: var(--quote-out-text);
+  --color-quote-in-bg: var(--quote-in-bg);
   --color-ink: var(--text);
   --color-ink-2: var(--text-2);
   --color-ink-3: var(--text-3);
