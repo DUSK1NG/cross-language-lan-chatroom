@@ -1,6 +1,6 @@
 # 01 稳定性与发布 — 任务
 
-执行规则见 `.kiro/steering/engineering-methodology.md`。每个子任务完成后勾选并追加证据行。
+执行规则见 `docs/project/steering/engineering-methodology.md`。每个子任务完成后勾选并追加证据行。
 
 - [ ] 1. 依赖与版本基线（分支 `feat/01-stability-baseline`）
   - [x] 1.1 用 `pnpm-lock.yaml` 的解析版本替换 `frontend/package.json` 中全部 `"latest"`；`pnpm install --frozen-lockfile` 通过且锁文件无变化。_R4.1_

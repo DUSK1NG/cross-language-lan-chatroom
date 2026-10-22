@@ -1,9 +1,9 @@
 # 03 媒体预览与私信附件 — 任务
 
-前置：规格 01 任务 3 与规格 02 任务 3.4 已合并。执行规则见 `.kiro/steering/engineering-methodology.md`。
+前置：规格 01 任务 3 与规格 02 任务 3.4 已合并。执行规则见 `docs/project/steering/engineering-methodology.md`。
 
 - [ ] 1. 决策（不写代码）
-  - [x] 1.1 ⛔ 决策门：向用户陈述 design.md D1 的 (a)/(b)/(c) 与磁盘缓存风险，确认不变量修订文字，以及「退出时清除媒体缓存」是否默认开启。确认后把修订后的不变量写入 `.kiro/steering/engineering-methodology.md` §3 与 `docs/handover/2026-09-01-encrypted-attachments.md`。_R4.5_
+  - [x] 1.1 ⛔ 决策门：向用户陈述 design.md D1 的 (a)/(b)/(c) 与磁盘缓存风险，确认不变量修订文字，以及「退出时清除媒体缓存」是否默认开启。确认后把修订后的不变量写入 `docs/project/steering/engineering-methodology.md` §3 与 `docs/handover/2026-09-01-encrypted-attachments.md`。_R4.5_
     > 决定（用户 2026-10-21 采纳推荐）：方案 (a) 媒体缓存 + `lanchat-media://` 不透明令牌；不变量按 design.md D1 修订；「退出时清除媒体缓存」默认**开启**，设置中可关闭。
   - [x] 1.2 ⛔ 决策门：视频方案——(i) 引入 Qt Multimedia 生成首帧与时长（推荐）；(ii) 不引入，视频无缩略图；另问是否评估自行编译带专有编解码器的 Qt WebEngine（许可与专利风险由用户判断，默认不做）。_R1.3 R3.3_
     > 决定（用户 2026-10-21 采纳推荐）：(i) 引入 Qt Multimedia 生成首帧与时长；WebEngine 能播放的格式（WebM 等）内联播放，H.264 MP4 提供「用系统播放器打开」；不自行编译带专有编解码器的 WebEngine。

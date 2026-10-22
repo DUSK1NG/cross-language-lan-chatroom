@@ -7,10 +7,10 @@
 | 3 | [03-media-preview](03-media-preview/) | 1.4.0 | 图片/视频（≤ 100 MB）缩略图与内联预览、灯箱、媒体缓存与自定义 scheme、私信附件 | 1.1 不变量修订与缓存策略；1.2 视频方案 |
 | 4 | [04-desktop-notifications](04-desktop-notifications/) | 1.4.0 | 托盘、系统通知、免打扰、频道静音、房主关闭到托盘 | — |
 
-方法论：`.kiro/steering/engineering-methodology.md`；设计语言：`.kiro/steering/design-language.md`；执行代理：`.kiro/agents/sonnet-executor.md`（Claude Sonnet 5.5）。
+方法论：`docs/project/steering/engineering-methodology.md`；设计语言：`docs/project/steering/design-language.md`；执行代理：`docs/project/agents/sonnet-executor.md`（Claude Sonnet 5.5）。
 
 ## 如何执行
-在 Kiro 对话中：
-> 使用 sonnet-executor 代理执行 `.kiro/specs/01-stability-release/tasks.md` 的任务 1.1
+按任务编号执行：
+> 使用 sonnet-executor 代理执行 `docs/project/specs/01-stability-release/tasks.md` 的任务 1.1
 
 逐个子任务执行；遇到 ⛔ 决策门时代理会停下并给出决策简报，由你答复后继续。

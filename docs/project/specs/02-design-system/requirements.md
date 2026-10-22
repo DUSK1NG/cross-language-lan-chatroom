@@ -1,8 +1,8 @@
 # 02 设计系统：字体 · 间距 · 动画 · 转场 — 需求
 
-> **已被取代（2026-10-21）**：前端已按 Telegram Desktop 深色风格重做（Tailwind + Radix + Framer Motion，移除 GSAP），现行规范见 `docs/ui-design-spec.md` 与 `.kiro/steering/design-language.md`。本规格中引用的 `animation/motion.ts`、`MessageTimeline.tsx` 等文件已不存在，仅作历史记录。
+> **已被取代（2026-10-21）**：前端已按 Telegram Desktop 深色风格重做（Tailwind + Radix + Framer Motion，移除 GSAP），现行规范见 `docs/ui-design-spec.md` 与 `docs/project/steering/design-language.md`。本规格中引用的 `animation/motion.ts`、`MessageTimeline.tsx` 等文件已不存在，仅作历史记录。
 
-目标版本：1.3.0。依据 `.kiro/steering/design-language.md`。本规格不新增功能，只让现有界面在**排版舒适度、间距节奏与转场连续性**上达到一致。
+目标版本：1.3.0。依据 `docs/project/steering/design-language.md`。本规格不新增功能，只让现有界面在**排版舒适度、间距节奏与转场连续性**上达到一致。
 
 ## R1 排版令牌
 - R1.1 THE frontend SHALL 定义字号、行高、字重令牌（design-language §1），所有组件 CSS 只引用令牌。
