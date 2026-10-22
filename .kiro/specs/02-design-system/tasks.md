@@ -1,5 +1,7 @@
 # 02 设计系统 — 任务
 
+> **已被取代（2026-10-21）**：前端已按 Telegram Desktop 深色风格重做（Tailwind + Radix + Framer Motion，移除 GSAP），现行规范见 `docs/ui-design-spec.md` 与 `.kiro/steering/design-language.md`。本规格中引用的 `animation/motion.ts`、`MessageTimeline.tsx` 等文件已不存在，仅作历史记录。
+
 前置：规格 01 的任务 1、2 已合并（CI 中能跑前端检查）。执行规则见 `.kiro/steering/engineering-methodology.md`。
 
 - [ ] 1. 令牌与检查工具（分支 `feat/02-design-tokens`）

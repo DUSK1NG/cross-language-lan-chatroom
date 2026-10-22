@@ -9,7 +9,7 @@
 - bridge 状态每 100 ms 整体序列化，最多 500 行（`chat_bridge.cpp:19-40`）——**不得把图片数据放进状态**。
 - WebEngine 页面从 `qrc:/frontend/index.html` 加载，当前没有自定义 URL scheme（`web_ui_host.cpp:1-62`）。
 - Qt 官方预编译 WebEngine **不含专有编解码器**（H.264/AAC/MP4）：<https://doc.qt.io/qt-6.7/qtwebengine-features.html>。手机拍摄的 MP4 多为 H.264。
-- 现有不变量「UI 不接触路径、明文、密钥」（`MessageComposer.tsx:106-107`）。内联预览需要让解密后的像素进入渲染进程，**必须经用户批准修订该不变量**（任务 1.1 决策门）。
+- 现有不变量「UI 不接触路径、明文、密钥」（`frontend/src/components/composer/Composer.tsx` 的 `chooseUpload`）。内联预览需要让解密后的像素进入渲染进程，**必须经用户批准修订该不变量**（任务 1.1 决策门）。
 
 ## R1 媒体识别与缩略图（发送端）
 - R1.1 WHEN 用户选择 ≤ 100 MB 的文件 THE SYSTEM SHALL 依据文件内容（`QMimeDatabase::mimeTypeForFile(..., MatchContent)`）判定媒体类型，白名单：`image/png`、`image/jpeg`、`image/gif`、`image/webp`、`image/bmp`、`video/mp4`、`video/webm`、`video/quicktime`。
