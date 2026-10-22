@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QDir>
 #include <QMessageBox>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
@@ -72,6 +73,12 @@ int main(int argc, char* argv[]) {
                            hostAvailable ? QString() : hostUnavailableMessage);
     WebUiHost webUiHost;
     QWebEngineProfile uiProfile(QStringLiteral("LANChat"));
+    const QString testDataRoot = qEnvironmentVariable("LAN_CHAT_TEST_HOST_DATA_ROOT").trimmed();
+    if (!testDataRoot.isEmpty()) {
+        const QDir testDirectory(testDataRoot);
+        uiProfile.setPersistentStoragePath(testDirectory.filePath(QStringLiteral("web-ui/storage")));
+        uiProfile.setCachePath(testDirectory.filePath(QStringLiteral("web-ui/cache")));
+    }
     QWebEngineView webView;
     // Links in messages open in the system browser instead of replacing the chat UI.
     webView.setPage(new ExternalLinkPage(&uiProfile, &webView));
