@@ -118,4 +118,20 @@ describe('ConversationSidebar', () => {
     fireEvent.click(within(empty).getByRole('button', { name: /创建或加入频道/ }));
     expect(onCreateRoom).toHaveBeenCalledOnce();
   });
+
+  it('lists only the menu entries whose handlers are provided', async () => {
+    const onSettings = vi.fn();
+    renderSidebar();
+    fireEvent.keyDown(screen.getByRole('button', { name: '打开菜单' }), { key: 'Enter' });
+    expect(await screen.findByRole('menuitem', { name: '新建频道' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: '设置' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: '连接审批' })).not.toBeInTheDocument();
+    cleanup();
+
+    renderSidebar({ ...sidebarState, identity: { ...sidebarState.identity, admin: true } }, { onSettings, onConnectionApprovals: vi.fn() });
+    fireEvent.keyDown(screen.getByRole('button', { name: '打开菜单' }), { key: 'Enter' });
+    expect(await screen.findByRole('menuitem', { name: '连接审批' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: '设置' }));
+    expect(onSettings).toHaveBeenCalledOnce();
+  });
 });

@@ -46,7 +46,7 @@ export function ConversationSidebar({ state, bridge, filter, onFilterChange, onC
 
   const menu: MenuItem[] = [
     ...(onSettings ? [{ label: '设置', icon: <Settings />, onSelect: onSettings }] : []),
-    ...(state.identity.admin && onConnectionApprovals ? [{ label: '连接审批', icon: <ShieldCheck />, onSelect: onConnectionApprovals, trailing: approvals > 0 ? <span className="num text-small text-danger">{approvals}</span> : undefined }] : []),
+    ...(state.identity.admin && onConnectionApprovals ? [{ label: '连接审批', icon: <ShieldCheck />, onSelect: onConnectionApprovals, trailing: approvals > 0 ? <span className="num text-small text-danger-text">{approvals}</span> : undefined }] : []),
     ...(canManageRoom && onManageRoom ? [{ label: '频道管理', icon: <SlidersHorizontal />, onSelect: onManageRoom }] : []),
     { label: '新建频道', icon: <Plus />, onSelect: onCreateRoom },
     { label: '刷新列表', icon: <RefreshCw />, onSelect: () => { bridge.dispatch(createCommand('directory.refreshRooms', {})); bridge.dispatch(createCommand('directory.refreshUsers', {})); } }

@@ -29,6 +29,9 @@
   --color-accent-text: var(--accent-text);
   --color-online: var(--online);
   --color-danger: var(--danger);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-text: var(--danger-text);
+  --color-danger-icon-out: var(--danger-icon-out);
   --color-warning: var(--warning);
   --color-muted-badge: var(--muted-badge);
   --color-divider: var(--divider);
@@ -83,6 +86,16 @@
   }
 }
 
+@layer components {
+  .emoji-host em-emoji-picker {
+    --rgb-background: var(--rgb-elevated);
+    --rgb-color: var(--rgb-text);
+    --rgb-accent: var(--rgb-accent);
+    --border-radius: var(--radius-card);
+    height: 360px;
+  }
+}
+
 @layer utilities {
   /* 细滚动条：仅悬停容器时显示 */
   .scroll-thin { scrollbar-width: thin; scrollbar-color: transparent transparent; }
@@ -127,3 +140,8 @@ html[data-effects='off'] *, html[data-effects='off'] *::before, html[data-effect
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* 切换主题时 300ms 颜色交叉淡化（首次绘制不触发） */
+html.theme-transition *, html.theme-transition *::before, html.theme-transition *::after {
+  transition: background-color var(--dur-panel) var(--ease), color var(--dur-panel) var(--ease), border-color var(--dur-panel) var(--ease), fill var(--dur-panel) var(--ease) !important;
+}

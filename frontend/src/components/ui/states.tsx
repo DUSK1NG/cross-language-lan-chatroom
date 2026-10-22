@@ -1,12 +1,12 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 import { cn } from '../../lib/cn';
 import { Button } from './button';
 
 /** Skeleton block: a flat pulse at the content's real size — never a spinner (spec §10). */
-export function Skeleton({ className }: { className?: string }) {
-  return <span aria-hidden="true" className={cn('block rounded-sm bg-hover [animation:skeleton-pulse_1.4s_var(--ease)_infinite]', className)} />;
+export function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
+  return <span aria-hidden="true" style={style} className={cn('block rounded-sm bg-hover [animation:skeleton-pulse_1.4s_var(--ease)_infinite]', className)} />;
 }
 
 /** Empty state: icon + one sentence + the primary action. */

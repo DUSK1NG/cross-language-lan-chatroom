@@ -13,8 +13,8 @@ export const buttonVariants = cva(
         secondary: 'bg-input text-ink hover:bg-hover',
         ghost: 'bg-transparent text-ink-2 hover:bg-hover hover:text-ink',
         outline: 'border border-control bg-transparent text-ink hover:bg-hover',
-        'danger-outline': 'border border-danger bg-transparent text-danger hover:bg-hover',
-        danger: 'bg-danger text-on-accent hover:brightness-110'
+        'danger-outline': 'border border-danger-text bg-transparent text-danger-text hover:bg-hover',
+        danger: 'bg-danger-strong text-on-accent hover:brightness-110'
       },
       size: {
         sm: 'h-8 px-3 text-small rounded-sm',

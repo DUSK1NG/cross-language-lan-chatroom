@@ -18,7 +18,7 @@ export type MenuItem = {
 };
 
 function itemClasses(item: MenuItem) {
-  return cn(itemClass, item.danger && 'text-danger [&_svg]:text-danger');
+  return cn(itemClass, item.danger && 'text-danger-text [&_svg]:text-danger-text');
 }
 
 /** Dropdown menu (hamburger, header "more"). */

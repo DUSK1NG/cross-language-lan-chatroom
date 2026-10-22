@@ -28,6 +28,13 @@
   --text-on-active-2: rgba(255, 255, 255, 0.72); /* 选中行第二行文字 5.12:1（text-2 在选中行仅 2.86:1） */
   --text-on-accent: #FFFFFF;
 
+  /* 设置页强调色预设色块（仅装饰） */
+  --swatch-blue: #5288C1;
+  --swatch-green: #4FAE4E;
+  --swatch-violet: #8F7AE5;
+  --swatch-orange: #E08A3C;
+  --swatch-rose: #D9637E;
+
   /* 强调与状态 */
   --accent: #5288C1;
   --accent-strong: #3D72AE;       /* 白字角标/主按钮底 4.98:1（白字在 #5288C1 上仅 3.72:1） */
@@ -35,6 +42,9 @@
   --accent-soft: rgba(82, 136, 193, 0.16);
   --online: #4FAE4E;
   --danger: #E53935;
+  --danger-strong: #D32F2F;       /* 白字底色 4.98:1（白字在 #E53935 上仅 4.23:1） */
+  --danger-text: #FF6B66;         /* 危险色文字：侧栏 5.86 · 对方气泡 5.59（#E53935 在侧栏仅 3.85:1） */
+  --danger-icon-out: #FF7A75;     /* 自己气泡上的失败图标（非文字 ≥ 3:1）：3.21:1 */
   --warning: #F5A623;
   --muted-badge: #3E4C5A;
 
@@ -96,6 +106,11 @@
   --name-0: #FF8E86; --name-1: #8FD47A; --name-2: #F2B865; --name-3: #7EBDF0;
   --name-4: #B8A8F5; --name-5: #F58DBE; --name-6: #7DD9DB; --name-7: #FFB585;
 
+  /* emoji-mart 使用逗号分隔的 RGB 三元组，与上面的 --bg-elevated / --text / --accent 对应 */
+  --rgb-elevated: 23, 33, 43;
+  --rgb-text: 245, 245, 245;
+  --rgb-accent: 82, 136, 193;
+
   /* 布局 */
   --sidebar-width: 320px;
   --info-width: 340px;
@@ -144,7 +159,13 @@ html[data-theme='light'] {
   --shadow-dialog: 0 8px 24px rgba(0, 0, 0, 0.16);
   --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.12);
   --muted-badge: #A3AEB8;
+  --danger-strong: #C62828;
+  --danger-text: #C62828;
+  --danger-icon-out: #C62828;
   --pattern-opacity: 0.03;
+  --rgb-elevated: 255, 255, 255;
+  --rgb-text: 15, 20, 25;
+  --rgb-accent: 61, 114, 174;
   /* 发送者名称在白色气泡上 ≥ 4.8:1 */
   --name-0: #A35B56; --name-1: #517845; --name-2: #8E6C3B; --name-3: #4D7493;
   --name-4: #756B9C; --name-5: #9C5A79; --name-6: #477B7C; --name-7: #90664B;
