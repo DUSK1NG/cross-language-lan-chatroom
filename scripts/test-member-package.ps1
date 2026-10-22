@@ -125,7 +125,7 @@ if ($Smoke) {
         $hostDataDirectory = Join-Path $smokeDirectory '__host-data'
         $env:LAN_CHAT_TEST_HOST_DATA_ROOT = $hostDataDirectory
         $launcherProcess = Start-Process -FilePath $launcherExe -WorkingDirectory $smokeDirectory -WindowStyle Hidden -PassThru
-        Start-Sleep -Milliseconds 3000
+        Start-Sleep -Milliseconds 10000
         $guiProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
             $_.ExecutablePath -and $_.ExecutablePath.Equals($guiExe, [System.StringComparison]::OrdinalIgnoreCase)
         } | Select-Object -First 1
