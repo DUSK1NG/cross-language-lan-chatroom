@@ -13,7 +13,7 @@ export type ReleaseNotes = {
 export const currentRelease: ReleaseNotes = {
   version: '1.3.0',
   codename: 'Aurora',
-  date: '2026-10-21',
+  date: '2026-10-22',
   headline: '全新聊天界面',
   summary: '深色优先的三栏布局、分组气泡和更顺手的输入体验。',
   sections: [
@@ -39,7 +39,8 @@ export const currentRelease: ReleaseNotes = {
       kind: 'fixed',
       title: '修复',
       items: [
-        { title: '文字对比度', detail: '次要文字、气泡时间和投递状态标记均达到 WCAG AA 对比度。' }
+        { title: '文字对比度', detail: '次要文字、气泡时间和投递状态标记均达到 WCAG AA 对比度。' },
+        { title: '版本更新提示', detail: '每个版本只自动提示一次，退出重启后仍会记住；设置中的版本说明可随时手动查看。' }
       ]
     }
   ]
@@ -48,17 +49,9 @@ export const currentRelease: ReleaseNotes = {
 const SEEN_KEY = 'lan-chat.releaseSeen';
 
 export function hasSeenRelease(version = currentRelease.version): boolean {
-  try {
-    return window.localStorage.getItem(SEEN_KEY) === version;
-  } catch {
-    return true;
-  }
+  return window.localStorage.getItem(SEEN_KEY) === version;
 }
 
 export function markReleaseSeen(version = currentRelease.version) {
-  try {
-    window.localStorage.setItem(SEEN_KEY, version);
-  } catch {
-    // Storage unavailable: the card simply shows again next launch.
-  }
+  window.localStorage.setItem(SEEN_KEY, version);
 }

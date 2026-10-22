@@ -6,6 +6,7 @@
 class ChatBridge;
 class QWebChannel;
 class QWebEngineView;
+class QWebEngineProfile;
 
 class WebUiHost final {
 public:
@@ -25,7 +26,7 @@ public:
  */
 class ExternalLinkPage final : public QWebEnginePage {
 public:
-    explicit ExternalLinkPage(QObject* parent = nullptr);
+    explicit ExternalLinkPage(QWebEngineProfile* profile, QObject* parent = nullptr);
 
 protected:
     bool acceptNavigationRequest(const QUrl& url, NavigationType type, bool isMainFrame) override;

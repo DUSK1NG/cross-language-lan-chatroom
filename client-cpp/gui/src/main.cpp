@@ -5,6 +5,7 @@
 #include <QCommandLineParser>
 #include <QMessageBox>
 #include <QWebEnginePage>
+#include <QWebEngineProfile>
 #include <QWebEngineView>
 
 #include "chat_bridge.hpp"
@@ -70,9 +71,10 @@ int main(int argc, char* argv[]) {
                            hostPaths.dbFile, hostAvailable,
                            hostAvailable ? QString() : hostUnavailableMessage);
     WebUiHost webUiHost;
+    QWebEngineProfile uiProfile(QStringLiteral("LANChat"));
     QWebEngineView webView;
     // Links in messages open in the system browser instead of replacing the chat UI.
-    webView.setPage(new ExternalLinkPage(&webView));
+    webView.setPage(new ExternalLinkPage(&uiProfile, &webView));
     // The responsive layout is designed down to 480 × 600 (single-column below 700px).
     webView.setMinimumSize(480, 600);
     if (!webUiHost.registerBridge(webView.page(), &bridge)) {

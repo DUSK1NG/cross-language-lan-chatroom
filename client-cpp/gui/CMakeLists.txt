@@ -809,10 +809,10 @@ target_include_directories(web-ui-host-tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-add_test(NAME web-ui-host-tests COMMAND web-ui-host-tests)
+add_test(NAME web-ui-host-tests COMMAND web-ui-host-tests -o -,txt)
 set_tests_properties(
     web-ui-host-tests
-    PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_TEST_RUNTIME_PATH_ESCAPED}"
+    PROPERTIES ENVIRONMENT "PATH=${LAN_CHAT_TEST_RUNTIME_PATH_ESCAPED};QT_PLUGIN_PATH=${LAN_CHAT_QT_PREFIX}/plugins;QT_QPA_PLATFORM=offscreen"
 )
 
 set_target_properties(lan-chat-gui PROPERTIES
