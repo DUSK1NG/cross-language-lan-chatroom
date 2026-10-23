@@ -86,16 +86,16 @@ if ($forbidden) { $forbidden.FullName; throw '发布 ZIP 含不应交付的文�
 
 ### v1.3.0
 
-- 记录时间：2026-10-21 23:10:59 +08:00。
-- 构建源码：master，提交 80c72c4。
+- 记录时间：2026-10-23 07:46:53 +08:00。
+- 构建源码：master，提交 cccf3ab。
 - GitHub CI：Go server、React frontend、C++ core (headless)、C++ GUI (Windows)、Windows source launcher 全部成功。
-- 本机验证：前端 141 项测试、Go 测试和 CTest 19/19 通过；MLS++ 已启用，CTest 无跳过。
-- 包验证：统一包内容检查、启动烟雾测试和 ZIP 安全检查通过；安装器前置烟雾测试及 Inno Setup 编译通过，AppVersion 为 1.3.0。
-- 运行包中的 GUI 与构建目录中的 GUI 已通过逐字节比较，内容相同。
+- 本机验证：前端 lint、189 项测试、Go 测试和 CTest 19/19 通过；MLS++ 已启用，CTest 无跳过。
+- 包验证：统一包内容检查、成员及房主启动烟雾测试和 ZIP 安全检查通过；安装器前置烟雾测试及 Inno Setup 编译通过，AppVersion 为 1.3.0。
+- 更新提示：跨进程重启后的已读状态测试通过；打包启动检查确认使用隔离的持久化界面配置目录。
 - 干净机器及双机人工验收：未完成。
 
 | 文件 | SHA256 |
 | --- | --- |
-| LANChat-Windows-x64.zip | 82b3b848cd050ebed7b9045acd7ea0e166198958654d0a5e042eacc2ad24e88a |
-| LANChat-Setup-x64.exe | d0fee7f224887be25c513216cba81ac975056b0c8b4b71960a2c658c06643a46 |
-| out/modern-msvc-x64/lan-chat-gui.exe | 43d7e5ee08acaa3290b354b7028647792e4fe8a12fc22e3f94e26a47ac58c14b |
+| LANChat-Windows-x64.zip | 08894d7b39ef1ff5b436502d28013ed5c5673843000f626e45f5f5e3e1ace069 |
+| LANChat-Setup-x64.exe | e43b2ae2e0e018f0fc13055acb6e8e3d9770a4c7fb64df52064b2fef376069d6 |
+| out/modern-msvc-x64/lan-chat-gui.exe | 32cb9bd8368897de8275cc7a117807ad8833bf03744eb9f355a824a9dad0d34a |
