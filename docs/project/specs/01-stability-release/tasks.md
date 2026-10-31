@@ -23,7 +23,8 @@
     > 证据：`.github/workflows/ci.yml` 新增 `cpp-gui-windows`（windows-latest）：`jurplel/install-qt-action@v4`（6.11.2 / win64_msvc2022_64 / `qtwebengine qtwebchannel qtpositioning` / `cache: true`）+ Node 22 + pnpm 11.19.0 + `choco install openssl`，用 `LAN_CHAT_QT_PREFIX=$QT_ROOT_DIR`、`LAN_CHAT_OPENSSL_ROOT` 跑 `scripts/build-modern.ps1 -Action Test`。该作业在 runner 上因 aqtinstall 镜像缺少 6.11.2 元数据持续失败（`Failed to locate XML data for Qt version '6.11.2'`，install-qt 步骤约 20 秒即失败，非本仓库代码问题），**已按 D2.4 降级为仅在 `master` 推送与 tag 上运行**，PR 上只保留 `cpp-core`。首次/缓存命中耗时待合并到 master 后实跑量测（已在 PR 描述记录）。
 
 - [ ] 3. 附件下载链路加固（分支 `feat/01-stability-downloads`）
-  - [ ] 3.1 失败测试：assembler 在校验失败/取消/析构后不留下目标文件或 `.lanchat-part`。实现临时文件 + rename。_R2.1 D1.1_
+  - [x] 3.1 失败测试：assembler 在校验失败/取消/析构后不留下目标文件或 `.lanchat-part`。实现临时文件 + rename。_R2.1 D1.1_
+    > 证据：`attachment_download_assembler_tests.cpp` 先改/增 5 个用例（成功替换已存在目标且不留 part、篡改块后无目标无 part、失败保留已存在目标、`cancel()` 清理、析构清理且移动不误删），实现前 5/5 按预期失败。`AttachmentDownloadAssembler` 改为写 `<目标>.lanchat-part`，末块校验通过后删除旧目标再 `QFile::rename`；任何错误、`cancel()`、析构均删除 part；禁止拷贝、移动转移 part 所有权。Windows 本机（Qt 6.10.3 / MSVC 14.44，MLS++ 开启，测试钩子开启）`ctest` 19/19 通过。
   - [ ] 3.2 失败测试：worker 窗口化下载在乱序到达时仍按序写入，在途数不超过 8。实现乱序缓冲。_R2.2 D1.2_
   - [ ] 3.3 失败测试：发送者完成上传后可对自己的 `attachmentId` 发起下载。实现本地保存自身 manifest。_R2.3 D1.3_
   - [ ] 3.4 进度/完成/失败事件 + `handleAttachmentEvent` 更新消息行；`frontend/src/bridge/types.ts` 增加 `download.progress`/`completed` 事件与 `saved`/`failed` 状态；`MessageItem` 附件卡显示三种状态（vitest 覆盖）。_R2.4 D1.4_
