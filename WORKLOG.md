@@ -54,6 +54,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+### 2026-11-23 19:43 — S0 本机基线与局域网便携包
+
+- 执行者：Codex。
+- 改动：`server-rust/src/lan/mod.rs` 让附件控制帧和加密附件消息使用原命令限额排队，修复附件落盘后消息被限流的问题。`lan_desktop.rs` 同时断言发送方和接收方都能看到附件。桌面 `1.4.0` 版本从工作区 Cargo 配置同步，CI 增加 LAN 安装器预检及 TLS 验收。
+- 验证：工作区离线测试及 Clippy 通过，附件连续 12 次通过，前端 188 项测试与构建通过，版本校验 4 项通过。Windows LAN 便携包启动、安装器预检和 TLS 11 项通过，ZIP 检查仅含客户端、房主服务程序、图标和说明。
+- 产物：`release/v1.4-s0/LANChat-Desktop-Windows-x64.zip`。
+- 后续：干净 CI、后续阶段和完整 1.4 验收待完成。
+
 ### 2026-11-23 19:18 — 合并 Rust 工作区与 v1.4 执行文档
 
 - 执行者：Codex。

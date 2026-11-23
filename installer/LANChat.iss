@@ -9,7 +9,7 @@
   #define OutputDir "..\release"
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.3.0"
+  #define AppVersion "1.4.0"
 #endif
 #ifndef Edition
   #define Edition "lan"

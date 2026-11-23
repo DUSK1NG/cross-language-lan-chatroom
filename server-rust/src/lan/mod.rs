@@ -494,9 +494,29 @@ async fn serve(
                 }
                 continue;
             }
-            let allowed = match request.kind.as_str() {
-                "attachment.chunk" | "attachment.download" => {
+            let allowed = match (request.kind.as_str(), request.crypto.is_some()) {
+                ("attachment.chunk" | "attachment.download", _) => {
                     let delay = transfer.delay(MAX_FRAME_BYTES as f64);
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    true
+                }
+                (
+                    "attachment.init"
+                    | "attachment.resume"
+                    | "attachment.commit"
+                    | "mls.key_package.fetch"
+                    | "mls.group.proposal"
+                    | "mls.group.commit"
+                    | "mls.group.welcome"
+                    | "mls.group.welcome.accept",
+                    _,
+                )
+                | ("chat", true) => {
+                    // A single upload sends several control frames in succession.
+                    // Pace them at the normal rate so a busy connection can finish the upload.
+                    let delay = normal.delay(1.0);
                     if !delay.is_zero() {
                         tokio::time::sleep(delay).await;
                     }

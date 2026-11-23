@@ -2685,7 +2685,7 @@ dependencies = [
 
 [[package]]
 name = "lan-chat-desktop"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "lan-chat-client-core",

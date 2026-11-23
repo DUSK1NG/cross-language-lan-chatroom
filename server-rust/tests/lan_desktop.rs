@@ -197,6 +197,14 @@ async fn lan_desktop_hosts_approves_and_transfers_encrypted_attachment() -> Resu
         json!({"room":"migration"}),
     )
     .await?;
+    await_state(&owner, &owner_ui, |state| {
+        state["activeMessages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["attachment"]["fileName"] == "input.bin")
+    })
+    .await;
     let state = await_state(&guest, &guest_ui, |state| {
         state["activeMessages"]
             .as_array()

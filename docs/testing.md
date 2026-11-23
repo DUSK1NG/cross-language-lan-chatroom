@@ -9,9 +9,15 @@ pnpm.cmd --dir frontend run build
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build --workspace --locked --release
+node scripts/check-version.mjs
+node --test scripts/check-version.test.mjs
 ~~~
 
+桌面发布版本来自根 `Cargo.toml` 的 `[workspace.package].version`。修改当前版本说明后，运行 `node scripts/check-version.mjs --sync` 同步构建元数据。
+
 协议测试校验帧边界与历史 JSON 样本。局域网桌面集成测试通过两个客户端创建聊天室、批准成员、加入密码频道、发送消息并上传和解密下载附件。测试使用临时的证书和数据库，房主端口为 TCP 8888。
+
+2026-11-23 本机 S0 回归通过工作区离线测试和 Clippy、LAN 附件连续 12 次、前端 188 项测试、版本校验 4 项及 TLS 11 项。MSVC 报 D8050 时，在当前 PowerShell 设 `CARGO_TARGET_DIR=C:/lc-target` 和 `CARGO_PROFILE_DEV_DEBUG=0` 后复跑。TLS 测试临时目录写入失败时，可在当前进程将 `TEMP` 和 `TMP` 指向工作区下可写的测试目录。
 
 ## Windows 发布包
 

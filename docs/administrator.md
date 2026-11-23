@@ -2,10 +2,10 @@
 
 ## 配置远程服务端管理员
 
-启动服务端时指定管理员用户代码（迁移期二进制为 `chat-server.exe`，Rust 目标为 `lan-chat-server.exe`，参数名不变）：
+启动局域网服务端时指定管理员用户代码。
 
 ```powershell
-.\chat-server.exe `
+.\lan-chat-server.exe `
   -cert .\certs\server.crt `
   -key .\certs\server.key `
   -admin-code ALICE001
