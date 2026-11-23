@@ -3,7 +3,7 @@ import { Lock, MessageSquare, Settings2, SlidersHorizontal, X } from 'lucide-rea
 
 import type { BridgeState, MemberSummary } from '../../bridge/types';
 import { cn } from '../../lib/cn';
-import { ease } from '../../lib/motion';
+import { ease, easeExit, scaled } from '../../lib/motion';
 import { Avatar } from '../ui/avatar';
 import { Button } from '../ui/button';
 import { IconButton } from '../ui/icon-button';
@@ -36,13 +36,14 @@ export function InfoPanel({ state, open, overlay, onClose, onStartDirect, onView
         <>
           {overlay && (
             <motion.div key="scrim" className="absolute inset-0 z-30 bg-overlay" onClick={onClose}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3, ease }} />
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              exit={{ opacity: 0, transition: { duration: scaled(0.15), ease: easeExit } }} transition={{ duration: scaled(0.22), ease }} />
           )}
           <motion.aside key="panel" data-testid="member-panel" data-state="open" aria-label="会话信息"
-            initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 24, opacity: 0 }}
-            transition={{ duration: 0.3, ease }}
-            className={cn('flex h-full w-[var(--info-width)] shrink-0 flex-col border-l border-divider bg-sidebar',
-              overlay && 'absolute right-0 top-0 z-40 shadow-dialog')}>
+            initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 20, opacity: 0, transition: { duration: scaled(0.15), ease: easeExit } }} transition={{ duration: scaled(0.28), ease }}
+            className={cn('flex h-full w-[var(--info-width)] shrink-0 flex-col border-l border-divider',
+              overlay ? 'surface-glass absolute right-0 top-0 z-40 shadow-dialog' : 'surface-chrome')}>
             <header className="flex h-14 shrink-0 items-center gap-2 px-4">
               <h2 className="flex-1 text-title font-semibold text-ink">{isRoom ? '频道信息' : '用户信息'}</h2>
               <IconButton label="关闭信息面板" onClick={onClose}><X size={20} aria-hidden="true" /></IconButton>
@@ -60,7 +61,7 @@ export function InfoPanel({ state, open, overlay, onClose, onStartDirect, onView
                 )}
               </section>
             )}
-            <section className="flex min-h-0 flex-1 flex-col">
+            {state.edition !== 'online' && <section className="flex min-h-0 flex-1 flex-col">
               <h3 className="px-4 pb-2 pt-4 text-small font-medium text-ink-2">成员</h3>
               {sorted.length === 0 ? <EmptyState icon={<MessageSquare />} title="暂无成员" description="成员上线后会显示在这里。" /> : (
                 <ul className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -93,7 +94,7 @@ export function InfoPanel({ state, open, overlay, onClose, onStartDirect, onView
                   })}
                 </ul>
               )}
-            </section>
+            </section>}
           </motion.aside>
         </>
       )}

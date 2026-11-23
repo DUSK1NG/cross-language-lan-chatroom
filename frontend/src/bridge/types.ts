@@ -8,7 +8,7 @@ export type BridgeError = {
   code: string;
   message: string;
   retryable: boolean;
-  source: 'bridge' | 'controller' | 'server' | 'webengine';
+  source: 'bridge' | 'controller' | 'server';
   commandId?: string;
 };
 
@@ -19,6 +19,7 @@ export type RoomSummary = {
   ownerCode?: string;
   private?: boolean;
   canManage?: boolean;
+  passwordRequired?: boolean;
   mls?: boolean;
 };
 
@@ -33,6 +34,7 @@ export type MessageAttachment = {
   attachmentId: string;
   fileName: string;
   logicalSize: number;
+  transport?: 'tls';
   status?: 'available' | 'downloading' | 'verified-failed' | 'expired';
   receivedChunks?: number;
   totalChunks?: number;
@@ -43,11 +45,14 @@ export type MessageItem = {
   displayName: string;
   userCode: string;
   time: string;
+  createdAt?: string;
   content: string;
   selfMessage: boolean;
   systemMessage: boolean;
   deliveryState?: 'queued' | 'sent' | 'delivered' | 'failed';
   attachment?: MessageAttachment;
+  imageSize?: number;
+  imagePeer?: string;
 };
 
 export type MemberSummary = {
@@ -65,10 +70,6 @@ export type ConnectionApprovalRequest = {
 };
 
 export type HostDefaults = {
-  serverExe: string;
-  certFile: string;
-  keyFile: string;
-  dbFile: string;
   available?: boolean;
   unavailableReason?: string;
 };
@@ -114,11 +115,12 @@ export type GraphicsState = {
 
 export type DiagnosticsState = {
   enabled: boolean;
-  directory: string;
 };
 
 export type BridgeState = {
   schemaVersion: 1;
+  edition?: 'lan' | 'online';
+  onlineFiles?: boolean;
   connection: {
     phase: ConnectionPhase;
     statusText: string;
@@ -165,6 +167,8 @@ export type CommandResult = {
   id: string;
   ok: boolean;
   error?: BridgeError;
+  certificateFile?: string;
+  imageUrl?: string;
 };
 
 export type AttachmentEventPayload =
@@ -172,7 +176,7 @@ export type AttachmentEventPayload =
       chunkSize: number; chunkIndex: number; receivedIndexes: number[];
       expiresAt: string; content: string;
       // Plaintext bytes from the native transfer; optional for older bridge events.
-      logicalSize?: number }
+      logicalSize?: number; fileName?: string }
   | { type: 'attachment.chunk'; attachmentId: string; chunkIndex: number;
       content: string }
   | { type: 'attachment.resume'; attachmentId: string;
@@ -195,4 +199,5 @@ export interface ChatBridgeClient {
   subscribeCommandResult(listener: (result: CommandResult) => void): () => void;
   subscribeAttachmentEvents(listener: (event: AttachmentEvent) => void): () => void;
   subscribeBridgeError(listener: (error: BridgeError) => void): () => void;
+  subscribePresence(listener: (message: string) => void): () => void;
 }

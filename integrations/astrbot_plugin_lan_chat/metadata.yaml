@@ -1,0 +1,5 @@
+name: astrbot_plugin_lan_chat
+display_name: LAN Chat
+desc: Connects AstrBot to a LAN Chat room over TLS.
+version: v0.1.0
+author: LAN Chat

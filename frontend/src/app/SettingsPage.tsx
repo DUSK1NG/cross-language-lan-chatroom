@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
 import { ArrowLeft, Bell, Info, Palette, Shield, Sparkles, UserRound } from 'lucide-react';
 
 import { createCommand } from '../bridge/chatBridge';
@@ -12,7 +11,6 @@ import { Button } from '../components/ui/button';
 import { SegmentedRadio, Select, Switch } from '../components/ui/controls';
 import { IconButton } from '../components/ui/icon-button';
 import { cn } from '../lib/cn';
-import { ease } from '../lib/motion';
 
 type SettingsPageProps = { bridge: ChatBridgeClient; state: BridgeState; onBack(): void; onShowReleaseNotes?(): void };
 type Category = 'account' | 'appearance' | 'notifications' | 'privacy' | 'about';
@@ -47,8 +45,8 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
   const current = categories.find((item) => item.id === category) ?? categories[0];
 
   return (
-    <main className="flex h-full w-full overflow-hidden bg-bg text-ink">
-      <nav aria-label="设置分类" className="flex w-[260px] shrink-0 flex-col border-r border-divider bg-sidebar max-[699px]:w-[72px]">
+    <main className="flex h-full w-full overflow-hidden text-ink">
+      <nav aria-label="设置分类" className="surface-chrome flex w-[240px] shrink-0 flex-col border-r border-divider max-[699px]:w-[72px]">
         <header className="flex h-14 shrink-0 items-center gap-2 px-3">
           <IconButton label="返回聊天" onClick={onBack}><ArrowLeft size={20} aria-hidden="true" /></IconButton>
           <h1 className="truncate text-title font-semibold max-[699px]:visually-hidden">设置</h1>
@@ -67,10 +65,12 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
         </ul>
       </nav>
       <section data-testid="settings-scroll-container" aria-label={current.label} className="scroll-thin min-w-0 flex-1 overflow-y-auto">
-          <motion.div key={category} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease }} className="mx-auto flex w-full max-w-[640px] flex-col gap-6 px-6 py-8">
-            <h2 className="text-title font-semibold">{current.label}</h2>
-            {category === 'account' && <AccountSection state={state} />}
+          <div key={category} className="view-enter mx-auto flex w-full max-w-[640px] flex-col gap-6 px-6 py-8">
+            <h2 className="text-xl font-semibold tracking-tight">{current.label}</h2>
+            {category === 'account' && <AccountSection state={state} onSignOut={() => {
+              bridge.dispatch(createCommand('session.disconnect', {}));
+              onBack();
+            }} />}
             {category === 'appearance' && <>
               <Group title="主题">
                 <Row label="外观主题">
@@ -96,7 +96,7 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
             </>}
             {category === 'notifications' && (
               <Group title="桌面通知">
-                <p className="px-4 py-4 text-body text-ink-2">暂未开放。桌面通知需要 Qt 宿主提供系统通知接口，当前版本尚未接入。</p>
+                <p className="px-4 py-4 text-body text-ink-2">桌面通知暂未开放。</p>
               </Group>
             )}
             {category === 'privacy' && <PrivacySection bridge={bridge} state={state} />}
@@ -110,10 +110,10 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
                   </span>
                   {onShowReleaseNotes && <Button variant="secondary" onClick={onShowReleaseNotes}><Sparkles size={16} aria-hidden="true" />版本说明</Button>}
                 </div>
-                <p className="border-t border-divider px-4 py-3 text-small text-ink-2">Go TLS 服务端 · Qt WebEngine 客户端 · MLS 端到端加密频道与附件。</p>
+                <p className="border-t border-divider px-4 py-3 text-small text-ink-2">Windows 桌面客户端 · Go TLS 服务端</p>
               </Group>
             )}
-          </motion.div>
+          </div>
       </section>
     </main>
   );
@@ -123,7 +123,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section aria-label={title} className="flex flex-col gap-2">
       <h3 className="px-4 text-small font-medium text-accent-text">{title}</h3>
-      <div className="flex flex-col overflow-hidden rounded-md bg-sidebar">{children}</div>
+      <div className="surface-glass flex flex-col overflow-hidden rounded-card">{children}</div>
     </section>
   );
 }
@@ -144,7 +144,7 @@ function Value({ children }: { children: ReactNode }) {
   return <span className="num min-w-0 break-all text-right text-body text-ink-2">{children}</span>;
 }
 
-function AccountSection({ state }: { state: BridgeState }) {
+function AccountSection({ state, onSignOut }: { state: BridgeState; onSignOut: () => void }) {
   const endpoint = `${state.savedConnection.serverIp || '未设置'}:${state.savedConnection.serverPort || '—'}`;
   return <>
     <div className="flex items-center gap-4 rounded-md bg-sidebar px-4 py-4">
@@ -156,28 +156,34 @@ function AccountSection({ state }: { state: BridgeState }) {
     </div>
     <Group title="连接">
       <Row label="当前身份"><Value>{state.identity.displayName}#{state.identity.userCode}</Value></Row>
-      <Row label="连接模式"><Value>Go TLS Server</Value></Row>
+      <Row label="连接模式"><Value>{state.edition === 'online' ? '在线' : '局域网'}</Value></Row>
       <Row label="服务器地址"><Value>{endpoint}</Value></Row>
       <Row label="连接状态"><Value>{state.connection.statusText}</Value></Row>
     </Group>
-    <p className="px-4 text-small text-ink-2">用户名和用户代码由启动页面管理，断开后可重新选择。</p>
+    {state.edition === 'online'
+      ? <div className="flex justify-end"><Button variant="outline" onClick={onSignOut}>退出登录</Button></div>
+      : <p className="px-4 text-small text-ink-2">用户名和用户代码由启动页面管理，断开后可重新选择。</p>}
   </>;
 }
 
 function PrivacySection({ bridge, state }: { bridge: ChatBridgeClient; state: BridgeState }) {
-  const diagnostics = state.diagnostics ?? { enabled: false, directory: '' };
+  const diagnostics = state.diagnostics;
   return <>
     <Group title="连接日志">
       <Row label="记录连接日志" hint="仅记录时间、服务器端点、重连次数和 TLS/审批结果；不记录消息内容、证书或私钥。">
-        <Switch label="记录连接日志" checked={diagnostics.enabled}
+        <Switch label="记录连接日志" checked={diagnostics?.enabled === true}
           onCheckedChange={(enabled) => bridge.dispatch(createCommand('settings.setConnectionLogging', { enabled }))} />
       </Row>
-      {diagnostics.enabled && <Row label="日志目录"><Value>{diagnostics.directory}</Value></Row>}
     </Group>
     <Group title="加密">
-      <Row label="传输" hint="TLS，并固定校验房主证书指纹" />
-      <Row label="频道与附件" hint="MLS 端到端加密，服务器只转发密文" />
-      <Row label="成员审批" hint="用户名和用户代码不是密码,请通过当面或电话等可信渠道核验" />
+      {state.edition === 'online' ? <>
+        <Row label="传输" hint="TLS，校验服务器证书" />
+        <Row label="私信历史" hint="由服务器保存，用于同步历史和投递离线消息" />
+      </> : <>
+        <Row label="传输" hint="TLS，并固定校验房主证书指纹" />
+        <Row label="频道与附件" hint="MLS 端到端加密，服务器只转发密文" />
+        <Row label="成员审批" hint="用户名和用户代码不是密码,请通过当面或电话等可信渠道核验" />
+      </>}
     </Group>
   </>;
 }
@@ -188,7 +194,7 @@ function PerformanceSection({ bridge, state }: { bridge: ChatBridgeClient; state
   if (!performance || !graphics) {
     return (
       <Group title="性能 / 图形信息">
-        <p className="px-4 py-4 text-body text-ink-2">性能信息由 Qt bridge 提供，当前连接尚未发布完整运行状态。</p>
+        <p className="px-4 py-4 text-body text-ink-2">当前没有性能数据。</p>
       </Group>
     );
   }

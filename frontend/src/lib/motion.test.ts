@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { effectsDisabled, motionAllowed, scaled, setMotionScale } from './motion';
+import { effectsDisabled, scaled, setMotionScale } from './motion';
 
 describe('motion gate', () => {
   afterEach(() => {
@@ -10,12 +10,12 @@ describe('motion gate', () => {
 
   it('reports motion as allowed while the effects gate is unset', () => {
     expect(effectsDisabled()).toBe(false);
-    expect(motionAllowed()).toBe(true);
+    expect(scaled(0.2)).toBe(0.2);
   });
 
   it('blocks motion and zeroes durations when data-effects is off', () => {
     document.documentElement.dataset.effects = 'off';
-    expect(motionAllowed()).toBe(false);
+    expect(effectsDisabled()).toBe(true);
     expect(scaled(0.2)).toBe(0);
   });
 

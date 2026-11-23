@@ -1,5 +1,7 @@
 [CmdletBinding()]
 param(
+    [ValidateSet('lan', 'online')]
+    [string]$Edition = 'lan',
     [string]$PackageDirectory = '',
     [string]$OutputDirectory = '',
     [string]$InnoCompiler = '',
@@ -15,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $Root 'release'))
 if ([string]::IsNullOrWhiteSpace($PackageDirectory)) {
-    $PackageDirectory = Join-Path $ReleaseRoot 'LANChat-Windows-x64'
+    $PackageDirectory = Join-Path $ReleaseRoot $(if ($Edition -eq 'lan') { 'LANChat-Desktop-Windows-x64' } else { 'LANChat-Online-Windows-x64' })
 }
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = $ReleaseRoot
@@ -48,8 +50,8 @@ function Test-InstallerDefinition([string]$Path) {
         'Uninstallable=yes',
         'SetupIconFile={#SourceDir}\LANChat.ico',
         'UninstallDisplayIcon={app}\LANChat.ico',
-        'Name: "{autoprograms}\LAN Chat"',
-        'Name: "{autodesktop}\LAN Chat"',
+        'Name: "{autoprograms}\{#DisplayName}"',
+        'Name: "{autodesktop}\{#DisplayName}"',
         'IconFilename: "{app}\LANChat.ico"',
         'Name: "desktopicon"',
         'Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs'
@@ -67,6 +69,7 @@ function Find-InnoCompiler([string]$RequestedCompiler) {
     $candidates = @(
         $RequestedCompiler,
         (Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
         (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
         (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
@@ -89,7 +92,7 @@ if (-not (Test-Path -LiteralPath $PackageDirectory -PathType Container)) {
 Write-Step 'Validate unified runtime input and sensitive-file exclusions'
 $validationArguments = @(
     '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $runtimeValidator,
-    '-PackageDirectory', $PackageDirectory, '-AllowLocalHost'
+    '-PackageDirectory', $PackageDirectory, '-Edition', $Edition
 )
 if ($SmokeTest.IsPresent) { $validationArguments += '-Smoke' }
 & powershell.exe @validationArguments
@@ -107,10 +110,10 @@ if ([string]::IsNullOrWhiteSpace($iscc)) {
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 Write-Step 'Compile per-user installer'
-& $iscc ("/DSourceDir={0}" -f $PackageDirectory) ("/DOutputDir={0}" -f $OutputDirectory) ("/DAppVersion={0}" -f $Version) $definition
+& $iscc ("/DSourceDir={0}" -f $PackageDirectory) ("/DOutputDir={0}" -f $OutputDirectory) ("/DAppVersion={0}" -f $Version) "/DEdition=$Edition" $definition
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
 
-$installer = Join-Path $OutputDirectory 'LANChat-Setup-x64.exe'
+$installer = Join-Path $OutputDirectory $(if ($Edition -eq 'online') { 'LANChat-Online-Setup-x64.exe' } else { 'LANChat-Setup-x64.exe' })
 Require-File $installer 'Compiled installer'
 Write-Host "Installer: $installer" -ForegroundColor Green
 Write-Host 'Installer behavior: per-user install, Start menu and optional desktop shortcut, Windows uninstall entry, and local host data preserved on uninstall.' -ForegroundColor Green

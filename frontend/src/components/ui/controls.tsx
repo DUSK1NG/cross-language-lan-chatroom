@@ -45,7 +45,7 @@ export function Select({ value, onValueChange, options, label }: { value: string
         <SelectPrimitive.Icon><ChevronDown size={16} className="text-ink-2" aria-hidden="true" /></SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
-        <SelectPrimitive.Content position="popper" sideOffset={4} className="z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md bg-elevated p-1 shadow-dialog">
+        <SelectPrimitive.Content position="popper" sideOffset={4} className="menu-surface surface-glass z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md p-1 shadow-dialog">
           <SelectPrimitive.Viewport>
             {options.map((option) => (
               <SelectPrimitive.Item key={option.value} value={option.value}

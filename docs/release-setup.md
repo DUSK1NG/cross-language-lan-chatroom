@@ -5,9 +5,9 @@
 | 场景 | 文件 | 说明 |
 | --- | --- | --- |
 | 推荐安装 | `LANChat-Setup-x64.exe` | 为当前 Windows 用户安装，提供开始菜单、可选桌面快捷方式和卸载项。 |
-| 便携运行 | `LANChat-Windows-x64.zip` | 完整解压后双击 `LANChat.exe`。不要只复制其中一个 EXE。 |
+| 便携运行 | `LANChat-Desktop-Windows-x64.zip` | 完整解压后双击 `LANChat.exe`。不要只复制其中一个 EXE。 |
 
-两个包都包含同一套 GUI、Go Server 和运行库。它们不包含房主证书、私钥、数据库或聊天记录。
+局域网便携包和安装器都提供 `LANChat.exe` 和 `lan-chat-server.exe`。房主证书、私钥和数据库在首次开房时生成。
 
 ## 房主：创建本地聊天室
 
@@ -21,7 +21,7 @@
 %LocalAppData%\DUSK1NG\LAN Chat\host\chat.db
 ```
 
-房主会成为管理员。首次看到 Windows 防火墙提示时，只允许 `chat-server.exe` 通过“专用网络”；不要关闭整个防火墙，也不要把 TCP `8888` 映射到公网。
+房主会成为管理员。首次看到 Windows 防火墙提示时，只允许 `lan-chat-server.exe` 通过“专用网络”。TCP `8888` 用于局域网成员连接。
 
 ## 成员：加入局域网聊天室
 

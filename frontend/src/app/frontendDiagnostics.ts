@@ -1,6 +1,6 @@
 // 前端异常上报（规格 01 D5 / R5.1 R5.2）。
 // 仅上报错误名与堆栈/组件栈，各截断到 2048 字节，不含消息正文。
-// C++ 侧（bridge_protocol.cpp 白名单）仅在连接日志开启时写日志。
+// 桌面端仅在连接日志开启时写入前端错误。
 import { createCommand } from '../bridge/chatBridge';
 import type { ChatBridgeClient } from '../bridge/types';
 

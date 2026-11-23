@@ -1,8 +1,16 @@
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import readline from 'node:readline';
 import tls from 'node:tls';
 
-const CA = 'server-go/certs/server-lan.crt';
-const WRONG_CA = 'server-go/certs/server.crt';
+const server = path.resolve(process.argv[2] ?? 'out/desktop/lan-chat-server.exe');
+const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'lan-chat-tls-'));
+const CA = path.join(fixture, 'server-lan.crt');
+const WRONG_CA = path.join(fixture, 'wrong.crt');
+let port;
 const checks = [];
 
 class Client {
@@ -19,8 +27,9 @@ class Client {
     return new Promise((resolve, reject) => {
       const socket = tls.connect({
         host: '127.0.0.1',
-        port: 8888,
+        port,
         ca: fs.readFileSync(caFile),
+        minVersion: 'TLSv1.2',
         rejectUnauthorized: true,
       }, () => {
         this.socket = socket;
@@ -104,8 +113,13 @@ class Client {
   }
 }
 
-async function login(client) {
+async function login(client, owner) {
   client.send({ type: 'login', username: client.name, user_code: client.code });
+  if (owner) {
+    const pending = await client.waitFor((message) => message.type === 'login_pending');
+    await owner.waitFor((message) => message.type === 'connection_approval_request' && message.message_id === pending.message_id);
+    owner.send({ type: 'admin_action', content: 'approve_connection', message_id: pending.message_id });
+  }
   const response = await client.waitFor((message) => message.type === 'login_ok');
   if (response.user_code !== client.code) throw new Error('identity mismatch');
   return response;
@@ -123,7 +137,7 @@ async function run() {
   const charlie = new Client('P10Charlie', 'P10C001');
   try {
     await alice.connect(); await bob.connect(); await charlie.connect();
-    const aliceLogin = await login(alice); await login(bob); await login(charlie);
+    const aliceLogin = await login(alice); await login(bob, alice); await login(charlie, alice);
     if (aliceLogin.is_admin !== true) throw new Error('Alice is not administrator');
     checks.push('TLS login: Alice/Bob/Charlie passed; Alice administrator');
     await alice.drain(); await bob.drain(); await charlie.drain();
@@ -143,7 +157,7 @@ async function run() {
     bob.close(); await new Promise((resolve) => setTimeout(resolve, 600));
     alice.send({ type: 'private_chat', target_user_code: 'P10B001', content: 'P10离线私信' });
     await expectContent(alice, 'system', 'offline');
-    bob = new Client('P10Bob', 'P10B001'); await bob.connect(); await login(bob);
+    bob = new Client('P10Bob', 'P10B001'); await bob.connect(); await login(bob, alice);
     await bob.waitFor((message) => message.type === 'offline_message' && message.content === 'P10离线私信');
     checks.push('Offline private delivery + reconnect: passed');
 
@@ -213,7 +227,40 @@ async function run() {
   } finally { alice.close(); bob.close(); charlie.close(); }
 }
 
-run().then((result) => console.log(JSON.stringify(result, null, 2))).catch((error) => {
+async function accept() {
+  const args = (certificate, name) => ['--cert', certificate, '--key', path.join(fixture, name + '.key'),
+    '--db', path.join(fixture, name + '.db')];
+  for (const [certificate, name] of [[CA, 'server'], [WRONG_CA, 'wrong']]) {
+    const initialized = spawnSync(server, [...args(certificate, name), '--initialize-local-host'],
+      { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+    if (initialized.error) throw initialized.error;
+    if (initialized.status !== 0) throw new Error(initialized.stderr);
+  }
+  const child = spawn(server, [...args(CA, 'server'), '--mode', 'lan', '--listen', '127.0.0.1:0',
+    '--admin-code', 'P10A001'], { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+  const finished = once(child, 'close');
+  const lines = readline.createInterface({ input: child.stderr });
+  try {
+    port = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Rust server startup timed out')), 10000);
+      lines.on('line', (line) => {
+        const match = /^listening on 127\.0\.0\.1:(\d+)$/.exec(line);
+        if (match) { clearTimeout(timer); resolve(Number(match[1])); }
+      });
+      void finished.then(([code]) => {
+        clearTimeout(timer);
+        reject(new Error(`Rust server exited with code ${code}`));
+      }, reject);
+    });
+    return await run();
+  } finally {
+    child.kill();
+    await finished;
+    lines.close();
+  }
+}
+
+accept().then((result) => console.log(JSON.stringify(result, null, 2))).catch((error) => {
   console.error(JSON.stringify({ ok: false, checks, error: error.message }, null, 2));
   process.exitCode = 1;
-});
+}).finally(() => fs.rmSync(fixture, { recursive: true, force: true }));

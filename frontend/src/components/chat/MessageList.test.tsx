@@ -160,10 +160,26 @@ describe('MessageList', () => {
     expect(screen.queryByTestId('message-blank')).toBeNull();
   });
 
-  it('shows the sticky date pill above the history', () => {
-    render(<MessageList bridge={createFakeBridge(baseState)} state={withMessages([message('history-1')])} />);
+  it('marks each local calendar date once, in message order', () => {
+    const state = withMessages([
+      { ...message('history-1'), createdAt: new Date(2026, 10, 16, 23, 56).toISOString() },
+      { ...message('history-2'), createdAt: new Date(2026, 10, 16, 23, 58).toISOString() },
+      { ...message('history-3'), createdAt: new Date(2026, 10, 17, 0, 1).toISOString() }
+    ]);
+    render(<MessageList bridge={createFakeBridge(state)} state={state} />);
 
-    expect(screen.getByTestId('date-separator')).toHaveTextContent('今天');
+    const separators = screen.getAllByTestId('date-separator');
+    expect(separators.map((separator) => separator.textContent)).toEqual(['2026年11月16日', '2026年11月17日']);
+    expect(separators[0].nextElementSibling).toBe(screen.getByTestId('message-history-1'));
+    expect(separators[1].nextElementSibling).toBe(screen.getByTestId('message-history-3'));
+    expect(screen.getByTestId('message-history-3')).toHaveAttribute('data-group', 'single');
+  });
+
+  it('does not invent a date for undated messages', () => {
+    const state = withMessages([message('older-message')]);
+    render(<MessageList bridge={createFakeBridge(state)} state={state} />);
+
+    expect(screen.queryByTestId('date-separator')).not.toBeInTheDocument();
   });
 
   it('shows skeleton rows while connecting and an empty state for a quiet conversation', () => {

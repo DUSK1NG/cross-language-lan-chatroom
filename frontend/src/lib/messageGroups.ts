@@ -3,7 +3,15 @@ import type { MessageItem } from '../bridge/types';
 /** Spec §6: consecutive messages from one sender within 5 minutes form a group. */
 export const groupWindowMinutes = 5;
 
-/** The bridge sends "HH:mm" only (gui_chat_controller.cpp:224) — no date. Returns minutes since midnight, or null. */
+const dateFormat = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+
+export function messageDate(createdAt?: string): string {
+  if (!createdAt) return '';
+  const timestamp = Date.parse(createdAt);
+  return Number.isFinite(timestamp) ? dateFormat.format(timestamp) : '';
+}
+
+/** Returns minutes since midnight for a wall-clock time. */
 export function minutesOf(time: string): number | null {
   const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
   if (!match) return null;
@@ -20,6 +28,9 @@ function sameSender(a: MessageItem, b: MessageItem): boolean {
 /** Whether b continues a's group. Unknown times fall back to same-sender grouping. A backwards clock (past midnight) starts a new group. */
 export function continuesGroup(a: MessageItem | undefined, b: MessageItem): boolean {
   if (!a || !sameSender(a, b)) return false;
+  const firstDate = messageDate(a.createdAt);
+  const nextDate = messageDate(b.createdAt);
+  if (firstDate && nextDate && firstDate !== nextDate) return false;
   const ta = minutesOf(a.time);
   const tb = minutesOf(b.time);
   if (ta === null || tb === null) return true;

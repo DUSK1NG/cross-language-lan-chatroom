@@ -46,7 +46,7 @@ export function UploadCard({ commandId, upload, onRemove, onRetry }: { commandId
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         {failed && <>
-          <span className="truncate text-body font-medium text-ink">附件发送失败</span>
+          <span className="truncate text-body font-medium text-ink">{upload.fileName ? `${upload.fileName} 发送失败` : '附件发送失败'}</span>
           <span className="text-small text-danger-text">{attachmentErrorCopy(upload.error?.code ?? '', upload.error?.message ?? '')}</span>
           <span className="flex gap-2 pt-1">
             <Button size="sm" variant="outline" onClick={onRetry}>重试</Button>
@@ -59,7 +59,7 @@ export function UploadCard({ commandId, upload, onRemove, onRetry }: { commandId
         </>}
         {inFlight && <>
           <span className="flex items-center justify-between gap-3">
-            <span className="truncate text-body font-medium text-ink">{finalizing ? '上传完成，正在校验…' : upload.phase === 'resuming' ? '续传中' : '上传中'}</span>
+            <span className="truncate text-body font-medium text-ink">{upload.fileName ?? (finalizing ? '上传完成，正在校验…' : upload.phase === 'resuming' ? '续传中' : '上传中')}</span>
             <strong className="num shrink-0 text-body font-medium text-accent-text">{percent ?? '准备中'}</strong>
           </span>
           {upload.logicalSize !== undefined && (
@@ -69,7 +69,7 @@ export function UploadCard({ commandId, upload, onRemove, onRetry }: { commandId
             </span>
           )}
           <span className={cn('num text-small', upload.phase === 'resuming' ? 'text-warning' : 'text-ink-2')}>
-            {upload.phase === 'resuming' ? `连接中断，已保存 ${upload.receivedChunks} 块` : `${upload.receivedChunks} 块`}{totalChunks ? ` / ${totalChunks} 块` : ''} · 端到端加密
+            {upload.phase === 'resuming' ? `连接中断，已保存 ${upload.receivedChunks} 块` : `${upload.receivedChunks} 块`}{totalChunks ? ` / ${totalChunks} 块` : ''}{!upload.fileName && ' · 端到端加密'}
           </span>
           <div role="progressbar" aria-label={`附件上传进度 ${commandId}`} aria-valuemin={0} aria-valuemax={totalChunks ?? 0}
             aria-valuenow={upload.receivedChunks} aria-valuetext={percent} className="mt-1 h-1 overflow-hidden rounded-full bg-hover">

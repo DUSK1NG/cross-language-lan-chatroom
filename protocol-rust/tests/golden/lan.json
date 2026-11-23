@@ -1,0 +1,183 @@
+[
+  {
+    "type": "login",
+    "username": "测试",
+    "user_code": "Host",
+    "host_session_token": "fixture-token",
+    "capabilities": [
+      "room-password-v1"
+    ]
+  },
+  {
+    "type": "login_pending",
+    "message_id": "approval-1",
+    "content": "Waiting for the room owner to approve this connection"
+  },
+  {
+    "type": "connection_approval_request",
+    "message_id": "approval-1",
+    "username": "成员",
+    "user_code": "Member",
+    "content": "127.0.0.1:52200"
+  },
+  {
+    "type": "admin_action",
+    "message_id": "approval-1",
+    "command_id": "approval-command",
+    "content": "approve_connection"
+  },
+  {
+    "type": "connection_approval_result",
+    "message_id": "approval-1",
+    "target_user_code": "Member",
+    "action": "approved"
+  },
+  {
+    "type": "login_ok",
+    "username": "测试",
+    "user_code": "Host",
+    "content": "Login successful",
+    "is_admin": true
+  },
+  {
+    "type": "login_error",
+    "content": "The room owner did not approve this connection"
+  },
+  {
+    "type": "users_request"
+  },
+  {
+    "type": "users_response",
+    "users": [
+      "测试#Host"
+    ],
+    "user_details": [
+      {
+        "username": "测试",
+        "user_code": "Host",
+        "room": "lobby",
+        "is_admin": true
+      }
+    ]
+  },
+  {
+    "type": "rooms_request"
+  },
+  {
+    "type": "rooms_response",
+    "rooms": [
+      "lobby",
+      "team"
+    ],
+    "room_details": [
+      {
+        "name": "lobby",
+        "private": false,
+        "can_manage": false
+      },
+      {
+        "name": "team",
+        "owner_code": "Host",
+        "private": true,
+        "can_manage": true,
+        "password_required": true
+      }
+    ]
+  },
+  {
+    "type": "room_create",
+    "command_id": "room-command",
+    "room": "team",
+    "room_password": "fixture-password",
+    "private": true
+  },
+  {
+    "type": "room_action",
+    "target_user_code": "Member",
+    "room": "team",
+    "content": "invite"
+  },
+  {
+    "type": "room_join",
+    "room": "team",
+    "room_password": "fixture-password"
+  },
+  {
+    "type": "room_leave"
+  },
+  {
+    "type": "chat",
+    "message_id": "message-1",
+    "username": "测试",
+    "user_code": "Host",
+    "room": "lobby",
+    "created_at": "2026-11-21T04:10:00Z",
+    "crypto": {
+      "v": 1,
+      "ciphertext": "AAE="
+    }
+  },
+  {
+    "type": "private_chat",
+    "command_id": "dm-command",
+    "target_user_code": "Member",
+    "content": "你好"
+  },
+  {
+    "type": "offline_message",
+    "message_id": "message-2",
+    "username": "测试",
+    "user_code": "Host",
+    "content": "离线消息"
+  },
+  {
+    "type": "delivery_receipt",
+    "message_id": "message-2",
+    "delivery_state": "delivered"
+  },
+  {
+    "type": "history_request",
+    "room": "lobby",
+    "before_message_id": "message-2",
+    "search_query": "测试",
+    "limit": 25
+  },
+  {
+    "type": "history_response",
+    "room": "lobby",
+    "has_more": true,
+    "messages": [
+      {
+        "type": "chat",
+        "message_id": "message-1",
+        "username": "测试",
+        "user_code": "Host",
+        "room": "lobby",
+        "created_at": "2026-11-21T04:10:00Z",
+        "crypto": {
+          "v": 1,
+          "ciphertext": "AAE="
+        }
+      }
+    ]
+  },
+  {
+    "type": "message_recalled",
+    "message_id": "message-1",
+    "content": "消息已撤回",
+    "recalled": true
+  },
+  {
+    "type": "system",
+    "content": "Channel #team created"
+  },
+  {
+    "type": "error",
+    "message_id": "message-1",
+    "command_id": "command-1",
+    "content": "Room not found"
+  },
+  {
+    "type": "quit"
+  }
+]

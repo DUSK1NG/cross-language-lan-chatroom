@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createFakeBridge } from '../bridge/chatBridge';
-import type { BridgeState } from '../bridge/types';
+import type { BridgeState, CommandResult } from '../bridge/types';
 import { WorkspacePage } from './WorkspacePage';
 
 const workspaceState: BridgeState = {
@@ -64,6 +64,27 @@ function matchWidth(maxWidth: number) {
 
 describe('WorkspacePage', () => {
   afterEach(cleanup);
+
+  it('opens online private chats by user code and shows a rejected lookup in the dialog', async () => {
+    const state: BridgeState = { ...workspaceState, edition: 'online', navigation: { page: 'workspace' }, rooms: [], members: [] };
+    const bridge = createFakeBridge(state);
+    let receiveResult: (result: CommandResult) => void;
+    vi.spyOn(bridge, 'subscribeCommandResult').mockImplementation((listener) => {
+      receiveResult = listener;
+      return () => undefined;
+    });
+    render(<WorkspacePage bridge={bridge} state={state} />);
+    expect(screen.getByText('Bob')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '群聊' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '发起私信' }));
+    const dialog = screen.getByRole('dialog', { name: '发起私信' });
+    fireEvent.change(within(dialog).getByLabelText('对方的用户代码'), { target: { value: 'B999' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '打开会话' }));
+    const command = bridge.commands.at(-1)!;
+    expect(command).toMatchObject({ type: 'conversation.openPrivate', payload: { userCode: 'B999' } });
+    act(() => receiveResult({ id: command.id, ok: false, error: { code: 'user_not_found', message: '找不到该用户代码', source: 'controller', retryable: false } }));
+    expect(await within(dialog).findByText('找不到该用户代码')).toBeInTheDocument();
+  });
 
   it('renders the list, chat and identity regions and keeps the identity card outside the message scroller', () => {
     render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={workspaceState} />);
@@ -177,9 +198,9 @@ describe('WorkspacePage', () => {
     expect(within(panel).getByText('Bob')).toBeInTheDocument();
   });
 
-  it('opens a private conversation for another member but not the local member', () => {
+  it('switches to a member’s private chat from the info panel', async () => {
     const bridge = createFakeBridge(workspaceState);
-    render(<WorkspacePage bridge={bridge} state={workspaceState} />);
+    const { rerender } = render(<WorkspacePage bridge={bridge} state={workspaceState} />);
 
     const panel = openInfoPanel();
     expect(within(panel).queryByRole('button', { name: 'direct-Alice' })).not.toBeInTheDocument();
@@ -188,6 +209,13 @@ describe('WorkspacePage', () => {
       type: 'conversation.openPrivate',
       payload: { displayName: 'Bob', userCode: 'B002' }
     }));
+    rerender(<WorkspacePage bridge={bridge} state={{
+      ...workspaceState,
+      navigation: { page: 'workspace', activeConversation: { kind: 'dm', id: 'B002', title: 'Bob', userCode: 'B002' } }
+    }} />);
+    expect(screen.getByRole('tab', { name: '私聊' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: 'direct-bob' })).toHaveAttribute('aria-current', 'page');
+    await waitFor(() => expect(screen.queryByTestId('member-panel')).not.toBeInTheDocument());
   });
 
   it('keeps one read-only quote while leaving the reply editable', () => {
@@ -282,20 +310,42 @@ describe('WorkspacePage', () => {
     await waitFor(() => expect(screen.queryByTestId('member-panel')).not.toBeInTheDocument());
   });
 
-  it('creates a private room then refreshes rooms on success', async () => {
+  it('creates a password-protected private room then refreshes rooms on success', async () => {
     const bridge = createFakeBridge(workspaceState);
     render(<WorkspacePage bridge={bridge} state={workspaceState} />);
     fireEvent.click(screen.getByRole('button', { name: '新建频道' }));
     fireEvent.change(screen.getByLabelText('频道名称'), { target: { value: 'study_group' } });
+    expect(screen.queryByLabelText('频道密码（可选）')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('switch', { name: '私有频道' }));
+    fireEvent.change(screen.getByLabelText('频道密码（可选）'), { target: { value: '讨论密码' } });
     fireEvent.click(screen.getByRole('button', { name: '确认新建频道' }));
 
     expect(bridge.commands[0]).toMatchObject({
       type: 'room.create',
-      payload: { room: 'study_group', isPrivate: true }
+      payload: { room: 'study_group', isPrivate: true, roomPassword: '讨论密码' }
     });
     await waitFor(() => expect(bridge.commands[1]).toMatchObject({ type: 'directory.refreshRooms', payload: {} }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '新建频道' })).not.toBeInTheDocument());
+  });
+
+  it('asks for a password before sending a protected room join', async () => {
+    const protectedState: BridgeState = {
+      ...workspaceState,
+      rooms: [...workspaceState.rooms, { roomName: 'protected', memberCount: 1, unreadCount: 0, private: true, passwordRequired: true }]
+    };
+    const bridge = createFakeBridge(protectedState);
+    render(<WorkspacePage bridge={bridge} state={protectedState} />);
+    fireEvent.click(screen.getByRole('button', { name: 'room-protected' }));
+    expect(bridge.commands).toHaveLength(0);
+
+    const dialog = screen.getByRole('dialog', { name: '加入 #protected' });
+    expect(within(dialog).getByRole('button', { name: '加入' })).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText('频道密码'), { target: { value: '讨论密码' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '加入' }));
+    expect(bridge.commands[0]).toMatchObject({
+      type: 'conversation.selectRoom', payload: { room: 'protected', roomPassword: '讨论密码' }
+    });
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
   });
 
   it('keeps room details and prevents duplicate submissions until the command resolves', async () => {

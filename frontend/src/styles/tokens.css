@@ -1,5 +1,5 @@
 /* LAN Chat 设计令牌 — 唯一颜色/尺寸来源。组件只引用这些变量（通过 Tailwind 主题或 var()），禁止硬编码颜色。
-   默认深色（Telegram Desktop 气质）；html[data-theme='light'] 覆盖浅色。
+   默认深色；html[data-theme='light'] 覆盖浅色。
    对比度（WCAG AA，正文 ≥ 4.5:1）已按规范调整四处，见 docs/ui-design-spec.md §1.3。 */
 :root {
   color-scheme: dark;
@@ -13,6 +13,9 @@
   --bg-elevated: #17212B;         /* 弹窗、菜单 */
   --bg-input: #242F3D;
   --bg-code: rgba(255, 255, 255, 0.08);
+  --surface-chrome: color-mix(in srgb, var(--bg-sidebar) 78%, transparent);
+  --surface-glass: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  --surface-edge: color-mix(in srgb, var(--text) 13%, transparent);
 
   /* 气泡 */
   --bubble-out: #2B5278;
@@ -83,8 +86,8 @@
   --space-8: 32px;
 
   /* 字体 */
-  --font: system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-mono: "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
+  --font: "Cascadia Code", "Cascadia Next SC", "Microsoft YaHei UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Next SC", Consolas, "Microsoft YaHei UI", "PingFang SC", "Microsoft YaHei", monospace;
   --text-body: 14px;
   --text-small: 12px;
   --text-title: 16px;
@@ -95,9 +98,18 @@
   /* 动效 */
   --motion-scale: 1;
   --dur-hover: calc(150ms * var(--motion-scale));
+  --dur-exit: calc(130ms * var(--motion-scale));
   --dur-enter: calc(200ms * var(--motion-scale));
   --dur-panel: calc(300ms * var(--motion-scale));
-  --ease: cubic-bezier(.2, .8, .2, 1);
+  --dur-press: calc(65ms * var(--motion-scale));
+  --dur-press-release: calc(280ms * var(--motion-scale));
+  --dur-send: calc(420ms * var(--motion-scale));
+  --press-scale: .95;
+  --press-icon-scale: .91;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  --ease-exit: cubic-bezier(.45, 0, .8, .55);
+  --ease-move: cubic-bezier(.4, 0, .2, 1);
+  --ease-spring: var(--ease);
 
   /* 头像渐变（白色首字在两端均 ≥ 4.6:1）与发送者名称色（在对方气泡上均 ≥ 6.9:1），按名称哈希取 0–7 */
   --avatar-0-from: #B0585C; --avatar-0-to: #91484C;
@@ -121,6 +133,12 @@
   --info-width: 340px;
   --header-height: 56px;
   --row-height: 64px;
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: linear(0, .229 8%, .618 16%, .913 24%, 1.058 32%, 1.089 40%, 1.061 49%, 1.024 58%, .996 70%, .993 83%, 1);
+  }
 }
 
 /* 主题色预设（外观设置，5 种）。每种的白字/主色、正文/气泡、时间/气泡、双勾/气泡均已计算 ≥ 4.5:1 */

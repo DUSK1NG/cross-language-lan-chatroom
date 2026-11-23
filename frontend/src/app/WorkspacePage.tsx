@@ -14,7 +14,7 @@ import { Composer, type QuoteDraft } from '../components/composer/Composer';
 import { InfoPanel } from '../components/shell/InfoPanel';
 import { ResizeHandle, useSidebarWidth } from '../components/shell/ResizeHandle';
 import { ApprovalDialog } from '../components/dialogs/ApprovalDialog';
-import { AdminConfirmDialog, CreateRoomDialog, MemberDialog, RoomManageDialog, type AdminAction } from '../components/dialogs/RoomDialogs';
+import { AdminConfirmDialog, CreateRoomDialog, JoinRoomDialog, MemberDialog, RoomManageDialog, StartPrivateDialog, type AdminAction } from '../components/dialogs/RoomDialogs';
 import { Avatar } from '../components/ui/avatar';
 import { IconButton } from '../components/ui/icon-button';
 import type { CommandFeedbackProps } from '../components/CommandFeedback';
@@ -46,7 +46,8 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   const compact = useMediaQuery(compactQuery);
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
   const [phoneView, setPhoneView] = useState<'list' | 'chat'>('list');
-  const [filter, setFilter] = useState<ConversationFilter>('rooms');
+  const online = state.edition === 'online';
+  const [filter, setFilter] = useState<ConversationFilter>(online ? 'direct' : 'rooms');
   const [infoOpen, setInfoOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
@@ -55,10 +56,16 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   const [focusToken, setFocusToken] = useState(0);
   const [uploadToken, setUploadToken] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const sendAnchor = useRef<HTMLFormElement>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createPending, setCreatePending] = useState(false);
   const [createFeedback, setCreateFeedback] = useState(idle);
+  const [privateOpen, setPrivateOpen] = useState(false);
+  const [privateFeedback, setPrivateFeedback] = useState(idle);
+  const [joinRoom, setJoinRoom] = useState<string | null>(null);
+  const [joinPending, setJoinPending] = useState(false);
+  const [joinFeedback, setJoinFeedback] = useState(idle);
   const [manageOpen, setManageOpen] = useState(false);
   const [managePending, setManagePending] = useState(false);
   const [manageFeedback, setManageFeedback] = useState(idle);
@@ -111,23 +118,25 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
 
   const startDirect = (member: MemberSummary) => {
     bridge.dispatch(createCommand('conversation.openPrivate', { displayName: member.displayName, userCode: member.userCode }));
+    setFilter('direct');
+    setInfoOpen(false);
     setProfile(null);
-    if (narrow) setPhoneView('chat');
+    selectFromList();
   };
 
   const quoteMessage = useCallback((message: MessageItem) => {
     setQuote({ displayName: message.displayName, content: parseQuote(message.content).body });
     setFocusToken((token) => token + 1);
   }, []);
-  const canRecall = useCallback((message: MessageItem) => state.identity.admin || message.userCode === state.identity.userCode, [state.identity.admin, state.identity.userCode]);
+  const canRecall = useCallback((message: MessageItem) => !online && (state.identity.admin || message.userCode === state.identity.userCode), [online, state.identity.admin, state.identity.userCode]);
 
   const updateHistoryQuery = (query: string) => {
     setHistoryQuery(query);
     bridge.dispatch(createCommand('history.search', { query }));
   };
 
-  const submitCreate = (room: string, isPrivate: boolean, reset: () => void) => {
-    const command = createCommand('room.create', { room, isPrivate });
+  const submitCreate = (room: string, isPrivate: boolean, roomPassword: string, reset: () => void) => {
+    const command = createCommand('room.create', { room, isPrivate, ...(roomPassword ? { roomPassword } : {}) });
     setCreatePending(true);
     setCreateFeedback({ status: 'pending', message: '正在创建频道…' });
     const stop = track(onResult(bridge, command.id, (ok, message) => {
@@ -135,10 +144,32 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
       setCreatePending(false);
       if (!ok) { setCreateFeedback({ status: 'error', message: message ?? '创建频道失败。' }); return; }
       bridge.dispatch(createCommand('directory.refreshRooms', {}));
-      bridge.dispatch(createCommand('conversation.selectRoom', { room }));
       reset();
       setCreateFeedback(idle);
       setCreateOpen(false);
+      selectFromList();
+    }));
+    bridge.dispatch(command);
+  };
+
+  const openJoin = (room: string) => {
+    setJoinFeedback(idle);
+    setJoinRoom(room);
+  };
+
+  const submitJoin = (room: string, roomPassword: string) => {
+    const command = createCommand('conversation.selectRoom', { room, roomPassword });
+    setJoinPending(true);
+    setJoinFeedback({ status: 'pending', message: '正在验证频道密码…' });
+    const stop = track(onResult(bridge, command.id, (ok, message) => {
+      stop();
+      setJoinPending(false);
+      if (!ok) {
+        setJoinFeedback({ status: 'error', message: message ?? '无法加入频道。' });
+        return;
+      }
+      setJoinRoom(null);
+      selectFromList();
     }));
     bridge.dispatch(command);
   };
@@ -182,19 +213,38 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
 
   const openManage = () => { setManageFeedback(idle); setManageOpen(true); };
   const openCreate = () => { setCreateFeedback(idle); setCreateOpen(true); };
-  const refresh = () => { bridge.dispatch(createCommand('directory.refreshRooms', {})); bridge.dispatch(createCommand('directory.refreshUsers', {})); };
+  const openPrivate = () => { setPrivateFeedback(idle); setPrivateOpen(true); };
+  const submitPrivate = (userCode: string) => {
+    const command = createCommand('conversation.openPrivate', { userCode });
+    setPrivateFeedback({ status: 'pending', message: '正在查找用户…' });
+    const stop = track(onResult(bridge, command.id, (ok, message) => {
+      stop();
+      if (!ok) { setPrivateFeedback({ status: 'error', message: message ?? '无法打开私信。' }); return; }
+      setPrivateOpen(false);
+      selectFromList();
+    }));
+    bridge.dispatch(command);
+  };
+  const refresh = () => {
+    if (!online) bridge.dispatch(createCommand('directory.refreshRooms', {}));
+    bridge.dispatch(createCommand('directory.refreshUsers', {}));
+  };
 
   const order = useMemo(() => buildEntries(state, filter, ''), [state, filter]);
   const stepConversation = (delta: number) => {
-    if (order.length === 0) return;
+    if (joinRoom !== null || order.length === 0) return;
     const current = order.findIndex((entry) => isActive(entry, active));
     const next = order[(current + delta + order.length) % order.length];
+    if (next.kind === 'room' && next.room.passwordRequired && !isActive(next, active)) {
+      openJoin(next.room.roomName);
+      return;
+    }
     bridge.dispatch(next.kind === 'room'
       ? createCommand('conversation.selectRoom', { room: next.room.roomName })
       : createCommand('conversation.selectDirect', { userCode: next.direct.userCode }));
   };
 
-  const anyDialog = createOpen || manageOpen || approvalsOpen || profile !== null || pendingAdmin !== null;
+  const anyDialog = createOpen || privateOpen || joinRoom !== null || manageOpen || approvalsOpen || profile !== null || pendingAdmin !== null;
   useHotkeys({
     focusSearch: (event) => {
       const search = document.querySelector<HTMLInputElement>('[data-hotkey="search"]');
@@ -213,15 +263,16 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
     }
   });
 
+  const canDropOnline = state.onlineFiles && active?.kind === 'dm';
   const onDragOver = (event: DragEvent) => {
-    if (active?.kind !== 'room' || !event.dataTransfer.types.includes('Files')) return;
+    if ((!canDropOnline && active?.kind !== 'room') || !event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
     setDragging(true);
   };
   const onDrop = (event: DragEvent) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
     setDragging(false);
-    // The page may not read local files (attachment contract), so a drop opens the native picker.
     if (active?.kind === 'room') setUploadToken((token) => token + 1);
   };
 
@@ -229,34 +280,43 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   const showChat = !narrow || phoneView === 'chat';
 
   return (
-    <main className="flex h-full w-full overflow-hidden bg-bg text-ink">
+    <main className="flex h-full w-full overflow-hidden text-ink">
       {showList && (
-        <div className="relative flex h-full shrink-0 flex-col border-r border-divider bg-sidebar" style={{ width: narrow ? '100%' : sidebarWidth }}>
-          <ConversationSidebar state={state} bridge={bridge} filter={filter} onFilterChange={setFilter} onCreateRoom={openCreate}
+        <div className={cn('surface-chrome relative flex h-full shrink-0 flex-col border-r border-divider', narrow && 'view-enter')} style={{ width: narrow ? '100%' : sidebarWidth }}>
+          <ConversationSidebar state={state} bridge={bridge} filter={filter} onFilterChange={setFilter} onCreateRoom={openCreate} onStartPrivate={online ? openPrivate : undefined} onJoinProtectedRoom={openJoin}
             onSettings={onSettings} onConnectionApprovals={() => setApprovalsOpen(true)} onManageRoom={openManage}
             canManageRoom={canManageRoom && Boolean(activeRoom)} onSelected={selectFromList}
             footer={<IdentityCard state={state} onSettings={onSettings} />} />
           {!narrow && <ResizeHandle width={sidebarWidth} onWidthChange={setSidebarWidth} />}
         </div>
       )}
-      {showChat && (
-        <section className="relative flex h-full min-w-0 flex-1" aria-label="聊天">
-          <div className="relative flex min-w-0 flex-1 flex-col" onDragOver={onDragOver} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
+      {showChat && online && !active && (
+        <section aria-label="聊天" className="relative flex min-w-0 flex-1 flex-col">
+          <ConnectionBanner connection={state.connection} onReconnect={onReconnect} />
+          <p className="grid flex-1 place-items-center text-body text-ink-2">选择一个会话或发起私信</p>
+        </section>
+      )}
+      {showChat && (!online || active) && (
+        <section className={cn('relative flex h-full min-w-0 flex-1', narrow && 'view-enter')} aria-label="聊天">
+          <div className="relative flex min-w-0 flex-1 flex-col" data-file-drop={canDropOnline || undefined}
+            onDragOver={onDragOver} onDragLeave={(event) => {
+              if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragging(false);
+            }} onDrop={onDrop}>
             <ChatHeader state={state} infoOpen={infoOpen} onToggleInfo={() => setInfoOpen((open) => !open)} canManage={canManageRoom}
               onManageRoom={openManage} onConnectionApprovals={() => setApprovalsOpen(true)} onRefresh={refresh}
               historyQuery={historyQuery} onHistoryQueryChange={updateHistoryQuery} searchOpen={searchOpen} onSearchOpenChange={setSearchOpen}
               onBack={narrow ? () => setPhoneView('list') : undefined} />
             <ConnectionBanner connection={state.connection} onReconnect={onReconnect} />
-            <MessageList state={state} bridge={bridge} onQuote={quoteMessage} canRecall={canRecall} entryUnread={entryUnread.current} />
+            <MessageList state={state} bridge={bridge} onQuote={quoteMessage} canRecall={canRecall} entryUnread={entryUnread.current} sendAnchor={sendAnchor} />
             <Composer state={state} bridge={bridge} quote={quote} onClearQuote={() => setQuote(null)} draft={draft} onDraftChange={setDraft}
-              onCommandResult={() => undefined} focusAtEndToken={focusToken} uploadRequestToken={uploadToken} theme={theme} />
+              onCommandResult={() => undefined} focusAtEndToken={focusToken} uploadRequestToken={uploadToken} theme={theme} sendAnchor={sendAnchor} />
             <AnimatePresence>
               {dragging && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease }}
                   className="pointer-events-none absolute inset-4 z-40 flex flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-accent bg-bg/90 text-accent-text">
                   <Upload size={32} aria-hidden="true" />
                   <p className="text-title font-semibold">松开以发送附件</p>
-                  <p className="text-small text-ink-2">将打开文件选择窗口确认要加密发送的文件</p>
+                  {!canDropOnline && <p className="text-small text-ink-2">将打开文件选择窗口确认要加密发送的文件</p>}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -268,6 +328,9 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
       )}
 
       <CreateRoomDialog open={createOpen} onOpenChange={setCreateOpen} pending={createPending} feedback={createFeedback} onSubmit={submitCreate} />
+      {privateOpen && <StartPrivateDialog pending={privateFeedback.status === 'pending'} feedback={privateFeedback} onClose={() => setPrivateOpen(false)} onSubmit={submitPrivate} />}
+      {joinRoom && <JoinRoomDialog room={joinRoom} pending={joinPending} feedback={joinFeedback}
+        onClose={() => setJoinRoom(null)} onSubmit={(password) => submitJoin(joinRoom, password)} />}
       <RoomManageDialog open={manageOpen} onOpenChange={setManageOpen} room={activeRoom} pending={managePending} feedback={manageFeedback} onAction={roomAction} />
       <ApprovalDialog open={approvalsOpen} onOpenChange={setApprovalsOpen} requests={approvals} onResolve={resolveApproval} />
       <MemberDialog member={profile} localUserCode={state.identity.userCode} canManage={canManageRoom} feedback={adminFeedback} pending={adminPending}

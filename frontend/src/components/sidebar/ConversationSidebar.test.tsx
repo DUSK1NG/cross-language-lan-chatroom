@@ -28,7 +28,7 @@ function renderSidebar(state = sidebarState, props: Partial<Parameters<typeof Co
   const bridge = createFakeBridge(state);
   const onFilterChange = props.onFilterChange ?? vi.fn();
   const onCreateRoom = props.onCreateRoom ?? vi.fn();
-  render(<TooltipProvider><ConversationSidebar state={state} bridge={bridge} filter={props.filter ?? 'rooms'} {...props} onFilterChange={onFilterChange} onCreateRoom={onCreateRoom} /></TooltipProvider>);
+  render(<TooltipProvider><ConversationSidebar state={state} bridge={bridge} filter={props.filter ?? 'rooms'} onJoinProtectedRoom={vi.fn()} {...props} onFilterChange={onFilterChange} onCreateRoom={onCreateRoom} /></TooltipProvider>);
   return { bridge, onFilterChange, onCreateRoom };
 }
 

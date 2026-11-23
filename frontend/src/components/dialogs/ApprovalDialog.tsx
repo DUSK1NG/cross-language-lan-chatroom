@@ -10,7 +10,7 @@ import { Button } from '../ui/button';
 import { Dialog } from '../ui/dialog';
 import { EmptyState } from '../ui/states';
 
-/** Matches the Go server's connectionApprovalTimeout (server-go/client.go:12). */
+/** Matches the server's connection approval timeout. */
 export const approvalTimeoutMs = 60_000;
 const fadeAfterExpiryMs = 1500;
 

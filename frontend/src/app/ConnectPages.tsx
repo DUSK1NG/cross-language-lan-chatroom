@@ -1,5 +1,4 @@
-import { useEffect, useState, type InputHTMLAttributes, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Cable, House, KeyRound, Loader2, Lock, RefreshCw, Server, ShieldCheck, Users, Wifi } from 'lucide-react';
 
 import { createCommand } from '../bridge/chatBridge';
@@ -8,8 +7,6 @@ import catBrandMark from '../assets/lan-chat-cat.png';
 import { Button } from '../components/ui/button';
 import { IconButton } from '../components/ui/icon-button';
 import { cn } from '../lib/cn';
-import { ease } from '../lib/motion';
-import { inferPrivateKeyPath } from './hostPaths';
 
 export type ConnectionMode = 'remote' | 'guest' | 'tunnel';
 const discoveryRefreshIntervalMs = 3000;
@@ -19,11 +16,10 @@ const inputClass = 'h-10 w-full min-w-0 rounded-md border border-transparent bg-
 /** Centred page used by every pre-workspace screen. */
 function PageFrame({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
-    <main className="scroll-thin flex h-full w-full justify-center overflow-y-auto bg-bg px-4 py-8 text-ink">
-      <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease }}
-        className={cn('my-auto flex w-full flex-col gap-4 rounded-card bg-sidebar p-6 shadow-float', wide ? 'max-w-[760px]' : 'max-w-[520px]')}>
+    <main className="scroll-thin flex h-full w-full justify-center overflow-y-auto px-4 py-8 text-ink">
+      <section className={cn('surface-glass my-auto flex w-full flex-col gap-4 rounded-[24px] p-6 shadow-dialog', wide ? 'max-w-[760px]' : 'max-w-[520px]')}>
         {children}
-      </motion.section>
+      </section>
     </main>
   );
 }
@@ -52,28 +48,28 @@ function ConnectionStatus({ state }: { state: BridgeState }) {
   return <p role="alert" className="rounded-md bg-hover px-3 py-2 text-small text-danger-text">{message}</p>;
 }
 
-export function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvailable, hostUnavailableReason }: {
+export function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, hostAvailable, hostUnavailableReason, lanOnly }: {
   onRemote: () => void;
   onGuest: () => void;
   onTunnel: () => void;
   onLocalHost: () => void;
   hostAvailable: boolean;
   hostUnavailableReason: string;
+  lanOnly?: boolean;
 }) {
   const cards: { label: string; icon: ReactNode; title: string; copy: string; onClick: () => void; disabled?: boolean }[] = [
-    { label: 'local-host-mode', icon: <House size={20} />, title: '创建本地聊天室', copy: hostAvailable ? '当前电脑启动 Go Server，作为 Host' : hostUnavailableReason, onClick: onLocalHost, disabled: !hostAvailable },
+    { label: 'local-host-mode', icon: <House size={20} />, title: '创建本地聊天室', copy: hostAvailable ? '在当前电脑启动房主服务' : hostUnavailableReason, onClick: onLocalHost, disabled: !hostAvailable },
     { label: 'guest-mode', icon: <Wifi size={20} />, title: '加入局域网聊天室', copy: '作为 Guest 连接另一台电脑上的 Host', onClick: onGuest },
-    { label: 'remote-mode', icon: <Server size={20} />, title: '远程服务器', copy: '连接已经部署好的 Go Server', onClick: onRemote },
+    { label: 'remote-mode', icon: <Server size={20} />, title: '远程服务器', copy: '连接已部署的服务器', onClick: onRemote },
     { label: 'tunnel-mode', icon: <Cable size={20} />, title: '通过 TCP 隧道加入', copy: '使用外部隧道提供的地址、端口和公开证书', onClick: onTunnel }
   ];
   return (
     <PageFrame wide>
       <div className="grid gap-6 min-[760px]:grid-cols-[1fr_1.2fr]">
-        <section aria-label="LAN Chat 简介" className="flex flex-col gap-4 rounded-md bg-bg p-6">
-          <img src={catBrandMark} alt="" className="size-16 rounded-full" />
+        <section aria-label="LAN Chat 简介" className="flex flex-col justify-center gap-5 rounded-card bg-bg/70 p-6">
+          <img src={catBrandMark} alt="" className="size-16 rounded-[20px] shadow-float" />
           <div className="flex flex-col gap-1">
-            <p className="text-title font-semibold">LAN Chat</p>
-            <p className="text-body text-ink-2">只在你信任的网络里，安静地聊天。</p>
+            <p className="text-[25px] font-semibold tracking-tight">LAN Chat</p>
           </div>
           <ul className="flex flex-col gap-3 text-small text-ink-2">
             <li className="flex items-center gap-2"><ShieldCheck size={16} aria-hidden="true" className="text-accent-text" />TLS 传输 · 证书指纹校验</li>
@@ -84,24 +80,84 @@ export function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, ho
         <section className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <h1 className="text-title font-semibold">选择聊天方式</h1>
-            <p className="text-small text-ink-2">安全、稳定的 Go + Qt 局域网聊天</p>
           </div>
           <div className="flex flex-col gap-2">
-            {cards.map((card, index) => (
-              <motion.button key={card.label} type="button" aria-label={card.label} onClick={card.onClick} disabled={card.disabled}
-                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, ease, delay: 0.04 * index }}
-                className="press group flex min-h-16 cursor-pointer items-center gap-3 rounded-md bg-bg px-4 py-3 text-left hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50">
+            {(lanOnly ? cards.slice(0, 2) : cards).map((card) => (
+              <button key={card.label} type="button" aria-label={card.label} onClick={card.onClick} disabled={card.disabled}
+                className="press group flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-divider bg-bg/70 px-4 py-3 text-left hover:border-control hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50">
                 <span aria-hidden="true" className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-text">{card.icon}</span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <strong className="text-body font-medium text-ink">{card.title}</strong>
                   <span className="text-small text-ink-2">{card.copy}</span>
                 </span>
                 <ArrowRight size={16} aria-hidden="true" className="shrink-0 text-ink-3 transition-transform transition-ui group-hover:translate-x-1" />
-              </motion.button>
+              </button>
             ))}
           </div>
         </section>
       </div>
+    </PageFrame>
+  );
+}
+
+export function OnlineAccountPage({ bridge, state }: { bridge: ChatBridgeClient; state: BridgeState }) {
+  const [register, setRegister] = useState(false);
+  const [serverIp, setServerIp] = useState(state.savedConnection.serverIp);
+  const [serverPort, setServerPort] = useState(String(state.savedConnection.serverPort));
+  const [username, setUsername] = useState(state.savedConnection.username);
+  const [userCode, setUserCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const request = useRef('');
+  const busy = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
+  const validPort = /^\d+$/.test(serverPort) && Number(serverPort) >= 1 && Number(serverPort) <= 65535;
+  const passwordLength = new TextEncoder().encode(password).length;
+  const valid = Boolean(serverIp.trim() && username.trim() && password.trim()) && validPort &&
+    passwordLength >= 8 && passwordLength <= 72 && (!register || /^[A-Za-z0-9]{3,16}$/.test(userCode));
+  useEffect(() => bridge.subscribeCommandResult((result) => {
+    if (result.id !== request.current) return;
+    request.current = '';
+    if (!result.ok) setError(result.error?.message ?? '无法连接在线服务器。');
+  }), [bridge]);
+
+  return (
+    <PageFrame>
+      <header className="flex items-center gap-3">
+        <img src={catBrandMark} alt="" className="size-10 rounded-md" />
+        <h1 className="text-title font-semibold">{register ? '注册在线账号' : '登录 LAN Chat 在线版'}</h1>
+      </header>
+      <form className="flex flex-col gap-4" onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid || busy || request.current) return;
+        const command = createCommand('session.connectOnline', {
+          serverIp: serverIp.trim(), serverPort: Number(serverPort), username: username.trim(),
+          password, register, ...(register ? { userCode } : {})
+        });
+        setError('');
+        request.current = command.id;
+        bridge.dispatch(command);
+      }}>
+        <div className="grid grid-cols-[1fr_100px] gap-3">
+          <Field id="online-server" label="服务器地址" value={serverIp} autoComplete="off" required disabled={busy}
+            placeholder="chat.example.com" onChange={(event) => setServerIp(event.target.value)} />
+          <Field id="online-port" label="端口" value={serverPort} inputMode="numeric" autoComplete="off" required disabled={busy}
+            onChange={(event) => setServerPort(event.target.value)} />
+        </div>
+        <Field id="online-username" label="用户名" name="username" autoComplete="username" spellCheck={false}
+          required value={username} disabled={busy} onChange={(event) => setUsername(event.target.value)} />
+        {register && <Field id="online-user-code" label="用户代码" value={userCode} autoComplete="off" required disabled={busy}
+          placeholder="3–16 位字母或数字" onChange={(event) => setUserCode(event.target.value)} />}
+        <Field id="online-password" label="密码" name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'}
+          required value={password} disabled={busy} onChange={(event) => setPassword(event.target.value)} />
+        {register && <p className="text-small text-ink-2">密码为 8–72 个 UTF-8 字节。其他人可通过用户代码发起私信。</p>}
+        {error ? <p role="alert" className="text-small text-danger-text">{error}</p> : state.connection.phase !== 'idle' && <ConnectionStatus state={state} />}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" disabled={busy} onClick={() => {
+            setError(''); setPassword(''); setRegister(!register);
+          }}>{register ? '返回登录' : '注册账号'}</Button>
+          <Button variant="primary" type="submit" disabled={!valid || busy}>{register ? '注册并登录' : '登录'}</Button>
+        </div>
+      </form>
     </PageFrame>
   );
 }
@@ -119,6 +175,9 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   const [username, setUsername] = useState(() => guest || tunnel ? 'Bob' : (state.savedConnection.username || 'Alice'));
   const [userCode, setUserCode] = useState(() => guest || tunnel ? 'B001' : (state.savedConnection.userCode || 'A001'));
   const [caFile, setCaFile] = useState(state.savedConnection.caFile);
+  const [certificateError, setCertificateError] = useState('');
+  const certificateRequest = useRef('');
+  const certificateName = caFile.split(/[\\/]/).at(-1);
   const [selectedHostId, setSelectedHostId] = useState('');
   const [manualEntry, setManualEntry] = useState(!guest);
   const [fingerprintConfirmed, setFingerprintConfirmed] = useState(false);
@@ -128,6 +187,21 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   const selectedHost = discovery.hosts.find((host) => host.id === selectedHostId);
   const showManualFields = !guest || manualEntry || !selectedHost;
   const joiningHost = guest && selectedHost && !manualEntry;
+
+  useEffect(() => bridge.subscribeCommandResult((result) => {
+    if (result.id !== certificateRequest.current) return;
+    certificateRequest.current = '';
+    if (!result.ok) setCertificateError(result.error?.message ?? '无法选择公开证书');
+    else if (result.certificateFile) setCaFile(result.certificateFile);
+  }), [bridge]);
+
+  function chooseCertificate() {
+    if (certificateRequest.current) return;
+    setCertificateError('');
+    const command = createCommand('session.chooseCertificate', {});
+    certificateRequest.current = command.id;
+    bridge.dispatch(command);
+  }
 
   useEffect(() => {
     if (!guest) return;
@@ -177,7 +251,7 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
       <PageHeader title={tunnel ? '通过 TCP 隧道加入' : (guest ? '加入局域网聊天室' : '连接远程服务器')} onBack={onBack} busy={busy} />
       <ConnectionStatus state={state} />
       <p className="text-body text-ink-2">
-        {tunnel ? '填写外部隧道提供的主机和端口，并使用房主的公开证书。隧道令牌和私钥只保留在外部隧道工具中。' : (guest ? '自动发现局域网或同一虚拟局域网内的房主；IPv4 变化后会持续重新发现。手动连接仍可作为备用方式。' : '填写已经启动 Go Server 的电脑 IPv4 和端口。')}
+        {tunnel ? '填写外部隧道提供的主机和端口，并使用房主的公开证书。隧道令牌和私钥只保留在外部隧道工具中。' : (guest ? '自动发现局域网或同一虚拟局域网内的房主；IPv4 变化后会持续重新发现。手动连接仍可作为备用方式。' : '填写服务端所在电脑的 IPv4 地址和端口。')}
       </p>
       {tunnel && <section aria-label="tunnel-connection-guide" className="flex flex-col gap-1 rounded-md bg-bg px-4 py-3">
         <strong className="flex items-center gap-2 text-body font-medium"><ShieldCheck size={16} aria-hidden="true" className="text-accent-text" />安全边界</strong>
@@ -219,7 +293,7 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
           )}
           {joiningHost && (
             <div className="flex flex-col gap-2 border-t border-divider pt-3 text-small text-ink-2">
-              <p className="flex gap-2"><KeyRound size={16} aria-hidden="true" className="mt-0.5 shrink-0" />点击“确认并加入”后，将保存并固定校验房主的公开证书。指纹：<span className="num break-all">{selectedHost.fingerprintSha256.slice(0, 16)}…</span></p>
+              <p className="flex items-start gap-2"><KeyRound size={16} aria-hidden="true" className="mt-0.5 shrink-0" /><span>房主证书指纹<span className="num block break-all">{selectedHost.fingerprintSha256}</span></span></p>
               {!selectedHost.known && <label className="flex cursor-pointer items-start gap-2 text-ink">
                 <input type="checkbox" className="mt-0.5 size-4 accent-[var(--accent)]" checked={fingerprintConfirmed}
                   onChange={(event) => setFingerprintConfirmed(event.target.checked)} disabled={busy} />
@@ -240,8 +314,13 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
         </>}
         <Field id="username" label="用户名" value={username} onChange={(event) => setUsername(event.target.value)} />
         <Field id="user-code" label="用户代码" value={userCode} onChange={(event) => setUserCode(event.target.value)} />
-        {showManualFields && <div className="min-[560px]:col-span-2">
-          <Field id="ca-file" label="CA 文件" value={caFile} onChange={(event) => setCaFile(event.target.value)} placeholder="server-lan.crt 的完整路径" />
+        {showManualFields && <div className="flex flex-wrap items-center gap-2 min-[560px]:col-span-2">
+          <Button variant="secondary" onClick={chooseCertificate} disabled={busy}>选择公开证书</Button>
+          {certificateName && <>
+            <span className="min-w-0 max-w-full truncate text-small text-ink-2" title={certificateName}>{certificateName}</span>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setCaFile('')}>移除证书</Button>
+          </>}
+          {certificateError && <p role="alert" className="w-full text-small text-danger-text">{certificateError}</p>}
         </div>}
       </div>
       <div className="flex justify-end gap-2 pt-2">
@@ -260,60 +339,44 @@ export function LocalHostPage({ bridge, state, onBack }: {
   state: BridgeState;
   onBack: () => void;
 }) {
-  const defaults: Partial<NonNullable<BridgeState['hostDefaults']>> = state.hostDefaults ?? {};
   const [username, setUsername] = useState('Alice');
   const [userCode, setUserCode] = useState('A001');
-  const [serverExe, setServerExe] = useState(() => String(defaults.serverExe ?? ''));
-  const [certFile, setCertFile] = useState(() => String(defaults.certFile ?? ''));
-  const [keyFileInput, setKeyFile] = useState(() => String(defaults.keyFile ?? ''));
-  const [dbFile, setDbFile] = useState(() => String(defaults.dbFile ?? ''));
-  const [keyFileManuallyEdited, setKeyFileManuallyEdited] = useState(false);
-  // Until the key path is edited by hand it follows the certificate (same folder, .key).
-  const keyFile = keyFileManuallyEdited ? keyFileInput : (inferPrivateKeyPath(serverExe, certFile) || keyFileInput);
+  const [password, setPassword] = useState('');
+  const [startError, setStartError] = useState('');
+  const pendingRequest = useRef('');
   const busy = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
-  const canStart = !busy && [username, userCode, serverExe, certFile, keyFile, dbFile].every((value) => value.trim().length > 0);
 
-  function autoDetectKeyFile() {
-    setKeyFileManuallyEdited(false);
-    const inferred = inferPrivateKeyPath(serverExe, certFile);
-    if (inferred) setKeyFile(inferred);
-  }
+  useEffect(() => bridge.subscribeCommandResult((result) => {
+    if (result.id !== pendingRequest.current) return;
+    pendingRequest.current = '';
+    if (!result.ok) setStartError(result.error?.message ?? '无法启动本地聊天室');
+  }), [bridge]);
 
   function startHost() {
-    if (!canStart) return;
-    bridge.dispatch(createCommand('session.connectLocalHost', {
-      serverExe: serverExe.trim(), certFile: certFile.trim(), keyFile: keyFile.trim(), dbFile: dbFile.trim(),
-      username: username.trim(), userCode: userCode.trim()
-    }));
+    if (busy || pendingRequest.current) return;
+    setStartError('');
+    const command = createCommand('session.connectLocalHost', { username: username.trim(), userCode: userCode.trim(), password });
+    pendingRequest.current = command.id;
+    bridge.dispatch(command);
   }
 
   return (
     <PageFrame>
       <PageHeader title="创建本地聊天室" onBack={onBack} busy={busy} />
-      <ConnectionStatus state={state} />
-      <p className="text-body text-ink-2">程序会启动本地 Go Server，再自动连接到本机聊天室。其他电脑可通过 Guest 加入。</p>
-      <div className="grid gap-3 min-[560px]:grid-cols-2">
-        <Field id="host-username" label="用户名" value={username} onChange={(event) => setUsername(event.target.value)} />
-        <Field id="host-user-code" label="用户代码" value={userCode} onChange={(event) => setUserCode(event.target.value)} />
-      </div>
-      <Field id="server-executable" label="Go Server" value={serverExe} onChange={(event) => setServerExe(event.target.value)} />
-      <Field id="certificate-file" label="证书文件" value={certFile} onChange={(event) => setCertFile(event.target.value)} />
-      <div className="flex flex-col gap-1">
-        <label htmlFor="key-file" className="text-small font-medium text-ink-2">私钥文件</label>
-        <div className="flex gap-2">
-          <input id="key-file" className={inputClass} value={keyFile} onChange={(event) => { setKeyFile(event.target.value); setKeyFileManuallyEdited(true); }} />
-          <Button variant="secondary" className="h-10" aria-label="auto-detect-private-key" onClick={autoDetectKeyFile}>自动检测</Button>
+      <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); startHost(); }}>
+        <div className="grid gap-3 min-[560px]:grid-cols-2">
+          <Field id="host-username" name="username" label="用户名" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} />
+          <Field id="host-user-code" name="userCode" label="用户代码" required value={userCode} onChange={(event) => setUserCode(event.target.value)} />
         </div>
-        <small className="text-small text-ink-3">{keyFileManuallyEdited ? '已使用手动私钥路径' : '首次启动时会在此路径自动生成私钥'}</small>
-      </div>
-      <Field id="database-file" label="数据库文件" value={dbFile} onChange={(event) => setDbFile(event.target.value)} />
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="ghost" onClick={onBack} disabled={busy}>返回</Button>
-        <Button variant="primary" aria-label="start-local-host" onClick={startHost} disabled={!canStart}>
-          {busy && <Loader2 size={16} aria-hidden="true" className="animate-[spin_0.8s_linear_infinite]" />}
-          {busy ? '启动中…' : '启动并连接'}
-        </Button>
-      </div>
+        <Field id="host-password" name="password" label="密码" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
+        {startError ? <p role="alert" className="text-small text-danger-text">{startError}</p> : (busy || state.connection.lastError) && <ConnectionStatus state={state} />}
+        <div className="flex justify-end pt-2">
+          <Button type="submit" variant="primary" aria-label="start-local-host" disabled={busy}>
+            {busy && <Loader2 size={16} aria-hidden="true" className="animate-[spin_0.8s_linear_infinite]" />}
+            {busy ? '启动中…' : '启动并连接'}
+          </Button>
+        </div>
+      </form>
     </PageFrame>
   );
 }

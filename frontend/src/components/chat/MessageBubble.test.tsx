@@ -76,9 +76,11 @@ describe('MessageBubble', () => {
 
   it('renders a quoted message on its own line above the reply and jumps to the original', () => {
     const onJumpToQuote = vi.fn();
-    render(<MessageBubble message={quotedMessage} bridge={createFakeBridge(state)} onJumpToQuote={onJumpToQuote} />);
+    const createdAt = '2026-11-16T02:01:00Z';
+    render(<MessageBubble message={{ ...quotedMessage, createdAt, deliveryState: 'delivered' }} bridge={createFakeBridge(state)} onJumpToQuote={onJumpToQuote} />);
 
-    const bubble = screen.getByTestId('message-m-3').querySelector('.message-bubble')!;
+    const item = screen.getByTestId('message-m-3');
+    const bubble = item.querySelector('.message-bubble')!;
     const quote = screen.getByTestId('message-quote-m-3');
     const body = screen.getByTestId('message-content-m-3');
 
@@ -86,6 +88,11 @@ describe('MessageBubble', () => {
     expect(body).toHaveTextContent('I am replying here');
     expect(quote.nextElementSibling).toBe(body);
     expect(bubble.firstElementChild).toBe(quote);
+    const metadata = item.querySelector<HTMLElement>('.message-meta')!;
+    expect(bubble.previousElementSibling).toBe(metadata);
+    expect(bubble).not.toContainElement(metadata);
+    expect(within(metadata).getByText('10:01')).toHaveAttribute('datetime', createdAt);
+    expect(within(metadata).getByLabelText('投递状态：delivered')).toBeInTheDocument();
     fireEvent.click(quote);
     expect(onJumpToQuote).toHaveBeenCalledWith('Bob', 'hello');
   });
@@ -227,6 +234,6 @@ describe('MessageBubble', () => {
 
     const article = screen.getByTestId('message-m-2');
     expect(article).not.toHaveAttribute('data-entering');
-    await waitFor(() => expect(article.style.opacity).toBe('1'));
+    expect(article.querySelector('.cirrus-bubble')).toBeVisible();
   });
 });

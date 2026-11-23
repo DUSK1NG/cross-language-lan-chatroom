@@ -1,6 +1,6 @@
 # 发布基线与恢复验收清单
 
-更新：2026-09-09。此清单用于区分“代码回归”和“运行了旧包或过期构建产物”。每次进入新功能阶段前、制作发布包前各执行一次。
+更新：2026-11-22。此清单用于区分“代码回归”和“运行了旧包或过期构建产物”。每次进入新功能阶段前、制作发布包前各执行一次。
 
 ## 0. 工作树与产物身份
 
@@ -9,13 +9,11 @@
 ```powershell
 git status --short
 git rev-parse --short HEAD
-Get-FileHash .\out\modern-msvc-x64\lan-chat-gui.exe -Algorithm SHA256
-Get-FileHash .\release\LANChat-Windows-x64.zip -Algorithm SHA256
-Get-FileHash .\release\LANChat-Setup-x64.exe -Algorithm SHA256
+Get-Item .\out\desktop\LANChat.exe, .\release\LANChat-Desktop-Windows-x64.zip, .\release\LANChat-Setup-x64.exe
 ```
 
 - 先记录输出；未跟踪的个人素材、`tmp\`、构建缓存和发布产物都不得顺手加入提交。
-- 运行包内的 `lan-chat-gui.exe` 必须与 `out\modern-msvc-x64\lan-chat-gui.exe` 为同一次构建。若哈希不同，先重新打包，不能把运行现象归因于源码。
+- 验收前确认所启动的 `LANChat.exe` 来自本次构建目录或解压目录。
 
 ## 1. 自动化回归
 
@@ -25,19 +23,16 @@ Get-FileHash .\release\LANChat-Setup-x64.exe -Algorithm SHA256
 # 前端：以本次运行输出为准
 pnpm.cmd --dir .\frontend exec vitest run
 
-# 工具链预检；若报告缺少 Node、Qt 或 OpenSSL，先从源码包运行 bootstrap，
-# 不要把依赖缺失误判为产品构建失败。
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -CheckOnly
-
-# Go、C++、Qt/WebEngine 集成测试
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
+# Windows 桌面构建与 Rust 测试
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
+cargo test --workspace --locked
 
 # 统一 ZIP 与安装器烟雾测试
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1 -SkipBuild
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version 1.2.0 -SmokeTest
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -SmokeTest
 ```
 
-通过标准：前端测试和 CTest 全部通过；统一包、安装器烟雾检查通过；允许出现 `WrapVulkanHeaders` 缺失提示，但不得出现测试失败或运行时 DLL 缺失。
+前端和 Rust 测试、运行包启动检查及安装器编译均应通过。
 
 若预检提示缺少构建依赖，在源代码工作目录执行一次：
 
@@ -45,26 +40,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap-github.ps1
 ```
 
-然后重新打开 PowerShell，并从本节第一条命令开始执行。当前机器本次验证使用的 OpenSSL 前缀是临时 vcpkg 目录；它只用于本机构建，不属于发布包。
+按 README 补齐缺失的构建工具，再执行本节命令。
 
 ## 2. 发布包安全检查
 
 ```powershell
-$zip = Join-Path $PWD 'release\LANChat-Windows-x64.zip'
+$zip = Join-Path $PWD 'release\LANChat-Desktop-Windows-x64.zip'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
 $forbidden = $archive.Entries | Where-Object {
   $path = $_.FullName.Replace('\', '/')
-  $path -match '\.(key|pem|crt|db)$' -or
-  $path -match '(^|/)(frontend|client-cpp)/' -or
-  $path -match '(^|/)(node_modules|\.tools)/' -or
-  ($path -match '(^|/)server-go/' -and $path -notin @('server-go/', 'server-go/chat-server.exe'))
+  $path -notin @('LANChat.exe', 'LANChat.ico', 'README.md', 'lan-chat-server.exe')
 }
 $archive.Dispose()
 if ($forbidden) { $forbidden.FullName; throw '发布 ZIP 含不应交付的文件。' }
 ```
 
-统一包必须包含 `LANChat.exe`、`lan-chat-gui.exe`、运行时 DLL、`server-go\chat-server.exe` 和应用图标；不得包含私钥、证书、数据库、聊天记录、源码或工具链。
+局域网包包含 `LANChat.exe`、`lan-chat-server.exe`、图标和说明。在线包提供桌面客户端、图标和说明。
 
 ## 3. 人工双机验收
 
@@ -74,7 +66,7 @@ if ($forbidden) { $forbidden.FullName; throw '发布 ZIP 含不应交付的文�
 4. 连续发送多条消息：发送方应跟随最新消息；正在查看历史的接收方应获得新消息计数而不被强制拉到底部。
 5. 关闭成员进程并重新打开，确认可以再次加入；停止再启动房主服务端时，记录 GUI 的实际状态和是否需要手动重连。
 
-当前基线说明：CLI 已有退避重连；WebEngine GUI 仅在本机服务端启动窗口内重试，断线后的通用会话恢复属于后续 Phase 1，不能在本阶段声称已完成。
+断开后恢复网络，检查客户端重连状态和聊天记录。
 
 ## 4. 安装器验收与卸载
 

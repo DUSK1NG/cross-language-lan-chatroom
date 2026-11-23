@@ -27,31 +27,32 @@ type ChatHeaderProps = {
 /** 56px header (spec §4): avatar · name · subtitle, then search / approvals / more. */
 export function ChatHeader({ state, infoOpen, onToggleInfo, canManage = false, onManageRoom, onConnectionApprovals, onRefresh, historyQuery = '', onHistoryQueryChange, searchOpen, onSearchOpenChange, onBack }: ChatHeaderProps) {
   const conversation = state.navigation.activeConversation;
+  const onlineEdition = state.edition === 'online';
   const isRoom = conversation?.kind === 'room';
   const online = state.members.filter((member) => member.online).length;
   const peer = conversation?.kind === 'dm' ? state.members.find((member) => member.userCode === conversation.userCode) : undefined;
   const subtitle = isRoom
     ? `${state.members.length} 名成员，${online} 人在线`
-    : peer?.online ? '在线' : '离线';
+    : onlineEdition && conversation?.kind === 'dm' ? `#${conversation.userCode}` : peer?.online ? '在线' : '离线';
   const approvals = state.connectionApprovals?.length ?? 0;
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
 
   const more: MenuItem[] = [
-    { label: infoOpen ? '隐藏成员列表' : '成员列表', icon: <Users />, onSelect: onToggleInfo },
+    { label: onlineEdition ? '用户信息' : infoOpen ? '隐藏成员列表' : '成员列表', icon: <Users />, onSelect: onToggleInfo },
     ...(canManage && isRoom && onManageRoom ? [{ label: '频道管理', icon: <SlidersHorizontal />, onSelect: onManageRoom }] : []),
     ...(onRefresh ? [{ label: '刷新', icon: <RefreshCw />, onSelect: onRefresh }] : [])
   ];
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-divider bg-sidebar px-2">
+    <header className="surface-chrome flex h-14 shrink-0 items-center gap-2 border-b border-divider px-3">
       {onBack && <IconButton label="返回会话列表" onClick={onBack}><ArrowLeft size={20} aria-hidden="true" /></IconButton>}
       {conversation && (
         <button type="button" aria-label="会话信息" aria-expanded={infoOpen} onClick={onToggleInfo}
           className="press flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md px-2 py-1 text-left hover:bg-hover">
           <Avatar name={conversation.title} seed={isRoom ? conversation.id : conversation.userCode} size={40}
-            online={conversation.kind === 'dm' ? peer?.online === true : undefined} />
+            online={conversation.kind === 'dm' && !onlineEdition ? peer?.online === true : undefined} />
           <span className="flex min-w-0 flex-col">
             <h1 aria-label={isRoom ? `# ${conversation.title}` : undefined} className="truncate text-name font-semibold text-ink">{conversation.title}</h1>
             <span className="flex min-w-0 items-center gap-2 text-small text-ink-2">
@@ -67,7 +68,7 @@ export function ChatHeader({ state, infoOpen, onToggleInfo, canManage = false, o
       )}
       {!conversation && <span className="flex-1" />}
       {searchOpen && onHistoryQueryChange && (
-        <label className="flex h-9 w-[240px] min-w-0 items-center gap-2 rounded-full border border-accent bg-input px-3">
+        <label className="view-enter flex h-9 w-[240px] min-w-0 items-center gap-2 rounded-full border border-accent bg-input px-3">
           <Search size={16} aria-hidden="true" className="shrink-0 text-ink-3" />
           <input ref={searchRef} aria-label="搜索当前会话" placeholder="搜索消息" value={historyQuery}
             onChange={(event) => onHistoryQueryChange(event.target.value)}

@@ -6,7 +6,7 @@ import { BridgeUnavailablePage } from './app/BridgeUnavailablePage';
 import { ErrorBoundary } from './app/ErrorBoundary';
 import { registerUnhandledRejectionReporter } from './app/frontendDiagnostics';
 import { resolveRuntimeBridge } from './app/runtimeBridge';
-import { createFakeBridge, createWebChannelBridge } from './bridge/chatBridge';
+import { createFakeBridge, createDesktopBridge, hasDesktopBridge } from './bridge/chatBridge';
 import type { BridgeState } from './bridge/types';
 
 const initialState: BridgeState = {
@@ -21,14 +21,14 @@ const initialState: BridgeState = {
 
 async function bootstrap() {
   const resolution = await resolveRuntimeBridge({
-    hasTransport: Boolean(window.qt?.webChannelTransport),
+    hasTransport: hasDesktopBridge(),
     isDevelopment: import.meta.env.DEV,
-    createBridge: createWebChannelBridge,
+    createBridge: createDesktopBridge,
     createPreviewBridge: () => createFakeBridge(initialState)
   });
   const root = createRoot(document.getElementById('root')!);
   if (resolution.error || !resolution.bridge) {
-    root.render(<BridgeUnavailablePage message={resolution.error ?? 'Qt bridge 未连接'} onRetry={() => window.location.reload()} />);
+    root.render(<BridgeUnavailablePage message={resolution.error ?? '桌面服务未连接'} onRetry={() => window.location.reload()} />);
     return;
   }
   const bridge = resolution.bridge;

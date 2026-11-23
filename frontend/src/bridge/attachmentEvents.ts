@@ -10,6 +10,7 @@ export type AttachmentUploadState = {
   chunkSize?: number;
   totalChunks?: number;
   logicalSize?: number;
+  fileName?: string;
   receivedBytes?: number;
   startedAt?: number;
   lastProgressAt?: number;
@@ -63,6 +64,7 @@ export function reduceAttachmentEvent(map: AttachmentUploadMap, event: Attachmen
       lastProgressAt: now,
       lastChunkIndex: payload.chunkIndex,
       expiresAt: payload.expiresAt,
+      fileName: payload.fileName,
       room: map[event.id]?.room
     };
     return { ...map, [event.id]: withTotalChunks(baseline, payload.chunkSize, payload.logicalSize) };

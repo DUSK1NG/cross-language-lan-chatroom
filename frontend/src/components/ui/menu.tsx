@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 
 import { cn } from '../../lib/cn';
 
-const contentClass = 'z-50 min-w-[200px] overflow-hidden rounded-md bg-elevated p-1 text-ink shadow-dialog';
+const contentClass = 'menu-surface surface-glass z-50 min-w-[200px] overflow-hidden rounded-card p-1.5 text-ink shadow-dialog';
 const itemClass = 'flex h-9 cursor-pointer select-none items-center gap-3 rounded-sm px-3 text-body outline-none data-[highlighted]:bg-hover data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 [&_svg]:size-[18px] [&_svg]:text-ink-2';
 
 export type MenuItem = {
