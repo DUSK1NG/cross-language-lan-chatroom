@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createQtBridge, createWebChannelBridge } from './chatBridge';
+import { createDesktopBridge } from './chatBridge';
 import type { BridgeState } from './types';
 
 const state: BridgeState = {
@@ -13,137 +13,71 @@ const state: BridgeState = {
   savedConnection: { serverIp: '127.0.0.1', serverPort: 8888, username: 'Alice', userCode: 'A001', caFile: '' }
 };
 
-describe('createQtBridge', () => {
-  it('hydrates from currentStateJson and serializes dispatch commands', async () => {
-    const proxy = {
-      currentStateJson: vi.fn((callback: (json: string) => void) => callback(JSON.stringify(state))),
-      dispatch: vi.fn(),
-      stateChanged: { connect: vi.fn() },
-      commandResult: { connect: vi.fn() },
-      bridgeError: { connect: vi.fn() }
-    };
+afterEach(() => {
+  delete window.__TAURI__;
+  delete window.runtime;
+});
 
-    const bridge = await createQtBridge(proxy);
+function installDesktop() {
+  const dispatch = vi.fn(async (_command: string, _args?: Record<string, unknown>) => undefined);
+  const listeners = new Map<string, (event: { payload: unknown }) => void>();
+  window.__TAURI__ = {
+    core: { invoke: async <T,>(command: string, args?: Record<string, unknown>) =>
+      (command === 'chat_state' ? state : await dispatch(command, args)) as T },
+    event: { listen: async <T,>(name: string, listener: (event: { payload: T }) => void) => {
+      listeners.set(name, (event) => listener({ payload: event.payload as T }));
+      return () => { listeners.delete(name); };
+    }}
+  };
+  return { dispatch, emit: (name: string, payload: unknown) => listeners.get(name)?.({ payload }) };
+}
+
+describe('createDesktopBridge', () => {
+  it('hydrates state and sends the desktop command as JSON', async () => {
+    const { dispatch } = installDesktop();
+    const bridge = await createDesktopBridge();
     const command = { id: 'web-1', type: 'conversation.selectRoom', payload: { room: 'lobby' } };
 
     expect(JSON.parse(bridge.currentStateJson())).toEqual(state);
     bridge.dispatch(command);
-    expect(proxy.dispatch).toHaveBeenCalledWith(JSON.stringify(command));
+    expect(dispatch).toHaveBeenCalledWith('chat_dispatch', { json: JSON.stringify(command) });
   });
 
-  it('forwards stateChanged snapshots to subscribers', async () => {
-    let stateListener: ((json: string) => void) | undefined;
-    const proxy = {
-      currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
-      dispatch: vi.fn(),
-      stateChanged: { connect: (listener: (json: string) => void) => { stateListener = listener; } },
-      commandResult: { connect: vi.fn() },
-      bridgeError: { connect: vi.fn() }
-    };
-    const bridge = await createQtBridge(proxy);
-    const listener = vi.fn();
-    bridge.subscribe(listener);
+  it('forwards snapshots without mixing command results and attachment events', async () => {
+    const { emit } = installDesktop();
+    const bridge = await createDesktopBridge();
+    const onState = vi.fn();
+    const onResult = vi.fn();
+    const onAttachment = vi.fn();
+    const onPresence = vi.fn();
+    bridge.subscribe(onState);
+    bridge.subscribeCommandResult(onResult);
+    bridge.subscribeAttachmentEvents(onAttachment);
+    bridge.subscribePresence(onPresence);
 
-    stateListener?.(JSON.stringify({ ...state, connection: { ...state.connection, statusText: 'Updated' } }));
+    const next = { ...state, connection: { ...state.connection, statusText: '已连接' } };
+    emit('chat:state', next);
+    emit('chat:attachment', { type: 'attachment.event', id: 'web-9', payload: { type: 'attachment.resume', attachmentId: 'att-1', receivedIndexes: [] } });
+    emit('chat:result', { id: 'web-1', ok: true });
+    emit('chat:presence', 'Bob#B002 joined the chat');
 
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ connection: expect.objectContaining({ statusText: 'Updated' }) }));
+    expect(onState).toHaveBeenCalledWith(next);
+    expect(onResult).toHaveBeenCalledExactlyOnceWith({ id: 'web-1', ok: true });
+    expect(onAttachment).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'web-9' }));
+    expect(onPresence).toHaveBeenCalledExactlyOnceWith('Bob#B002 joined the chat');
   });
 
-  it('discovers the chatBridge object through the Qt transport', async () => {
-    const proxy = {
-      currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
-      dispatch: vi.fn(),
-      stateChanged: { connect: vi.fn() },
-      commandResult: { connect: vi.fn() },
-      bridgeError: { connect: vi.fn() }
-    };
-    class FakeWebChannel {
-      constructor(_transport: unknown, callback: (channel: { objects: Record<string, typeof proxy> }) => void) {
-        callback({ objects: { chatBridge: proxy } });
-      }
-    }
-    window.qt = { webChannelTransport: {} };
-    window.QWebChannel = FakeWebChannel;
+  it('surfaces a rejected desktop call to the command subscriber', async () => {
+    const { dispatch } = installDesktop();
+    dispatch.mockRejectedValueOnce(new Error('invalid payload'));
+    const bridge = await createDesktopBridge();
+    const onResult = vi.fn();
+    bridge.subscribeCommandResult(onResult);
 
-    const bridge = await createWebChannelBridge();
+    bridge.dispatch({ id: 'web-1', type: 'chat.sendRoom', payload: {} });
 
-    expect(JSON.parse(bridge.currentStateJson())).toEqual(state);
-    delete window.qt;
-    delete window.QWebChannel;
-  });
-
-  it('rejects a channel that does not expose chatBridge', async () => {
-    class EmptyWebChannel {
-      constructor(_transport: unknown, callback: (channel: { objects: Record<string, never> }) => void) {
-        callback({ objects: {} });
-      }
-    }
-    window.qt = { webChannelTransport: {} };
-    window.QWebChannel = EmptyWebChannel;
-
-    await expect(createWebChannelBridge()).rejects.toThrow('chatBridge object is unavailable');
-    delete window.qt;
-    delete window.QWebChannel;
-  });
-
-  it('forwards command results from the Qt proxy', async () => {
-    let resultListener: ((json: string) => void) | undefined;
-    const proxy = {
-      currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
-      dispatch: vi.fn(),
-      stateChanged: { connect: vi.fn() },
-      commandResult: { connect: (listener: (json: string) => void) => { resultListener = listener; } },
-      bridgeError: { connect: vi.fn() }
-    };
-    const bridge = await createQtBridge(proxy);
-    const listener = vi.fn();
-    bridge.subscribeCommandResult(listener);
-
-    resultListener?.('{"id":"web-1","ok":false,"error":{"code":"rejected","message":"no","retryable":false,"source":"controller"}}');
-
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ id: 'web-1', ok: false }));
-  });
-
-  it('routes attachment events to the attachment subscription, not command results', async () => {
-    let resultListener: ((json: string) => void) | undefined;
-    const proxy = {
-      currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
-      dispatch: vi.fn(),
-      stateChanged: { connect: vi.fn() },
-      commandResult: { connect: (listener: (json: string) => void) => { resultListener = listener; } },
-      bridgeError: { connect: vi.fn() }
-    };
-    const bridge = await createQtBridge(proxy);
-    const resultListenerFn = vi.fn();
-    const attachmentListener = vi.fn();
-    bridge.subscribeCommandResult(resultListenerFn);
-    bridge.subscribeAttachmentEvents(attachmentListener);
-
-    resultListener?.('{"type":"attachment.event","id":"web-9","payload":{"type":"attachment.init","attachmentId":"att-1","uploadId":"up-1","chunkSize":48128,"chunkIndex":0,"receivedIndexes":[],"expiresAt":"2026-09-03T00:00:00Z","content":""}}');
-
-    expect(attachmentListener).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'attachment.event',
-      id: 'web-9',
-      payload: expect.objectContaining({ type: 'attachment.init' })
-    }));
-    expect(resultListenerFn).not.toHaveBeenCalled();
-  });
-
-  it('keeps routing plain command results away from the attachment subscription', async () => {
-    let resultListener: ((json: string) => void) | undefined;
-    const proxy = {
-      currentStateJson: (callback: (json: string) => void) => callback(JSON.stringify(state)),
-      dispatch: vi.fn(),
-      stateChanged: { connect: vi.fn() },
-      commandResult: { connect: (listener: (json: string) => void) => { resultListener = listener; } },
-      bridgeError: { connect: vi.fn() }
-    };
-    const bridge = await createQtBridge(proxy);
-    const attachmentListener = vi.fn();
-    bridge.subscribeAttachmentEvents(attachmentListener);
-
-    resultListener?.('{"id":"web-1","ok":true}');
-
-    expect(attachmentListener).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(onResult).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'web-1', ok: false, error: expect.objectContaining({ message: expect.stringContaining('invalid payload') })
+    })));
   });
 });

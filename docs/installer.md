@@ -7,7 +7,7 @@
 - 默认安装到当前用户的 `%LocalAppData%\Programs\LAN Chat`，无需管理员权限。
 - 创建开始菜单快捷方式；安装时可选择创建桌面快捷方式。
 - 在 Windows“已安装的应用”中登记 `LAN Chat` 卸载项。
-- 包含现代 GUI、Qt WebEngine 运行时、OpenSSL 运行时和本地 Go Server。
+- 包含 Windows 客户端、MLS++、OpenSSL 和本地服务端（迁移期为 Go 实现，目标为 Rust `lan-chat-server.exe`）。系统需安装 Microsoft Edge WebView2 Runtime。
 - 不包含任何初始证书、私钥、数据库、聊天记录、源码或编译器。
 
 首次作为房主启动时，程序会把新生成的房主身份和数据库写入：

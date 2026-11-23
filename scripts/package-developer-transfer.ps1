@@ -127,8 +127,7 @@ merge stale code automatically.
 - `codex-06d8`: tracked changes are in `working.patch`; the five intentional
   untracked C++/documentation files are under `untracked/`. The old Go build
   cache is deliberately excluded.
-- `remember-connection`: tracked Go changes are in `working.patch`. Its Qt
-  build directories are deliberately excluded.
+- `remember-connection`: tracked Go changes are in `working.patch`.
 - The historical `glass-ui` and `gui-polish` worktrees are already represented
   by the Git bundle and are not duplicated. `glass-ui` is additionally excluded
   because it contains a local host private key.
@@ -149,7 +148,7 @@ Created from commit: `$($mainCommit[0])
 
 1. Extract this archive.
 2. Open `LANChat-Source` and read `docs/CODEX_HANDOFF.md` first.
-3. Run `LANChat-Launcher.exe`; confirm its first-run toolchain setup when prompted.
+3. Prepare the build dependencies listed in the README, then run `LANChat-Launcher.exe`.
 4. To recover branch history, create a new repository from `LANChat-Source` and import `git-history.bundle` after reviewing its refs.
 5. Optionally copy `Codex-optional/AGENTS.md` and the folders inside `Codex-optional/skills` into the new PC's Codex profile. Do not copy an old Codex configuration or authentication file; sign in again locally.
 

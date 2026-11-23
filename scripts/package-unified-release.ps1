@@ -1,5 +1,7 @@
 [CmdletBinding()]
 param(
+    [ValidateSet('lan', 'online')]
+    [string]$Edition = 'lan',
     [string]$BuildDirectory = '',
     [string]$ReleaseDirectory = '',
     [switch]$SkipBuild,
@@ -8,112 +10,29 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-$Root = Split-Path -Parent $PSScriptRoot
-$ReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $Root 'release'))
-if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
-    $BuildDirectory = Join-Path $Root 'out\modern-msvc-x64'
+$root = Split-Path -Parent $PSScriptRoot
+$releaseRoot = [IO.Path]::GetFullPath((Join-Path $root 'release'))
+if (!$BuildDirectory) { $BuildDirectory = Join-Path $root $(if ($Edition -eq 'lan') { 'out\desktop' } else { 'out\desktop-online' }) }
+if (!$ReleaseDirectory) { $ReleaseDirectory = Join-Path $releaseRoot $(if ($Edition -eq 'lan') { 'LANChat-Desktop-Windows-x64' } else { 'LANChat-Online-Windows-x64' }) }
+$ReleaseDirectory = [IO.Path]::GetFullPath($ReleaseDirectory)
+$releasePrefix = $releaseRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if (!$ReleaseDirectory.StartsWith($releasePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "ReleaseDirectory must stay under $releaseRoot"
 }
-if ([string]::IsNullOrWhiteSpace($ReleaseDirectory)) {
-    $ReleaseDirectory = Join-Path $ReleaseRoot 'LANChat-Windows-x64'
+if (!$SkipBuild) { & (Join-Path $PSScriptRoot 'build-desktop.ps1') -Edition $Edition -OutputDirectory $BuildDirectory }
+
+$files = @('LANChat.exe', 'LANChat.ico')
+New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
+if ($Edition -eq 'lan') {
+    $files += 'lan-chat-server.exe'
 }
-
-$BuildDirectory = [System.IO.Path]::GetFullPath($BuildDirectory)
-$ReleaseDirectory = [System.IO.Path]::GetFullPath($ReleaseDirectory)
-$releasePrefix = $ReleaseRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-if (-not $ReleaseDirectory.StartsWith($releasePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "ReleaseDirectory must stay under the repository release directory: $ReleaseRoot"
+foreach ($file in $files) {
+    Copy-Item -LiteralPath (Join-Path $BuildDirectory $file) -Destination (Join-Path $ReleaseDirectory $file) -Force
 }
-$ArchivePath = "$ReleaseDirectory.zip"
+Copy-Item -LiteralPath (Join-Path $root 'docs\unified-package.md') -Destination (Join-Path $ReleaseDirectory 'README.md') -Force
 
-function Write-Step([string]$Message) {
-    Write-Host "[LAN Chat unified package] $Message" -ForegroundColor Cyan
-}
-
-function Require-File([string]$Path, [string]$Description) {
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "$Description was not found: $Path"
-    }
-}
-
-function Test-UnifiedArchive([string]$Archive) {
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
-    try {
-        $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-        foreach ($required in @(
-            'LANChat.exe',
-            'LANChat.ico',
-            'lan-chat-gui.exe',
-            'Qt6WebEngineCore.dll',
-            'QtWebEngineProcess.exe',
-            'resources/qtwebengine_resources.pak',
-            'server-go/chat-server.exe',
-            'README.md'
-        )) {
-            if ($entries -notcontains $required) {
-                throw "Unified ZIP is missing required file: $required"
-            }
-        }
-        $forbidden = @($entries | Where-Object {
-            $_ -match '(^|/)(\.git|\.tools|out|release|frontend|client-cpp|scripts|tools|server-go/certs|logs?|test-results|test-output|coverage|attachments|attachment-cache|__host-data|\.cache)/' -or
-            $_ -match '(?i)(\.key$|\.pem$|\.crt$|\.cer$|\.der$|\.pfx$|\.p12$|\.db(?:[-.]|$)|\.sqlite(?:[-.]|$)|\.sqlite3(?:[-.]|$)|\.log(?:[-.]|$)|\.test$|\.tap$|\.trx$|\.junit$|(^|/)LANChat-Launcher\.exe$|(^|/)(node|go)\.exe$|(^|/)(pnpm|npm)\.cmd$)'
-        })
-        if ($forbidden.Count -gt 0) {
-            throw "Unified ZIP contains forbidden paths: $($forbidden -join '; ')"
-        }
-    } finally {
-        $zip.Dispose()
-    }
-}
-
-$memberPackager = Join-Path $PSScriptRoot 'package-release.ps1'
-$packageTest = Join-Path $PSScriptRoot 'test-member-package.ps1'
-$serverSource = Join-Path $Root 'server-go\chat-server.exe'
-$guideSource = Join-Path $Root 'docs\unified-package.md'
-foreach ($input in @($memberPackager, $packageTest, $guideSource)) {
-    Require-File $input 'Unified package input'
-}
-
-Write-Step 'Create the verified GUI runtime base'
-$memberArguments = @(
-    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $memberPackager,
-    '-BuildDirectory', $BuildDirectory, '-ReleaseDirectory', $ReleaseDirectory
-)
-if ($SkipBuild.IsPresent) { $memberArguments += '-SkipBuild' }
-if ($SkipSmokeTest.IsPresent) { $memberArguments += '-SkipSmokeTest' }
-& powershell.exe @memberArguments
-if ($LASTEXITCODE -ne 0) { throw "GUI runtime base packaging failed with exit code $LASTEXITCODE." }
-
-Require-File $serverSource 'Built Go server for the unified package'
-Write-Step 'Add the local-host server without host identity files'
-$serverTargetDirectory = Join-Path $ReleaseDirectory 'server-go'
-New-Item -ItemType Directory -Force -Path $serverTargetDirectory | Out-Null
-Copy-Item -LiteralPath $serverSource -Destination (Join-Path $serverTargetDirectory 'chat-server.exe') -Force
-$memberGuide = Join-Path $ReleaseDirectory 'README-member.md'
-if (Test-Path -LiteralPath $memberGuide -PathType Leaf) {
-    Remove-Item -LiteralPath $memberGuide -Force
-}
-Copy-Item -LiteralPath $guideSource -Destination (Join-Path $ReleaseDirectory 'README.md') -Force
-
-if (Test-Path -LiteralPath $ArchivePath -PathType Leaf) {
-    Remove-Item -LiteralPath $ArchivePath -Force
-}
-
-Write-Step 'Validate the unified host/member runtime'
-$testArguments = @(
-    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $packageTest,
-    '-PackageDirectory', $ReleaseDirectory, '-AllowLocalHost'
-)
-if (-not $SkipSmokeTest.IsPresent) { $testArguments += '-Smoke' }
-& powershell.exe @testArguments
-if ($LASTEXITCODE -ne 0) { throw "Unified package validation failed with exit code $LASTEXITCODE." }
-
-Write-Step 'Create ZIP archive'
-Compress-Archive -Path (Join-Path $ReleaseDirectory '*') -DestinationPath $ArchivePath -CompressionLevel Optimal -Force
-Require-File $ArchivePath 'Unified ZIP archive'
-Test-UnifiedArchive $ArchivePath
-
-Write-Host "Unified package directory: $ReleaseDirectory" -ForegroundColor Green
-Write-Host "Unified package archive:    $ArchivePath" -ForegroundColor Green
-Write-Host 'Security: this package contains the GUI runtime and local server only. The host certificate, private key, database, chat history, source tree, compiler, Node.js, Go SDK, and auto-build launcher are excluded.' -ForegroundColor Green
+$validate = @{ PackageDirectory = $ReleaseDirectory; Edition = $Edition; Smoke = -not $SkipSmokeTest }
+& (Join-Path $PSScriptRoot 'test-member-package.ps1') @validate
+$archive = "$ReleaseDirectory.zip"
+Compress-Archive -Path (Join-Path $ReleaseDirectory '*') -DestinationPath $archive -CompressionLevel Optimal -Force
+Write-Host "Desktop package: $archive"

@@ -14,7 +14,7 @@ LAN Chat 不内置、不下载、也不配置 Radmin VPN。请由房主和成员
 ## 自动发现失败时
 
 - 确认双方在线且位于同一个虚拟网络。
-- 允许 LAN Chat 的 UDP `38888` 和 `chat-server.exe` 的 TCP `8888` 通过 Windows 防火墙的专用网络。
+- 允许 LAN Chat 的 UDP `38888` 和 `chat-server.exe`（Rust 迁移后为 `lan-chat-server.exe`）的 TCP `8888` 通过 Windows 防火墙的专用网络。
 - 某些虚拟局域网或企业网络会阻止 UDP 广播；这时使用“手动连接”，填写房主的虚拟网 IPv4、端口 `8888` 和公开证书 `server-lan.crt`。
 
 `server-lan.key`、`chat.db`、聊天记录以及虚拟网络工具的账号/令牌都不得共享、同步或提交到 GitHub。

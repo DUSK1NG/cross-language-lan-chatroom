@@ -48,8 +48,8 @@ export function FileCard({ attachment, bridge, self }: { attachment: MessageAtta
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-body font-medium" title={attachment.fileName}>{attachment.fileName}</span>
         <span className={cn('num flex flex-wrap items-center gap-x-2 text-small', meta)}>
-          {attachment.logicalSize > 0 && <span>{formatSize(attachment.logicalSize)}</span>}
-          <span className="inline-flex items-center gap-1"><Lock size={12} aria-hidden="true" />端到端加密</span>
+          {(attachment.logicalSize > 0 || attachment.transport === 'tls') && <span>{formatSize(attachment.logicalSize)}</span>}
+          {attachment.transport !== 'tls' && <span className="inline-flex items-center gap-1"><Lock size={12} aria-hidden="true" />端到端加密</span>}
           {status && <span className={cn(invalid && (self ? 'text-on-accent' : 'text-danger-text'))}>{status}</span>}
         </span>
       </span>

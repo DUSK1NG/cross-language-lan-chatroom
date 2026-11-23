@@ -26,6 +26,13 @@ export function useAttachmentUploads(bridge: ChatBridgeClient): {
     setUploads((current) => reduceAttachmentEvent(current, normalizeChunkEnvelope(event)));
   }), [bridge]);
 
+  useEffect(() => bridge.subscribeCommandResult((result) => {
+    if (!result.ok && result.error) {
+      const { code, message } = result.error;
+      setUploads((current) => reduceAttachmentEvent(current, { type: 'attachment.event', id: result.id, payload: { type: 'error', code, message } }));
+    }
+  }), [bridge]);
+
   const beginUpload = useCallback((commandId: string, room: string) => {
     setUploads((current) => beginAttachmentUpload(current, commandId, room));
   }, []);

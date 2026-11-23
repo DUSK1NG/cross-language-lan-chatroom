@@ -35,6 +35,7 @@ class ControllableBridge implements ChatBridgeClient {
     return () => this.attachmentListeners.delete(listener);
   }
   subscribeBridgeError() { return () => undefined; }
+  subscribePresence() { return () => undefined; }
   publishCommandResult(result: CommandResult) { this.resultListeners.forEach((listener) => listener(result)); }
   publishAttachmentEvent(event: AttachmentEvent) { this.attachmentListeners.forEach((listener) => listener(event)); }
 }

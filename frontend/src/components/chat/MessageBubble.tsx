@@ -1,13 +1,11 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
 import { AlertCircle, Check, Clock3, Copy, CornerUpLeft, MoreHorizontal, RotateCcw, Trash2, Undo2 } from 'lucide-react';
 
 import type { BridgeCommand, ChatBridgeClient, MessageItem as MessageItemData } from '../../bridge/types';
 import { createCommand } from '../../bridge/chatBridge';
-import { avatarTone } from '../../lib/avatarColor';
 import { cn } from '../../lib/cn';
-import { ease } from '../../lib/motion';
 import { Avatar } from '../ui/avatar';
+import { Dialog } from '../ui/dialog';
 import { ContextMenu, DropdownMenu, type MenuItem } from '../ui/menu';
 import { toast } from '../ui/toast';
 import { CommandFeedback } from '../CommandFeedback';
@@ -32,7 +30,7 @@ export type MessageBubbleProps = {
   onJumpToQuote?: (author: string, text: string) => void;
   canRecall?: boolean;
   showTime?: boolean;
-  /** Plays the 200ms rise-in (new arrivals only, never history). */
+  /** New arrivals animate once, including the frosted-glass entry. */
   animateEntry?: boolean;
   highlighted?: boolean;
 };
@@ -62,7 +60,6 @@ export const MessageBubble = memo(function MessageBubble({
   useEffect(() => () => unsubscribeRef.current?.(), []);
 
   const self = message.selfMessage;
-  const tone = avatarTone(message.userCode || message.displayName);
 
   const run = (type: string, label: string, payload: Record<string, unknown> = { messageId: message.messageId }) => {
     if (pendingRef.current) return;
@@ -107,29 +104,35 @@ export const MessageBubble = memo(function MessageBubble({
 
   const showSender = isGroupChat && !self && !grouped;
   const showAvatar = isGroupChat && !self;
-  const metaClass = self ? 'text-bubble-out-meta' : 'text-bubble-in-meta';
+  const visibleTime = showTime && message.time;
+  const delivery = self ? message.deliveryState : undefined;
+  const group = grouped ? (tail ? 'last' : 'middle') : (tail ? 'single' : 'first');
+  const longReply = !self && body.length >= 72 && !quote && !message.attachment;
 
   return (
-    <motion.article data-testid={`message-${message.messageId}`} data-entering={animateEntry ? 'true' : undefined}
-      initial={animateEntry ? { opacity: 0, y: 8 } : false} animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease }}
+    <article data-testid={`message-${message.messageId}`} data-entering={animateEntry ? 'true' : undefined}
+      data-group={group} data-long-reply={longReply || undefined}
       className={cn('message group/message relative flex w-full items-end gap-2',
         self ? 'message--self justify-end' : 'message--peer justify-start',
         grouped && 'message--grouped', tail && 'message--tail')}>
       {showAvatar && (
         <span className="w-9 shrink-0 self-end">{tail ? <Avatar name={message.displayName} seed={message.userCode} size={36} /> : null}</span>
       )}
-      <div className={cn('relative flex min-w-0 max-w-[65%] flex-col', self ? 'items-end' : 'items-start')}>
+      <div className={cn('cirrus-bubble-column relative flex min-w-0 flex-col', self ? 'items-end' : 'items-start')}>
+        {(visibleTime || delivery) && (
+          <div className="message-meta num mb-1 flex items-center gap-1 whitespace-nowrap px-1 text-small leading-none text-ink-2">
+            {visibleTime && <time dateTime={message.createdAt || message.time}>{message.time}</time>}
+            {delivery && <DeliveryMark state={delivery} onRetry={retry} />}
+          </div>
+        )}
         <ContextMenu items={menu}>
-          <div className={cn('message-bubble relative flow-root min-w-0 max-w-full px-3 py-2 text-message leading-[1.5] text-ink transition-colors duration-[var(--dur-panel)]',
-            self ? 'bg-bubble-out' : 'bg-bubble-in',
-            'rounded-bubble',
-            tail && (self ? 'rounded-br-tail' : 'rounded-bl-tail'),
+          <div className={cn('message-bubble cirrus-bubble relative flow-root min-w-0 max-w-full',
             highlighted && 'ring-2 ring-accent')}>
             {showSender && (
-              <p className="message-sender mb-1 truncate text-small font-semibold" style={{ color: `var(--name-${tone})` }}>{message.displayName}</p>
+              <p className="message-sender mb-1 truncate text-small font-semibold">{message.displayName}</p>
             )}
             {message.attachment && <div className="mb-1"><FileCard attachment={message.attachment} bridge={bridge} self={self} /></div>}
+            {message.imageSize && <OnlineImage message={message} bridge={bridge} />}
             {quote && (
               <blockquote data-testid={`message-quote-${message.messageId}`}
                 className={cn('message-quote mb-1 cursor-pointer rounded-sm border-l-[3px] py-1 pl-2 pr-2 text-small', self ? 'border-read-tick bg-quote-out-bg' : 'border-accent bg-quote-in-bg')}
@@ -139,24 +142,62 @@ export const MessageBubble = memo(function MessageBubble({
                   : <span className={cn('block truncate', self ? 'text-quote-out-text' : 'text-bubble-in-meta')}>{quote.raw}</span>}
               </blockquote>
             )}
-            {(!quote || body) && (
+            {!message.imageSize && message.attachment?.transport !== 'tls' && (!quote || body) && (
               <p data-testid={`message-content-${message.messageId}`} className="message-content message-content--wrap inline whitespace-pre-wrap break-words [overflow-wrap:anywhere] select-text">
                 <RichText text={body} self={self} onCopyPath={(path) => { bridge.dispatch(createCommand('message.copy', { text: path })); toast.success('路径已复制'); }} />
               </p>
             )}
-            {/* Time and status float to the bottom-right of the last line: inline with short text, wrapped below long text (spec §6). */}
-            <span className={cn('message-meta num relative top-1 float-right ml-2 inline-flex h-4 items-center gap-1 whitespace-nowrap text-small leading-none', metaClass)}>
-              {showTime && <span>{message.time}</span>}
-              {self && message.deliveryState && <DeliveryMark state={message.deliveryState} onRetry={retry} />}
-            </span>
           </div>
         </ContextMenu>
         <MessageActions id={message.messageId} self={self} onReply={reply} onCopy={copy} menu={menu.slice(2)} />
         <CommandFeedback {...feedback} />
       </div>
-    </motion.article>
+    </article>
   );
 }, areEqual);
+
+function OnlineImage({ message, bridge }: { message: MessageItemData; bridge: ChatBridgeClient }) {
+  const holder = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [source, setSource] = useState('');
+  const [error, setError] = useState('');
+  const [open, setOpen] = useState(false);
+  const { messageId, userCode, imagePeer, imageSize } = message;
+
+  useEffect(() => {
+    const node = holder.current;
+    if (!node) return;
+    let unsubscribe: (() => void) | undefined;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      const command = createCommand('image.read', { messageId, userCode, targetUserCode: imagePeer, imageSize });
+      unsubscribe = bridge.subscribeCommandResult((result) => {
+        if (result.id !== command.id) return;
+        unsubscribe?.();
+        if (result.ok && result.imageUrl) setSource(result.imageUrl);
+        else setError(result.error?.message ?? '图片加载失败');
+      });
+      bridge.dispatch(command);
+    });
+    observer.observe(node);
+    return () => { observer.disconnect(); unsubscribe?.(); };
+  }, [bridge, messageId, userCode, imagePeer, imageSize]);
+
+  return (
+    <div ref={holder}>
+      {source ? (
+        <button ref={trigger} type="button" aria-label="打开大图" onClick={() => setOpen(true)} className="block cursor-zoom-in overflow-hidden rounded-card">
+          <img src={source} alt="聊天图片" width={192} height={144} className="h-36 w-48 object-cover" decoding="async" />
+        </button>
+      ) : <p className="grid h-36 w-48 place-items-center text-small" role="status">{error || '正在加载图片…'}</p>}
+      <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) requestAnimationFrame(() => trigger.current?.focus()); }}
+        title="聊天图片" hideTitle className="max-w-[min(92vw,1000px)]">
+        <img src={source} alt="聊天图片大图" className="mx-auto max-h-[76vh] max-w-full object-contain" />
+      </Dialog>
+    </div>
+  );
+}
 
 function DeliveryMark({ state, onRetry }: { state: NonNullable<MessageItemData['deliveryState']>; onRetry: () => void }) {
   const label = deliveryCopy[state];
@@ -164,7 +205,7 @@ function DeliveryMark({ state, onRetry }: { state: NonNullable<MessageItemData['
   if (state === 'failed') {
     return (
       <span aria-label="投递状态：failed" title={label} className={className}>
-        <button type="button" onClick={onRetry} aria-label="重试发送" className="press inline-flex cursor-pointer text-danger-icon-out">
+        <button type="button" onClick={onRetry} aria-label="重试发送" className="press inline-flex cursor-pointer text-danger-text">
           <AlertCircle size={16} aria-hidden="true" />
         </button>
         <span className="visually-hidden">发送失败</span>
@@ -209,8 +250,8 @@ function areEqual(previous: MessageBubbleProps, next: MessageBubbleProps) {
     && previous.animateEntry === next.animateEntry && previous.highlighted === next.highlighted
     && previous.onQuote === next.onQuote && previous.onCopy === next.onCopy && previous.onLocalDelete === next.onLocalDelete
     && previous.onRecall === next.onRecall && previous.onJumpToQuote === next.onJumpToQuote
-    && a.messageId === b.messageId && a.content === b.content && a.time === b.time && a.displayName === b.displayName
+    && a.messageId === b.messageId && a.content === b.content && a.time === b.time && a.createdAt === b.createdAt && a.displayName === b.displayName
     && a.userCode === b.userCode && a.selfMessage === b.selfMessage && a.systemMessage === b.systemMessage
-    && a.deliveryState === b.deliveryState && a.attachment === b.attachment;
+    && a.deliveryState === b.deliveryState && a.attachment === b.attachment && a.imageSize === b.imageSize && a.imagePeer === b.imagePeer;
 }
 

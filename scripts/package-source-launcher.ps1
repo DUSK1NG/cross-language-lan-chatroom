@@ -42,19 +42,18 @@ function Test-SourcePackageDirectory([string]$Directory) {
         'README.md',
         'LANChat-Launcher.exe',
         'scripts\bootstrap-github.ps1',
-        'scripts\build-modern.ps1',
-        'scripts\install-modern-toolchain.ps1',
+        'scripts\build-desktop.ps1',
+        'apps\desktop\src-tauri\Cargo.toml',
         'scripts\package-source-launcher.ps1',
         'docs\CODEX_HANDOFF.md',
-        'tools\bootstrap\CMakeLists.txt',
-        'tools\bootstrap\launcher.cpp'
+        'tools\bootstrap\Cargo.toml',
+        'tools\bootstrap\src\main.rs'
     )) {
         Require-File (Join-Path $Directory $required) "Source package required file '$required'"
     }
 
     $forbiddenDirectories = @(
-        '.git', '.tools', 'out', 'release', 'frontend\node_modules', 'frontend\dist',
-        'server-go\certs'
+        '.git', '.tools', 'out', 'release', 'frontend\node_modules', 'frontend\dist'
     )
     foreach ($relativePath in $forbiddenDirectories) {
         if (Test-Path -LiteralPath (Join-Path $Directory $relativePath)) {
@@ -64,8 +63,9 @@ function Test-SourcePackageDirectory([string]$Directory) {
 
     $forbiddenFiles = @(Get-ChildItem -LiteralPath $Directory -Recurse -File |
         Where-Object {
-            $_.Extension -in @('.key', '.pem', '.crt', '.db') -or
-            $_.Name -in @('chat-server.exe', 'chat.db', 'node.exe', 'go.exe', 'pnpm.cmd', 'npm.cmd')
+            $_.Extension -in @('.key', '.pem', '.crt', '.db', '.log') -or
+            $_.Name -in @('lan-chat-server.exe', 'node.exe', 'pnpm.cmd', 'npm.cmd') -or
+            $_.DirectoryName -match '(^|[\\/])certs([\\/]|$)'
         })
     if ($forbiddenFiles.Count -gt 0) {
         throw "Source package contains forbidden files: $($forbiddenFiles.FullName -join '; ')"
@@ -81,10 +81,12 @@ function Test-SourceArchive([string]$Archive) {
             'README.md',
             'LANChat-Launcher.exe',
             'scripts/bootstrap-github.ps1',
-            'scripts/build-modern.ps1',
+            'scripts/build-desktop.ps1',
+            'apps/desktop/src-tauri/Cargo.toml',
             'scripts/package-source-launcher.ps1',
             'docs/CODEX_HANDOFF.md',
-            'tools/bootstrap/launcher.cpp'
+            'tools/bootstrap/Cargo.toml',
+            'tools/bootstrap/src/main.rs'
         )) {
             if ($entryNames -notcontains $required) {
                 throw "Source ZIP is missing required file: $required"
@@ -92,8 +94,8 @@ function Test-SourceArchive([string]$Archive) {
         }
 
         $forbidden = @($entryNames | Where-Object {
-            $_ -match '(^|/)(\.git|\.tools|out|release|frontend/node_modules|frontend/dist|server-go/certs)/' -or
-            $_ -match '(?i)(\.key$|\.pem$|\.crt$|\.db$|(^|/)(chat-server|chat)\.exe$|(^|/)(node|go)\.exe$|(^|/)(pnpm|npm)\.cmd$)'
+            $_ -match '(^|/)(\.git|\.tools|out|release|frontend/node_modules|frontend/dist|certs)/' -or
+            $_ -match '(?i)(\.(key|pem|crt|db|log)$|(^|/)(lan-chat-server|node)\.exe$|(^|/)(pnpm|npm)\.cmd$)'
         })
         if ($forbidden.Count -gt 0) {
             throw "Source ZIP contains forbidden paths: $($forbidden -join '; ')"
@@ -107,16 +109,11 @@ $git = Get-Command git.exe -ErrorAction SilentlyContinue | Select-Object -First 
 if ($null -eq $git) { throw 'git.exe is required to make a clean source package.' }
 
 if (-not $SkipLauncherBuild) {
-    $cmake = Get-Command cmake.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $cmake) { throw 'cmake.exe is required to build LANChat-Launcher.exe.' }
-
-    Write-Step 'Configure static source launcher'
-    & $cmake.Source -S (Join-Path $Root 'tools\bootstrap') -B $LauncherBuildDirectory -G Ninja
-    if ($LASTEXITCODE -ne 0) { throw "Source launcher CMake configure failed with exit code $LASTEXITCODE." }
-
     Write-Step 'Build static source launcher'
-    & $cmake.Source --build $LauncherBuildDirectory --target LANChat-Launcher --parallel 4
+    $target = Join-Path $LauncherBuildDirectory 'cargo'
+    & cargo build --locked --release --manifest-path (Join-Path $Root 'Cargo.toml') -p lan-chat-launcher --target-dir $target
     if ($LASTEXITCODE -ne 0) { throw "Source launcher build failed with exit code $LASTEXITCODE." }
+    Copy-Item -LiteralPath (Join-Path $target 'release\lan-chat-launcher.exe') -Destination (Join-Path $LauncherBuildDirectory 'LANChat-Launcher.exe') -Force
 }
 
 $launcherSource = Join-Path $LauncherBuildDirectory 'LANChat-Launcher.exe'
@@ -149,13 +146,8 @@ Write-Step 'Validate source package security boundary'
 Test-SourcePackageDirectory $ReleaseDirectory
 
 Write-Step 'Verify launcher package root discovery'
-& (Join-Path $ReleaseDirectory 'LANChat-Launcher.exe') --dry-run --root $ReleaseDirectory 2>&1 | Out-Null
-# LANChat-Launcher is a GUI subsystem executable. MSVC builds can write the
-# dry-run command to the invoking console, while MinGW builds deliberately
-# have no console handle. In both cases a zero exit code proves that the
-# package-root search found scripts/bootstrap-github.ps1; a missing script
-# returns 1 after showing the controlled error dialog.
-if ($LASTEXITCODE -ne 0) {
+$probe = Start-Process -FilePath (Join-Path $ReleaseDirectory 'LANChat-Launcher.exe') -ArgumentList '--dry-run' -WindowStyle Hidden -Wait -PassThru
+if ($probe.ExitCode -ne 0) {
     throw 'Source launcher dry-run did not find scripts\\bootstrap-github.ps1 in the package root.'
 }
 

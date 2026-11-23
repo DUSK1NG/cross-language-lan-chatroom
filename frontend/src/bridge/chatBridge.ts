@@ -1,21 +1,5 @@
+import { installDesktopRuntime } from '../app/runtimeBridge';
 import type { AttachmentEvent, BridgeCommand, BridgeError, BridgeState, ChatBridgeClient, CommandResult } from './types';
-
-export type QtBridgeProxy = {
-  currentStateJson(callback: (json: string) => void): void | string;
-  dispatch(commandJson: string): void;
-  stateChanged: { connect(listener: (json: string) => void): void };
-  commandResult: { connect(listener: (json: string) => void): void };
-  bridgeError: { connect(listener: (json: string) => void): void };
-};
-
-type QtWebChannelConstructor = new (transport: unknown, callback: (channel: { objects: Record<string, QtBridgeProxy> }) => void) => unknown;
-
-declare global {
-  interface Window {
-    QWebChannel?: QtWebChannelConstructor;
-    qt?: { webChannelTransport?: unknown };
-  }
-}
 
 export class FakeChatBridge implements ChatBridgeClient {
   private state: BridgeState;
@@ -23,6 +7,7 @@ export class FakeChatBridge implements ChatBridgeClient {
   private readonly resultListeners = new Set<(result: CommandResult) => void>();
   private readonly errorListeners = new Set<(error: BridgeError) => void>();
   private readonly attachmentListeners = new Set<(event: AttachmentEvent) => void>();
+  private readonly presenceListeners = new Set<(message: string) => void>();
   readonly commands: BridgeCommand[] = [];
 
   constructor(initialState: BridgeState) {
@@ -58,6 +43,15 @@ export class FakeChatBridge implements ChatBridgeClient {
     return () => this.errorListeners.delete(listener);
   }
 
+  subscribePresence(listener: (message: string) => void): () => void {
+    this.presenceListeners.add(listener);
+    return () => this.presenceListeners.delete(listener);
+  }
+
+  publishPresence(message: string): void {
+    this.presenceListeners.forEach((listener) => listener(message));
+  }
+
   publish(state: BridgeState): void {
     this.state = state;
     this.listeners.forEach((listener) => listener(state));
@@ -72,112 +66,80 @@ export function createFakeBridge(initialState: BridgeState): FakeChatBridge {
   return new FakeChatBridge(initialState);
 }
 
-function readCurrentState(proxy: QtBridgeProxy): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (json: string) => {
-      if (!settled) {
-        settled = true;
-        resolve(json);
-      }
-    };
-    try {
-      const result = proxy.currentStateJson(finish);
-      if (typeof result === 'string') finish(result);
-    } catch (error) {
-      if (!settled) {
-        settled = true;
-        reject(error);
-      }
+export function hasDesktopBridge(): boolean {
+  return Boolean(window.__TAURI__?.core.invoke && window.__TAURI__?.event.listen);
+}
+
+export async function createDesktopBridge(): Promise<ChatBridgeClient> {
+  const tauri = window.__TAURI__;
+  if (!tauri) throw new Error('桌面服务未连接');
+
+  const stateListeners = new Set<(state: BridgeState) => void>();
+  const resultListeners = new Set<(result: CommandResult) => void>();
+  const attachmentListeners = new Set<(event: AttachmentEvent) => void>();
+  const errorListeners = new Set<(error: BridgeError) => void>();
+  const presenceListeners = new Set<(message: string) => void>();
+  const subscribe = <T,>(listeners: Set<(value: T) => void>, listener: (value: T) => void) => {
+    listeners.add(listener);
+    return () => { listeners.delete(listener); };
+  };
+
+  let state: BridgeState | undefined;
+  const register = <T,>(name: string, handler: (event: T) => void) =>
+    tauri.event.listen<T>(name, ({ payload }) => handler(payload));
+  const registrations = await Promise.allSettled([
+    register<BridgeState>('chat:state', (payload) => {
+      const next = validateState(payload);
+      state = next;
+      stateListeners.forEach((listener) => listener(next));
+    }),
+    register<CommandResult>('chat:result', (payload) => resultListeners.forEach((listener) => listener(payload))),
+    register<AttachmentEvent>('chat:attachment', (payload) => attachmentListeners.forEach((listener) => listener(payload))),
+    register<BridgeError>('chat:error', (payload) => errorListeners.forEach((listener) => listener(payload))),
+    register<string>('chat:presence', (payload) => {
+      if (typeof payload !== 'string') throw new Error('chat:presence 应为字符串');
+      presenceListeners.forEach((listener) => listener(payload));
+    })
+  ]);
+  try {
+    for (const registration of registrations) {
+      if (registration.status === 'rejected') throw registration.reason;
     }
-  });
-}
-
-class QtChatBridge implements ChatBridgeClient {
-  private readonly listeners = new Set<(state: BridgeState) => void>();
-  private readonly resultListeners = new Set<(result: CommandResult) => void>();
-  private readonly errorListeners = new Set<(error: BridgeError) => void>();
-  private readonly attachmentListeners = new Set<(event: AttachmentEvent) => void>();
-
-  constructor(private readonly proxy: QtBridgeProxy, private state: BridgeState) {
-    proxy.stateChanged.connect((json) => {
-      const nextState = parseBridgeState(json);
-      this.state = nextState;
-      this.listeners.forEach((listener) => listener(nextState));
-    });
-    proxy.commandResult.connect((json) => {
-      const message = JSON.parse(json) as CommandResult | AttachmentEvent;
-      if ('type' in message && message.type === 'attachment.event') {
-        this.attachmentListeners.forEach((listener) => listener(message));
-        return;
-      }
-      this.resultListeners.forEach((listener) => listener(message as CommandResult));
-    });
-    proxy.bridgeError.connect((json) => {
-      const error = JSON.parse(json) as BridgeError;
-      this.errorListeners.forEach((listener) => listener(error));
-    });
+    const initialState = validateState(await tauri.core.invoke<BridgeState>('chat_state'));
+    state ??= initialState;
+  } catch (error) {
+    for (const registration of registrations) {
+      if (registration.status === 'fulfilled') registration.value();
+    }
+    throw error;
   }
+  installDesktopRuntime(tauri);
 
-  currentStateJson(): string {
-    return JSON.stringify(this.state);
-  }
-
-  dispatch(command: BridgeCommand): void {
-    this.proxy.dispatch(JSON.stringify(command));
-  }
-
-  subscribe(listener: (state: BridgeState) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  subscribeCommandResult(listener: (result: CommandResult) => void): () => void {
-    this.resultListeners.add(listener);
-    return () => this.resultListeners.delete(listener);
-  }
-
-  subscribeAttachmentEvents(listener: (event: AttachmentEvent) => void): () => void {
-    this.attachmentListeners.add(listener);
-    return () => this.attachmentListeners.delete(listener);
-  }
-
-  subscribeBridgeError(listener: (error: BridgeError) => void): () => void {
-    this.errorListeners.add(listener);
-    return () => this.errorListeners.delete(listener);
-  }
-}
-
-export async function createQtBridge(proxy: QtBridgeProxy): Promise<ChatBridgeClient> {
-  const state = parseBridgeState(await readCurrentState(proxy));
-  return new QtChatBridge(proxy, state);
-}
-
-export async function createWebChannelBridge(): Promise<ChatBridgeClient> {
-  const transport = window.qt?.webChannelTransport;
-  const WebChannel = window.QWebChannel;
-  if (!transport || !WebChannel) {
-    throw new Error('QWebChannel transport is unavailable');
-  }
-
-  return new Promise((resolve, reject) => {
-    new WebChannel(transport, (channel) => {
-      const proxy = channel.objects?.chatBridge;
-      if (!proxy) {
-        reject(new Error('chatBridge object is unavailable'));
-        return;
-      }
-      void createQtBridge(proxy).then(resolve, reject);
-    });
-  });
+  return {
+    currentStateJson: () => JSON.stringify(state),
+    dispatch: (command) => {
+      void tauri.core.invoke('chat_dispatch', { json: JSON.stringify(command) }).catch((error: unknown) => {
+        const failure: BridgeError = { code: 'desktop_dispatch', message: String(error), retryable: false, source: 'bridge', commandId: command.id };
+        resultListeners.forEach((listener) => listener({ id: command.id, ok: false, error: failure }));
+      });
+    },
+    subscribe: (listener) => subscribe(stateListeners, listener),
+    subscribeCommandResult: (listener) => subscribe(resultListeners, listener),
+    subscribeAttachmentEvents: (listener) => subscribe(attachmentListeners, listener),
+    subscribeBridgeError: (listener) => subscribe(errorListeners, listener),
+    subscribePresence: (listener) => subscribe(presenceListeners, listener)
+  };
 }
 
 export function parseBridgeState(json: string): BridgeState {
-  const parsed = JSON.parse(json) as BridgeState;
-  if (parsed.schemaVersion !== 1) {
+  return validateState(JSON.parse(json) as BridgeState);
+}
+
+function validateState(state: BridgeState): BridgeState {
+  if (state.schemaVersion !== 1) {
     throw new Error('不支持的 bridge 状态版本');
   }
-  return parsed;
+  return state;
 }
 
 export function createCommand(type: string, payload: Record<string, unknown>): BridgeCommand {

@@ -2,6 +2,23 @@
 @import "tailwindcss";
 @import "./tokens.css";
 
+@font-face {
+  font-family: "Cascadia Code";
+  src: url('../assets/fonts/CascadiaCode.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cascadia Next SC";
+  src: url('../assets/fonts/CascadiaNextSC.wght.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  unicode-range: U+2E80-303F, U+31C0-31EF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE10-FE1F, U+FE30-FE4F, U+FF00-FFEF;
+}
+
 @custom-variant dark (&:where(html:not([data-theme='light']) *));
 
 @theme inline {
@@ -75,6 +92,7 @@
     margin: 0;
     font-family: var(--font);
     font-size: var(--text-body);
+    font-size-adjust: from-font;
     line-height: var(--leading-body);
     color: var(--text);
     background: var(--bg);
@@ -111,21 +129,6 @@
 
   .num { font-variant-numeric: tabular-nums; }
   .transition-ui { transition-duration: var(--dur-hover); transition-timing-function: var(--ease); }
-  .press { transition: transform var(--dur-hover) var(--ease), background-color var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease), border-color var(--dur-hover) var(--ease); }
-  .press:active:not(:disabled) { transform: scale(0.97); }
-
-  /* 聊天区背景：渐变 + ≤4% 不透明度的点阵图案，不影响文字对比 */
-  .chat-wall {
-    background-color: var(--bg);
-    background-image: linear-gradient(180deg, var(--bg) 0%, var(--bg-chat-to) 100%);
-    position: relative;
-  }
-  .chat-wall::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none;
-    opacity: var(--pattern-opacity);
-    background-image: radial-gradient(circle at 12px 12px, var(--text) 1.2px, transparent 1.6px);
-    background-size: 24px 24px;
-  }
 
   .visually-hidden {
     position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -133,19 +136,223 @@
   }
 }
 
-/* 动效门控：性能档位关闭特效或系统减少动效时，过渡与动画直达终态。
-   prefers-reduced-motion 下 Framer Motion 由 MotionConfig reducedMotion="user" 仅保留淡入淡出。 */
+:where(.press, button, [role='button'], [role='menuitem'], [role='option']) {
+  transition: scale var(--press-duration, var(--dur-press-release)) var(--press-ease, var(--ease-spring)),
+    background-color var(--dur-hover) var(--ease), color var(--dur-hover) var(--ease), border-color var(--dur-hover) var(--ease);
+
+  &:active:not(:disabled, [aria-disabled='true'], [data-disabled]) {
+    scale: var(--button-press-scale, var(--press-scale));
+    --press-duration: var(--dur-press);
+    --press-ease: ease-out;
+  }
+}
+:where(button:has(> svg:only-child)) { --button-press-scale: var(--press-icon-scale); }
+
+.conversation-filter::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  inset-block: var(--space-0-5);
+  left: var(--space-0-5);
+  width: calc((100% - 2 * var(--space-0-5)) / 3);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  transform: translateX(var(--filter-offset, 0%));
+  transition: transform var(--dur-panel) var(--ease-move);
+}
+.conversation-filter:has(> :nth-child(2)[aria-selected='true']) { --filter-offset: 100%; }
+.conversation-filter:has(> :nth-child(3)[aria-selected='true']) { --filter-offset: 200%; }
+
+@media (forced-colors: active) {
+  .conversation-filter::before { border-color: Highlight; }
+}
+
+@property --cirrus-frost {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+
+.app-atmosphere {
+  background: radial-gradient(ellipse at 64% 18%, var(--accent-soft), transparent 57%),
+    linear-gradient(155deg, var(--bg), var(--bg-chat-to));
+}
+
+.surface-chrome { background-color: var(--surface-chrome); }
+.surface-glass {
+  background-color: var(--surface-glass);
+  border: 1px solid var(--surface-edge);
+  backdrop-filter: blur(18px) saturate(120%);
+}
+
+.view-enter { animation: view-enter var(--dur-panel) var(--ease) both; }
+.dialog-surface[data-state='closed'] { pointer-events: none; }
+.composer-surface:focus-within { border-color: var(--accent); }
+.menu-surface {
+  --menu-offset: -4px;
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin,
+    var(--radix-context-menu-content-transform-origin, var(--radix-select-content-transform-origin, top left)));
+}
+.menu-surface[data-side='top'] { --menu-offset: 4px; }
+.menu-surface[data-side='left'], .menu-surface[data-side='right'] { --menu-offset: 0px; }
+.menu-surface[data-state='open'] { animation: menu-reveal var(--dur-enter) var(--ease) both; }
+.menu-surface[data-state='closed'] {
+  pointer-events: none;
+  animation: menu-dismiss var(--dur-exit) var(--ease-exit) both;
+}
+
+@keyframes view-enter { from { opacity: 0; transform: translateY(5px); } }
+@keyframes menu-reveal {
+  from { opacity: 0; transform: translateY(var(--menu-offset)) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes menu-dismiss {
+  to { opacity: 0; transform: translateY(var(--menu-offset)) scale(.96); }
+}
+
+.cirrus-timeline {
+  isolation: isolate;
+}
+
+.cirrus-sky {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  pointer-events: none;
+  mask-image: linear-gradient(transparent, black 55%, transparent);
+}
+
+.cirrus-sky::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('../assets/cirrus-sky.jpg') center 58% / cover no-repeat;
+  filter: saturate(.3);
+  opacity: .12;
+}
+
+.cirrus-history {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.cirrus-thread {
+  padding-inline: clamp(12px, 2.5vw, 24px);
+}
+
+.cirrus-bubble-column { max-inline-size: min(560px, 78%); }
+.cirrus-row-content { translate: 0 var(--cirrus-row-offset, 0px); }
+.cirrus-word { display: inline-block; max-inline-size: 100%; }
+
+.cirrus-bubble {
+  --cirrus-tint: var(--bubble-in);
+  --cirrus-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .09 0'/%3E%3C/filter%3E%3Cpath d='M0 0h160v160H0z' filter='url(%23g)'/%3E%3C/svg%3E");
+  border-radius: var(--radius-bubble);
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: var(--message-font-size);
+  line-height: 1.45;
+  backdrop-filter: blur(calc(14px * var(--cirrus-frost)));
+  isolation: isolate;
+  transition: border-radius 200ms ease-out, scale 160ms ease-out, opacity 160ms ease-out;
+}
+
+.cirrus-bubble::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--cirrus-grain), color-mix(in srgb, var(--cirrus-tint) 85%, transparent);
+  opacity: var(--cirrus-frost);
+  pointer-events: none;
+}
+
+.message--self .cirrus-bubble { --cirrus-tint: var(--bubble-out); }
+.message--self[data-group='first'] .cirrus-bubble,
+.message--self[data-group='middle'] .cirrus-bubble { border-end-end-radius: var(--radius-bubble-tail); }
+.message--self[data-group='last'] .cirrus-bubble,
+.message--self[data-group='middle'] .cirrus-bubble { border-start-end-radius: var(--radius-bubble-tail); }
+.message--peer[data-group='first'] .cirrus-bubble,
+.message--peer[data-group='middle'] .cirrus-bubble { border-end-start-radius: var(--radius-bubble-tail); }
+.message--peer[data-group='last'] .cirrus-bubble,
+.message--peer[data-group='middle'] .cirrus-bubble { border-start-start-radius: var(--radius-bubble-tail); }
+
+.cirrus-bubble .message-sender { color: var(--bubble-in-meta); }
+.cirrus-bubble[data-state='open'] { scale: 1.025; }
+.cirrus-thread:has(.cirrus-bubble[data-state='open']) .cirrus-bubble:not([data-state='open']) { opacity: .5; }
+@media (pointer: coarse) {
+  .cirrus-bubble:active:not([data-state='open']) { scale: .97; }
+}
+
+.message--self[data-entering='true'] .cirrus-bubble-column {
+  transform-origin: bottom right;
+  animation: cirrus-send var(--dur-send) var(--ease-spring) both, cirrus-fade var(--dur-enter) var(--ease) both;
+}
+.message--self[data-entering='true'] .cirrus-bubble { animation: cirrus-frost-in var(--dur-send) var(--ease) both; }
+.message--peer[data-entering='true'] .cirrus-bubble {
+  transform-origin: bottom left;
+  animation: cirrus-frost-in 560ms var(--ease) both, cirrus-rise var(--dur-panel) var(--ease) both, cirrus-fade var(--dur-enter) var(--ease) both;
+}
+.message[data-entering='true'][data-long-reply='true'] .cirrus-bubble {
+  animation: cirrus-frost-in 560ms ease-out both, cirrus-open 640ms cubic-bezier(.18, .85, .28, 1) both, cirrus-fade 200ms ease-out both;
+}
+
+.cirrus-leaving .cirrus-bubble {
+  animation: cirrus-melt 420ms ease-in both;
+}
+.message--peer[data-entering='true'] .message-meta { animation: cirrus-fade var(--dur-enter) var(--ease) both; }
+.cirrus-leaving .message-meta { animation: cirrus-fade 420ms ease-in reverse both; }
+
+.message[data-entering='true'][data-long-reply='true'] .cirrus-word {
+  animation: cirrus-word 360ms ease-out both;
+  animation-delay: calc(160ms + var(--word) * 18ms);
+}
+
+.cirrus-exits { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
+.cirrus-exits .message-actions { visibility: hidden; }
+
+@keyframes cirrus-frost-in { from { --cirrus-frost: 0; } to { --cirrus-frost: 1; } }
+@keyframes cirrus-send {
+  from { transform: translate(var(--send-x, 0px), var(--send-y, 22px)) scale(.91); }
+  to { transform: none; }
+}
+@keyframes cirrus-rise { from { transform: translateY(14px) scale(.96); } to { transform: none; } }
+@keyframes cirrus-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cirrus-open { from { clip-path: inset(100% 100% 0 0 round var(--radius-bubble)); } to { clip-path: inset(0 round 0); } }
+@keyframes cirrus-word { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: none; } }
+@keyframes cirrus-melt {
+  from { --cirrus-frost: 1; opacity: 1; }
+  55% { opacity: .85; }
+  to { --cirrus-frost: 0; opacity: 0; }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .surface-glass { background-color: var(--bg-elevated); backdrop-filter: none; }
+  .surface-chrome { background-color: var(--bg-sidebar); }
+  .cirrus-bubble { backdrop-filter: none; }
+  .cirrus-bubble::before { background: var(--cirrus-tint); }
+}
+
+/* 性能档位关闭特效时，过渡与动画直接到达终态。 */
 html[data-effects='off'] *, html[data-effects='off'] *::before, html[data-effects='off'] *::after {
   animation: none !important; transition: none !important;
 }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 1ms !important; transition-property: opacity, color, background-color, border-color !important; }
-  .press:active:not(:disabled) { transform: none; }
+html[data-effects='off'] {
+  --press-scale: 1;
+  --press-icon-scale: 1;
+  --dur-press: 0ms;
+  --dur-press-release: 0ms;
 }
+html[data-effects='off'] .surface-glass { background-color: var(--bg-elevated); backdrop-filter: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 
 /* 切换主题时 300ms 颜色交叉淡化（首次绘制不触发） */
-html.theme-transition *, html.theme-transition *::before, html.theme-transition *::after {
+html.theme-transition:not([data-effects='off']) *,
+html.theme-transition:not([data-effects='off']) *::before,
+html.theme-transition:not([data-effects='off']) *::after {
   transition: background-color var(--dur-panel) var(--ease), color var(--dur-panel) var(--ease), border-color var(--dur-panel) var(--ease), fill var(--dur-panel) var(--ease) !important;
 }

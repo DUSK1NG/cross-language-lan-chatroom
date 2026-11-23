@@ -1,0 +1,69 @@
+plugins {
+    id 'com.android.application' version '8.13.2'
+    id 'com.google.gms.google-services' version '4.4.4' apply false
+}
+
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
+def rustProject = rootProject.file('transport-rust')
+def rustTarget = layout.buildDirectory.dir('rust-target')
+def rustJni = layout.buildDirectory.dir('generated/rust-jni')
+
+android {
+    namespace 'dev.dusk1ng.lanchat'
+    compileSdk 35
+    buildToolsVersion '35.0.1'
+
+    defaultConfig {
+        applicationId 'dev.dusk1ng.lanchat'
+        minSdk 28
+        targetSdk 35
+        versionCode 15
+        versionName '0.3.3'
+        ndk.abiFilters 'arm64-v8a'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    sourceSets.main.assets.srcDir '../../frontend/src/assets/fonts'
+    sourceSets.main.java.srcDir 'src/rustTransport/java'
+    ndkVersion '30.0.16248370'
+    sourceSets.main.jniLibs.srcDir rustJni
+}
+
+dependencies {
+    implementation 'com.google.firebase:firebase-messaging:25.0.1'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+def buildRust = tasks.register('buildRustTransport', Exec) {
+    inputs.files(fileTree(rustProject) { include 'Cargo.toml', 'Cargo.lock', 'src/**/*.rs' })
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.file(rustJni.map { it.file('arm64-v8a/liblanchat_transport.so') })
+    workingDir rustProject
+    commandLine 'cargo', 'build', '--locked', '--release', '--target', 'aarch64-linux-android'
+    doFirst {
+        def ndk = androidComponents.sdkComponents.ndkDirectory.get().asFile
+        def windows = org.gradle.internal.os.OperatingSystem.current().isWindows()
+        def mac = org.gradle.internal.os.OperatingSystem.current().isMacOsX()
+        def host = windows ? 'windows-x86_64' : mac ? 'darwin-x86_64' : 'linux-x86_64'
+        def clang = new File(ndk, "toolchains/llvm/prebuilt/${host}/bin/clang" + (windows ? '.exe' : ''))
+        environment 'CARGO_TARGET_DIR', rustTarget.get().asFile.absolutePath
+        environment 'CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER', clang.absolutePath
+        environment 'CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS', '-C link-arg=--target=aarch64-linux-android28'
+    }
+    doLast {
+        copy {
+            from rustTarget.get().file('aarch64-linux-android/release/liblanchat_transport.so')
+            into rustJni.get().dir('arm64-v8a')
+        }
+    }
+}
+tasks.named('preBuild') { dependsOn buildRust }

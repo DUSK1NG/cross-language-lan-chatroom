@@ -3,16 +3,24 @@
 ## 运行时链路
 
 ```text
-React / TypeScript（Qt WebEngine）
-        ↓ QWebChannel
-ChatBridge / GuiChatController（C++）
+React / TypeScript（WebView2）
+        ↓ Tauri 2 invoke / event
+桌面客户端（Rust：client-core）
         ↓ TLS TCP
-Go Server（Hub、成员连接审批、消息与频道）
+服务端（Rust 单进程：局域网房主模式 / 在线服务器模式）
         ↓
-SQLite（房主本机聊天数据）
+SQLite（本机聊天数据或在线服务器数据）
 ```
 
-React 仅负责界面和交互。TLS、网络连接、房主进程和业务状态保留在 C++ / Go 层。发布版把构建后的前端嵌入 Qt Resource System；最终用户不需要 Node.js。
+React 负责界面和交互。Rust 客户端管理 TLS 连接、房主进程和会话状态，并在同一进程内完成 MLS 附件加密。发布版把 Vite 产物嵌入桌面程序。
+
+桌面客户端使用系统 TLS，服务端使用 rustls，房主服务在独立进程运行。Android 客户端通过 JNI 使用 Rust 传输层连接在线服务。
+
+## 协议与桥接边界
+
+- 协议唯一权威为 `protocol-rust`（crate `lan-chat-protocol`）：帧为 4 字节大端长度 + UTF-8 JSON，长度上限 65536 字节。
+- React 不直接访问 socket、TLS、私钥、子进程或 SQLite，只能通过 `frontend/src/bridge/` 的桥接接口收发状态与命令。
+- React 通过 Tauri 的 `invoke` 提交命令，通过 `listen` 接收连接状态、命令结果和传输进度。
 
 ## 房主数据与首次启动
 
@@ -22,7 +30,7 @@ React 仅负责界面和交互。TLS、网络连接、房主进程和业务状�
 %LocalAppData%\DUSK1NG\LAN Chat\host\
 ```
 
-因此安装目录升级、移动便携包或卸载程序都不会误删房主身份。为了兼容旧版本，如果安装目录 `server-go\certs` 和 `server-go\chat.db` 已存在，则继续使用该数据而不会自动移动。
+房主的证书和数据库独立于安装目录。手动启动脚本也会读取旧安装路径下的证书和数据库。
 
 ## 成员连接审批
 
@@ -36,7 +44,7 @@ React 仅负责界面和交互。TLS、网络连接、房主进程和业务状�
 
 ## 网络与发现
 
-- Go Server 默认监听 TCP `8888`，TLS 最低版本为 1.2。
+- 局域网服务端默认监听 TCP `8888`，TLS 最低版本为 1.2（迁移不得降级）。
 - 房主每秒通过 UDP `38888` 广播名称、地址、端口、公开证书和 SHA-256 指纹。
 - 成员首次接受未知房主前必须人工核对证书指纹；IPv4 变化不会改变已确认的证书信任关系。
 - UDP 广播本身不具备认证，发现到房间不等于确认了房主身份。
@@ -45,6 +53,6 @@ React 仅负责界面和交互。TLS、网络连接、房主进程和业务状�
 
 - 默认最多 64 个连接；登录和读写都有超时；每个连接的入站消息采用令牌桶限流。
 - SQL 查询使用参数化语句；私钥不会经协议、发现广播或发布包传输。
-- TLS 加密并验证客户端到房主的传输，但本项目不提供端到端加密，房主服务端仍可读取消息。
+- TLS 加密并验证客户端到房主的传输。房主服务端可以读取普通消息。客户端用 AES-256-GCM 加密附件，并用 `mls-rs` 保护附件清单。
 - TCP `8888` 仅应在 Windows 防火墙的“专用网络”配置文件中开放，绝不能映射到公网。
 - `server-lan.key`、`chat.db`、聊天记录和访问令牌必须留在房主本地受保护目录，不能加入 Git、同步盘或 Release。

@@ -1,0 +1,30 @@
+[package]
+name = "lan-chat-server"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+bcrypt = "0.17"
+chrono = { version = "0.4", default-features = false, features = ["now"] }
+clap = { version = "4.5", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+if-addrs = "=0.14.0"
+lan-chat-protocol.workspace = true
+rcgen = "=0.13.2"
+ring = "0.17"
+rusqlite = { version = "0.37", features = ["bundled"] }
+rustls-pemfile = "2"
+serde.workspace = true
+serde_json.workspace = true
+subtle = "=2.6.1"
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-rustls.workspace = true
+time = "=0.3.45"
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+lan-chat-client-core = { path = "../crates/client-core" }

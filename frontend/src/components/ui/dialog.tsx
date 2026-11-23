@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '../../lib/cn';
+import { ease, easeExit, scaled } from '../../lib/motion';
 
 type DialogProps = {
   open: boolean;
@@ -19,9 +20,7 @@ type DialogProps = {
 };
 
 /**
- * The one dialog used everywhere (spec §9): centred, 16px radius, --bg-sidebar surface,
- * rgba(0,0,0,.5) overlay, scale .96 → 1 with fade. Radix supplies role="dialog",
- * aria-labelledby, focus trapping and Esc handling.
+ * The shared modal surface. Radix supplies focus trapping, naming and Esc handling.
  */
 export function Dialog({ open, onOpenChange, title, hideTitle = false, description, dismissible = true, className, children }: DialogProps) {
   const block = (event: Event) => { if (!dismissible) event.preventDefault(); };
@@ -32,16 +31,17 @@ export function Dialog({ open, onOpenChange, title, hideTitle = false, descripti
           <DialogPrimitive.Portal forceMount>
             <DialogPrimitive.Overlay asChild forceMount>
               <motion.div className="fixed inset-0 z-40 bg-overlay"
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }} />
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: { duration: scaled(0.15), ease: easeExit } }}
+                transition={{ duration: scaled(0.2), ease }} />
             </DialogPrimitive.Overlay>
             <div className="fixed inset-0 z-50 grid place-items-center p-4 pointer-events-none">
-              <DialogPrimitive.Content asChild forceMount onEscapeKeyDown={block} onPointerDownOutside={block} onInteractOutside={block}
-                aria-describedby={description ? undefined : undefined}>
+              <DialogPrimitive.Content asChild forceMount onEscapeKeyDown={block} onPointerDownOutside={block} onInteractOutside={block}>
                 <motion.section
-                  className={cn('pointer-events-auto relative flex max-h-[calc(100vh-64px)] w-full max-w-[440px] flex-col overflow-hidden rounded-card bg-elevated text-ink shadow-dialog', className)}
-                  initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
-                  transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}>
+                  className={cn('dialog-surface surface-glass pointer-events-auto relative flex max-h-[calc(100vh-64px)] w-full max-w-[440px] flex-col overflow-hidden rounded-card text-ink shadow-dialog', className)}
+                  initial={{ opacity: 0, y: 12, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 12, scale: 0.97, transition: { duration: scaled(0.15), ease: easeExit } }}
+                  transition={{ duration: scaled(0.28), ease }}>
                   <header className={cn('flex items-center gap-3 px-6 pt-6', hideTitle && 'visually-hidden')}>
                     <DialogPrimitive.Title className="flex-1 text-title font-semibold">{title}</DialogPrimitive.Title>
                     {dismissible && !hideTitle && (

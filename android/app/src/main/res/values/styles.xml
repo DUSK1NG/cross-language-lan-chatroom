@@ -1,0 +1,7 @@
+<resources>
+    <style name="LanChatTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#654832</item>
+        <item name="android:colorBackgroundFloating">#FFFCF4</item>
+        <item name="android:windowBackground">#F5EFE4</item>
+    </style>
+</resources>

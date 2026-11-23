@@ -1,26 +1,13 @@
 import { useEffect, useState } from 'react';
 
-/**
- * Motion gate shared by CSS and Framer Motion (spec §11):
- *  - html[data-effects='off'] — the native performance profile turned effects off → no motion at all
- *  - prefers-reduced-motion   — keep fades, drop travel and scale (Framer: reducedMotion="user")
- */
-function prefersReducedMotion() {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
+/** Motion gate shared by CSS and Framer Motion for the selected performance profile. */
 export function effectsDisabled(): boolean {
   return typeof document !== 'undefined' && document.documentElement.dataset.effects === 'off';
 }
 
-/** True when travel/scale animations may run. */
-export function motionAllowed(): boolean {
-  return !prefersReducedMotion() && !effectsDisabled();
-}
-
 /** Spec easing and durations, in seconds for Framer Motion. */
-export const ease = [0.2, 0.8, 0.2, 1] as const;
+export const ease = [0.22, 1, 0.36, 1] as const;
+export const easeExit = [0.45, 0, 0.8, 0.55] as const;
 export const duration = { hover: 0.15, enter: 0.2, panel: 0.3 } as const;
 
 /** Duration multiplier published by the native performance profile. */

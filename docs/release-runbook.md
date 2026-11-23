@@ -1,6 +1,6 @@
 # 发布操作手册（本地 Windows 机器）
 
-适用对象：在装有 Qt / MSVC / OpenSSL / Inno Setup 的 Windows 开发机上，用本地 agent 或手动完成一次发布。把下面的 `X.Y.Z` 替换为目标版本，例如 `1.3.0`。
+使用装有 WebView2、Rust、MSVC、Node、pnpm 和 Inno Setup 的 Windows 开发机。把下面的 `X.Y.Z` 替换为目标版本。
 
 > 与 `docs/release-checklist.md` 的区别：旧清单里的版本号是写死的历史值（如 `1.2.0`），本手册以 `X.Y.Z` 为准。
 
@@ -29,52 +29,37 @@ git rev-parse HEAD
 gh api repos/DUSK1NG/cross-language-lan-chatroom/commits/$(git rev-parse HEAD)/check-runs --jq '.check_runs[] | [.name,.conclusion] | @tsv'
 ```
 
-`Go server`、`React frontend`、`C++ core (headless)`、`C++ GUI (Windows)`、`Windows source launcher` 全部为 `success` 才继续。
+`Rust LAN and online server`、`React frontend`、`Windows desktop host` 和 `Windows source launcher` 全部为 `success` 才继续。
 
-## 3. 构建并测试（必须启用 MLS++）
-
-**先确认 MLS++ 源码存在**，否则构建会静默关闭附件功能（`build-modern.ps1` 只在 `.tools\mlspp\CMakeLists.txt` 存在时才启用 `LAN_CHAT_ENABLE_MLSPP`）：
+## 3. 构建并测试
 
 ```powershell
-Test-Path .\.tools\mlspp\CMakeLists.txt     # 必须为 True
-```
-
-- 若为 `False`：**停止并询问用户**。MLS++ 的锁定版本与校验值在 `vendor/mls/manifest.json`，校验脚本为 `scripts/test-mlspp-supply-chain.ps1`，可参考 `scripts/test-mls-e2e-build.ps1` 的获取与校验流程；不要用未经校验的源码。
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -CheckOnly
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-modern.ps1 -Action Test
-```
-
-通过标准：前端、Go、CTest 全部通过；在输出里能看到 `Enable locked MLS++ source`。允许 `WrapVulkanHeaders` 缺失提示。附件相关测试若被 `QSKIP`（MLS 未启用）视为未通过。
-
-可选但推荐（发布前的供应链与端到端校验）：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-mls-e2e-build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
+pnpm --dir frontend exec vitest run
+cargo test --workspace --locked
 ```
 
 ## 4. 打包并检查
 
 ```powershell
-# 统一运行包（生成 release\LANChat-Windows-x64\ 与 .zip）
+# 统一运行包（生成 release\LANChat-Desktop-Windows-x64\ 与 .zip）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-unified-release.ps1
 
 # 统一包内容检查（含禁止文件检查与启动烟雾测试）
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-member-package.ps1 -PackageDirectory .\release\LANChat-Windows-x64 -AllowLocalHost -Smoke
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-member-package.ps1 -PackageDirectory .\release\LANChat-Desktop-Windows-x64 -Smoke
 
 # 安装器（需要 Inno Setup 6）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-installer.ps1 -Version X.Y.Z -SmokeTest
 ```
 
-再手动做 `docs/release-checklist.md` 第 2 节的 ZIP 内容检查：压缩包内不得出现 `.key/.pem/.crt/.db`、`frontend|client-cpp` 目录、`node_modules|.tools`；`server-go/` 内仅允许 `chat-server.exe`。
+按 [发布验收清单](release-checklist.md) 检查最终 ZIP 的内容。构建在线版时，给打包和安装器脚本传入 `-Edition online`。
 
 ## 5. 记录产物哈希
 
 ```powershell
-Get-FileHash .\release\LANChat-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\release\LANChat-Desktop-Windows-x64.zip -Algorithm SHA256
 Get-FileHash .\release\LANChat-Setup-x64.exe   -Algorithm SHA256
-Get-FileHash .\out\modern-msvc-x64\lan-chat-gui.exe -Algorithm SHA256
+Get-FileHash .\out\desktop\LANChat.exe -Algorithm SHA256
 ```
 
 生成 `release\SHA256SUMS.txt`（每行 `<小写哈希>  <文件名>`，包含 zip 与 exe 两个文件），并把三个哈希与 `git rev-parse --short HEAD` 记入 `docs/release-checklist.md` 的对应小节（单独一个文档提交，走 PR）。
@@ -98,17 +83,17 @@ Get-FileHash .\out\modern-msvc-x64\lan-chat-gui.exe -Algorithm SHA256
 git tag vX.Y.Z-rc.1
 git push origin vX.Y.Z-rc.1
 gh release create vX.Y.Z-rc.1 --prerelease --title "LAN Chat X.Y.Z-rc.1" --notes-file .\docs\release-notes\vX.Y.Z.md `
-  .\release\LANChat-Setup-x64.exe .\release\LANChat-Windows-x64.zip .\release\SHA256SUMS.txt
+  .\release\LANChat-Setup-x64.exe .\release\LANChat-Desktop-Windows-x64.zip .\release\SHA256SUMS.txt
 
 # 正式发布（用户确认后）
 git tag vX.Y.Z
 git push origin vX.Y.Z
 gh release create vX.Y.Z --title "LAN Chat X.Y.Z" --notes-file .\docs\release-notes\vX.Y.Z.md `
-  .\release\LANChat-Setup-x64.exe .\release\LANChat-Windows-x64.zip .\release\SHA256SUMS.txt
+  .\release\LANChat-Setup-x64.exe .\release\LANChat-Desktop-Windows-x64.zip .\release\SHA256SUMS.txt
 ```
 
 说明：
-- 推送 `v*` 标签会触发 CI 的 `C++ GUI (Windows)` 作业；等它通过再创建正式 Release。
+- 等待标签对应的 `Windows desktop host` 检查通过，再创建正式 Release。
 - 发行说明里的卡片图片指向 `master` 上的 `assets/release-card-vX.Y.Z.svg`，该文件必须已合并。
 - 目前没有代码签名证书：发行说明末尾须注明“未签名，请核对 SHA256”。
 - 发布后：把 `docs/release-checklist.md` 记录与 `docs/known-issues.md` 中已验证的条目更新并走 PR。

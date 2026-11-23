@@ -1,0 +1,80 @@
+[
+  {
+    "type": "mls.key_package.publish",
+    "protocol_version": "mls-v1",
+    "key_package": "AAE="
+  },
+  {
+    "type": "mls.key_package.fetch",
+    "command_id": "key-command",
+    "target_user_code": "Member",
+    "room": "team"
+  },
+  {
+    "type": "mls.group.proposal",
+    "group_id": "group-1",
+    "epoch": 1,
+    "proposal_id": "proposal-1",
+    "action": "add",
+    "proposal": "AAE="
+  },
+  {
+    "type": "mls.group.commit",
+    "group_id": "group-1",
+    "epoch": 2,
+    "proposal_id": "proposal-1",
+    "commit": "AAE="
+  },
+  {
+    "type": "mls.group.welcome",
+    "group_id": "group-1",
+    "epoch": 2,
+    "proposal_id": "proposal-1",
+    "welcome": "AAE=",
+    "welcome_digest": "fixture-digest"
+  },
+  {
+    "type": "mls.group.welcome.accept",
+    "group_id": "group-1",
+    "epoch": 2,
+    "proposal_id": "proposal-1",
+    "welcome_digest": "fixture-digest"
+  },
+  {
+    "type": "attachment.init",
+    "room": "team",
+    "upload_id": "upload-1",
+    "logical_size": 48129,
+    "chunk_size": 48128,
+    "expires_at": "2026-11-22T04:10:00Z"
+  },
+  {
+    "type": "attachment.chunk",
+    "upload_id": "upload-1",
+    "ciphertext": "AAE=",
+    "cipher_sha256": "fixture-digest"
+  },
+  {
+    "type": "attachment.resume",
+    "upload_id": "upload-1",
+    "received_indexes": [
+      0,
+      1
+    ],
+    "received_bitmap": "Aw=="
+  },
+  {
+    "type": "attachment.commit",
+    "attachment_id": "attachment-1",
+    "upload_id": "upload-1",
+    "logical_size": 48129
+  },
+  {
+    "type": "attachment.download",
+    "attachment_id": "attachment-1",
+    "chunk_index": 1,
+    "ciphertext": "AAE=",
+    "cipher_sha256": "fixture-digest",
+    "whole_sha256": "fixture-whole-digest"
+  }
+]

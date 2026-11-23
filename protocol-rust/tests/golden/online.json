@@ -1,0 +1,175 @@
+[
+  {
+    "type": "account_register",
+    "username": "测试",
+    "user_code": "Host",
+    "account_password": "fixture-password"
+  },
+  {
+    "type": "account_login",
+    "user_code": "Host",
+    "account_password": "fixture-password"
+  },
+  {
+    "type": "online_sync"
+  },
+  {
+    "type": "dm_contacts",
+    "user_details": [
+      {
+        "username": "测试",
+        "user_code": "Host",
+        "room": "",
+        "is_admin": false
+      }
+    ]
+  },
+  {
+    "type": "dm_lookup",
+    "target_user_code": "Member"
+  },
+  {
+    "type": "dm_received",
+    "message_id": "message-1",
+    "target_user_code": "Host"
+  },
+  {
+    "type": "dm_ack_batch",
+    "message_id": "batch-1"
+  },
+  {
+    "type": "dm_backlog_end",
+    "message_id": "batch-1"
+  },
+  {
+    "type": "dm_image_chunk",
+    "message_id": "image-1",
+    "image_size": 2,
+    "image_data": "AAE="
+  },
+  {
+    "type": "dm_image_get",
+    "message_id": "image-1",
+    "chunk_index": 1
+  },
+  {
+    "type": "dm_file_init",
+    "file_name": "测试.txt",
+    "logical_size": 2
+  },
+  {
+    "type": "dm_file_chunk",
+    "file_data": "AAE=",
+    "attachment_id": "file-1"
+  },
+  {
+    "type": "dm_file_commit",
+    "attachment_id": "file-1"
+  },
+  {
+    "type": "dm_file_get",
+    "attachment_id": "file-1",
+    "chunk_index": 1
+  },
+  {
+    "type": "dm_edit",
+    "message_id": "message-1",
+    "content": "编辑"
+  },
+  {
+    "type": "dm_edited",
+    "message_id": "message-1",
+    "content": "编辑",
+    "revision": 2
+  },
+  {
+    "type": "dm_push_register",
+    "content": "fixture-fcm",
+    "enabled": true
+  },
+  {
+    "type": "dm_push_registration",
+    "enabled": true
+  },
+  {
+    "type": "profile_get",
+    "profile": {
+      "user_code": "Host",
+      "display_name": "测试",
+      "bio": ""
+    }
+  },
+  {
+    "type": "profile_save",
+    "content": "简介"
+  },
+  {
+    "type": "friend_list",
+    "profiles": [
+      {
+        "user_code": "Member",
+        "display_name": "成员",
+        "bio": "",
+        "friendship": "accepted"
+      }
+    ]
+  },
+  {
+    "type": "friend_request",
+    "target_user_code": "Member"
+  },
+  {
+    "type": "friend_respond",
+    "target_user_code": "Host",
+    "action": "accept"
+  },
+  {
+    "type": "friends_changed"
+  },
+  {
+    "type": "group_create",
+    "users": [
+      "Member"
+    ],
+    "content": "测试"
+  },
+  {
+    "type": "group_list",
+    "groups": [
+      {
+        "id": "group-1",
+        "name": "测试",
+        "member_count": 2
+      }
+    ]
+  },
+  {
+    "type": "group_detail",
+    "group_id": "group-1"
+  },
+  {
+    "type": "group_history",
+    "before_message_id": "message-1",
+    "limit": 20,
+    "group_id": "group-1"
+  },
+  {
+    "type": "group_send",
+    "message_id": "message-1",
+    "content": "你好",
+    "group_id": "group-1"
+  },
+  {
+    "type": "group_message",
+    "message_id": "message-1",
+    "content": "你好",
+    "group_id": "group-1"
+  },
+  {
+    "type": "group_leave",
+    "group_id": "group-1"
+  },
+  {
+    "type": "groups_changed"
+  }
+]

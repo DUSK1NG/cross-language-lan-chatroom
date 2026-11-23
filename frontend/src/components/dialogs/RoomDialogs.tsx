@@ -12,29 +12,92 @@ export const roomNamePattern = /^[A-Za-z0-9_]{1,32}$/;
 
 const fieldClass = 'h-10 w-full rounded-md border border-control bg-input px-3 text-body text-ink outline-none transition-colors duration-[var(--dur-hover)] placeholder:text-ink-3 focus:border-accent focus-visible:outline-none';
 
+const validPassword = (value: string) => value.trim() !== '' && new TextEncoder().encode(value).length <= 72;
+
+export function StartPrivateDialog({ pending, feedback, onClose, onSubmit }: {
+  pending: boolean; feedback: CommandFeedbackProps; onClose: () => void; onSubmit: (code: string) => void;
+}) {
+  const [code, setCode] = useState('');
+  return (
+    <Dialog open title="发起私信" dismissible={!pending} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (code.trim() && !pending) onSubmit(code.trim()); }}>
+        <label className="flex flex-col gap-2 text-small text-ink-2">对方的用户代码
+          <input className={fieldClass} value={code} onChange={(event) => setCode(event.target.value)} disabled={pending} required />
+        </label>
+        <CommandFeedback {...feedback} />
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={pending}>取消</Button>
+          <Button type="submit" variant="primary" disabled={!code.trim() || pending}>打开会话</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
 export function CreateRoomDialog({ open, onOpenChange, pending, feedback, onSubmit }: {
   open: boolean; onOpenChange: (open: boolean) => void; pending: boolean; feedback: CommandFeedbackProps;
-  onSubmit: (room: string, isPrivate: boolean, reset: () => void) => void;
+  onSubmit: (room: string, isPrivate: boolean, roomPassword: string, reset: () => void) => void;
 }) {
   const [name, setName] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [password, setPassword] = useState('');
   const valid = roomNamePattern.test(name.trim());
-  const reset = () => { setName(''); setIsPrivate(false); };
+  const invalidPassword = isPrivate && password !== '' && !validPassword(password);
+  const reset = () => { setName(''); setIsPrivate(false); setPassword(''); };
+  const close = (next: boolean) => {
+    if (pending) return;
+    if (!next) setPassword('');
+    onOpenChange(next);
+  };
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!pending) onOpenChange(next); }} title="新建频道" dismissible={!pending}>
-      <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (valid && !pending) onSubmit(name.trim(), isPrivate, reset); }}>
+    <Dialog open={open} onOpenChange={close} title="新建频道" dismissible={!pending}>
+      <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (valid && !invalidPassword && !pending) onSubmit(name.trim(), isPrivate, password, reset); }}>
         <label className="flex flex-col gap-2 text-small text-ink-2">频道名称
           <input aria-label="频道名称" className={fieldClass} value={name} onChange={(event) => setName(event.target.value)} autoFocus placeholder="例如 release_team" />
         </label>
         {name && !valid && <p className="-mt-2 text-small text-warning">只能使用字母、数字和下划线，长度 1-32 位</p>}
         <div className="flex items-center justify-between gap-4 rounded-md bg-bg px-3 py-3">
           <span className="flex items-center gap-2 text-body text-ink"><Lock size={16} aria-hidden="true" className="text-ink-2" />私有频道</span>
-          <Switch label="私有频道" checked={isPrivate} onCheckedChange={setIsPrivate} />
+          <Switch label="私有频道" checked={isPrivate} disabled={pending} onCheckedChange={(checked) => {
+            setIsPrivate(checked);
+            if (!checked) setPassword('');
+          }} />
         </div>
+        {isPrivate && (
+          <label className="flex flex-col gap-2 text-small text-ink-2">频道密码（可选）
+            <input type="password" autoComplete="new-password" className={fieldClass} value={password}
+              disabled={pending} aria-invalid={invalidPassword} onChange={(event) => setPassword(event.target.value)} />
+          </label>
+        )}
+        {invalidPassword && <p className="-mt-2 text-small text-warning">密码不能仅含空白，且最多 72 字节。</p>}
         <CommandFeedback {...feedback} />
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>取消</Button>
-          <Button type="submit" variant="primary" aria-label="确认新建频道" disabled={!valid || pending}>创建</Button>
+          <Button variant="ghost" onClick={() => close(false)} disabled={pending}>取消</Button>
+          <Button type="submit" variant="primary" aria-label="确认新建频道" disabled={!valid || invalidPassword || pending}>创建</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+export function JoinRoomDialog({ room, pending, feedback, onClose, onSubmit }: {
+  room: string; pending: boolean; feedback: CommandFeedbackProps;
+  onClose: () => void; onSubmit: (password: string) => void;
+}) {
+  const [password, setPassword] = useState('');
+  const valid = validPassword(password);
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !pending) onClose(); }} title={`加入 #${room}`} dismissible={!pending}>
+      <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (valid && !pending) onSubmit(password); }}>
+        <label className="flex flex-col gap-2 text-small text-ink-2">频道密码
+          <input type="password" autoComplete="current-password" className={fieldClass} required
+            value={password} disabled={pending} onChange={(event) => setPassword(event.target.value)} />
+        </label>
+        {password !== '' && !valid && <p className="-mt-2 text-small text-warning">密码不能仅含空白，且最多 72 字节。</p>}
+        <CommandFeedback {...feedback} />
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={pending}>取消</Button>
+          <Button type="submit" variant="primary" disabled={!valid || pending}>加入</Button>
         </div>
       </form>
     </Dialog>

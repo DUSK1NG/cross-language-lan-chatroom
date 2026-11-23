@@ -14,10 +14,6 @@ const disconnectedState: BridgeState = {
   permissions: { activeRoomCanManage: false },
   savedConnection: { serverIp: '127.0.0.1', serverPort: 8888, username: 'Alice', userCode: 'A001', caFile: '' },
   hostDefaults: {
-    serverExe: 'C:/chat/server-go/chat-server.exe',
-    certFile: 'C:/chat/certs/server-lan.crt',
-    keyFile: 'C:/chat/certs/server-lan.key',
-    dbFile: 'C:/chat/server-go/chat.db',
     available: true,
     unavailableReason: ''
   }
@@ -25,6 +21,37 @@ const disconnectedState: BridgeState = {
 
 describe('App', () => {
   afterEach(cleanup);
+
+  it('registers an online account with the selected server and user code', () => {
+    const bridge = createFakeBridge({ ...disconnectedState, edition: 'online' });
+    render(<App bridge={bridge} />);
+    expect(screen.queryByRole('button', { name: 'local-host-mode' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('密码')).toHaveAttribute('autocomplete', 'current-password');
+    fireEvent.click(screen.getByRole('button', { name: '注册账号' }));
+    fireEvent.change(screen.getByLabelText('服务器地址'), { target: { value: 'chat.example.com' } });
+    fireEvent.change(screen.getByLabelText('用户代码'), { target: { value: 'A001' } });
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'test-password' } });
+    expect(screen.getByLabelText('密码')).toHaveAttribute('autocomplete', 'new-password');
+    fireEvent.click(screen.getByRole('button', { name: '注册并登录' }));
+    expect(bridge.commands.at(-1)).toMatchObject({ type: 'session.connectOnline', payload: {
+      serverIp: 'chat.example.com', serverPort: 8888, username: 'Alice', userCode: 'A001', password: 'test-password', register: true
+    } });
+  });
+
+  it('displays room presence as a toast instead of a chat message', async () => {
+    const bridge = createFakeBridge({
+      ...disconnectedState,
+      connection: { phase: 'connected', statusText: '已连接', retryable: false },
+      navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } }
+    });
+    render(<App bridge={bridge} />);
+
+    const message = 'Bob#B002 joined the chat';
+    act(() => bridge.publishPresence(message));
+
+    expect((await screen.findByText(message)).closest('[data-sonner-toast]')).not.toBeNull();
+    expect(within(screen.getByRole('region', { name: '聊天' })).queryByText(message)).not.toBeInTheDocument();
+  });
 
   it('renders all connection modes while disconnected', () => {
     render(<App bridge={createFakeBridge(disconnectedState)} />);
@@ -65,13 +92,18 @@ describe('App', () => {
   });
 
   it('opens a TCP tunnel profile without exposing tunnel secrets', () => {
-    render(<App bridge={createFakeBridge(disconnectedState)} />);
+    const certificateFile = 'C:/chat/certs/host.crt';
+    const bridge = createFakeBridge({ ...disconnectedState, savedConnection: { ...disconnectedState.savedConnection, caFile: certificateFile } });
+    render(<App bridge={bridge} />);
     fireEvent.click(screen.getByRole('button', { name: 'tunnel-mode' }));
 
     expect(screen.getByRole('heading', { name: '通过 TCP 隧道加入' })).toBeInTheDocument();
     expect(screen.getByLabelText('隧道地址')).toBeInTheDocument();
     expect(screen.getByLabelText('端口')).toBeInTheDocument();
-    expect(screen.getByLabelText('CA 文件')).toBeInTheDocument();
+    expect(screen.getByText('host.crt')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(certificateFile)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '选择公开证书' }));
+    expect(bridge.commands.at(-1)).toMatchObject({ type: 'session.chooseCertificate', payload: {} });
     expect(screen.queryByLabelText(/令牌|Token|私钥/)).not.toBeInTheDocument();
   });
 
@@ -137,51 +169,26 @@ describe('App', () => {
     });
   });
 
-  it('opens the local host form with bundled paths and dispatches a local-host connection', () => {
+  it('requires a password and submits only the three host credentials', () => {
     const bridge = createFakeBridge(disconnectedState);
     render(<App bridge={bridge} />);
     fireEvent.click(screen.getByRole('button', { name: 'local-host-mode' }));
 
-    expect(screen.getByDisplayValue('C:/chat/server-go/chat-server.exe')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('C:/chat/certs/server-lan.crt')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'start-local-host' }));
+    const password = screen.getByLabelText('密码');
+    const form = password.closest('form')!;
+    expect(form.querySelectorAll('input')).toHaveLength(3);
+    expect(password).toHaveAttribute('type', 'password');
+    expect(password).toBeRequired();
 
-    expect(bridge.commands[0]).toMatchObject({
-      type: 'session.connectLocalHost',
-      payload: {
-        serverExe: 'C:/chat/server-go/chat-server.exe',
-        certFile: 'C:/chat/certs/server-lan.crt',
-        keyFile: 'C:/chat/certs/server-lan.key',
-        dbFile: 'C:/chat/server-go/chat.db',
-        username: 'Alice',
-        userCode: 'A001'
-      }
+    const start = screen.getByRole('button', { name: 'start-local-host' });
+    fireEvent.click(start);
+    expect(bridge.commands.some((command) => command.type === 'session.connectLocalHost')).toBe(false);
+
+    fireEvent.change(password, { target: { value: 'test-host-password' } });
+    fireEvent.click(start);
+    expect(bridge.commands.find((command) => command.type === 'session.connectLocalHost')?.payload).toEqual({
+      username: 'Alice', userCode: 'A001', password: 'test-host-password'
     });
-  });
-
-  it('auto-fills the private key beside the certificate when the bridge default is empty', () => {
-    const bridge = createFakeBridge({
-      ...disconnectedState,
-      hostDefaults: {
-        serverExe: 'C:/chat/server-go/chat-server.exe',
-        certFile: 'C:/chat/server-go/certs/server-lan.crt',
-        keyFile: '',
-        dbFile: 'C:/chat/server-go/chat.db'
-      }
-    });
-    render(<App bridge={bridge} />);
-    fireEvent.click(screen.getByRole('button', { name: 'local-host-mode' }));
-
-    expect(screen.getByDisplayValue('C:/chat/server-go/certs/server-lan.key')).toBeInTheDocument();
-  });
-
-  it('keeps the local host form visible when bridge defaults are incomplete', () => {
-    const bridge = createFakeBridge({ ...disconnectedState, hostDefaults: {} as BridgeState['hostDefaults'] });
-    render(<App bridge={bridge} />);
-    fireEvent.click(screen.getByRole('button', { name: 'local-host-mode' }));
-
-    expect(screen.getByRole('heading', { name: '创建本地聊天室' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'start-local-host' })).toBeDisabled();
   });
 
   it('switches to the workspace when the bridge publishes a connected state', async () => {
@@ -243,7 +250,7 @@ describe('App', () => {
     expect(screen.getByRole('switch', { name: '显示发送时间' })).toHaveAttribute('aria-checked', 'false');
   });
 
-  it('shows the active Go TLS server and endpoint in settings', async () => {
+  it('shows the LAN connection mode and endpoint in settings', async () => {
     const bridge = createFakeBridge({
       ...disconnectedState,
       connection: { phase: 'connected', statusText: '已连接', retryable: false },
@@ -253,7 +260,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
 
-    expect(screen.getByText('Go TLS Server')).toBeInTheDocument();
+    expect(screen.getByText('局域网')).toBeInTheDocument();
     expect(screen.getByText('127.0.0.1:8888')).toBeInTheDocument();
   });
 
@@ -297,7 +304,7 @@ describe('App', () => {
       ...disconnectedState,
       connection: { phase: 'connected', statusText: '已连接', retryable: false },
       navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } },
-      diagnostics: { enabled: false, directory: 'C:/Users/Alice/AppData/Local/LAN Chat/logs' }
+      diagnostics: { enabled: true }
     } as BridgeState);
     render(<App bridge={bridge} />);
     await waitFor(() => expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument());
@@ -305,10 +312,11 @@ describe('App', () => {
 
     expect(screen.getByTestId('settings-scroll-container')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '隐私与安全' }));
+    expect(screen.queryByText('日志目录')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('switch', { name: '记录连接日志' }));
     expect(bridge.commands.at(-1)).toMatchObject({
       type: 'settings.setConnectionLogging',
-      payload: { enabled: true }
+      payload: { enabled: false }
     });
   });
   it('applies accent, message size and bubble radius presets from the appearance settings', async () => {

@@ -1,0 +1,12 @@
+[package]
+name = "lan-chat-transport"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+native-tls = "0.2"
+rustls-pemfile = "2"
+tokio = { workspace = true, features = ["net", "time"] }
+tokio-native-tls = "0.3"

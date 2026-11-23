@@ -1,41 +1,17 @@
-# Local Go build cache
-.go-build-cache/
-.gocache/
-server-go/.gocache*/
-
-# Stage build outputs
-server-go/chat-server.exe
-server-go/server-go.exe
-server-go/*.exe~
-client-cpp/chat-client.exe
-client-cpp/protocol-tests.exe
-client-cpp/*-direct.exe
-client-cpp/build/
-client-cpp/gui/build/
-client-cpp/gui/build-*/
-client-cpp/build-direct/
-client-cpp/build-verify*/
-
 # Generic local verification outputs
 .cache/
 .pnpm-store/
 .tools/
 .superpowers/brainstorm/
 chat-bridge-test-*.txt
-server-go/chat-server-current.exe
-*.test
-coverage.out
-server-go/chat.db
 *.db
 *.db-*
 *.sqlite
 *.sqlite3
 *.sqlite-*
 local-test/
-server-go/*.log
 *.log
 *.log.*
-server-go/certs/
 certs/
 *.key
 *.pem
@@ -61,6 +37,9 @@ frontend/dist/
 # Local diagnostics and image-generation scratch files
 /build-*.log
 /tmp/
+/target/
+/apps/desktop/src-tauri/gen/
 
 # Local implementation worktrees
 .worktrees/
+/Claude-BugHunter/

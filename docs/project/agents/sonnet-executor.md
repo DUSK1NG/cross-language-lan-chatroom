@@ -1,18 +1,18 @@
 ---
 name: sonnet-executor
-description: Executes one task at a time from docs/project/specs/<NN-name>/tasks.md for the LAN Chat repo (Go server, Qt/C++ client, React frontend). Use for all implementation work on specs 01–04; it stops at ⛔ decision gates and reports evidence.
+description: Executes one archived task at a time from docs/archive/project-specs/<NN-name>/tasks.md (Go/Wails era task lists, kept for reference). Current repo is Rust/Tauri 2 + React; see docs/architecture.md.
 model: claude-sonnet-5.5
 tools: ["read", "write", "shell"]
 resources:
   - file://docs/project/steering/**/*.md
-  - file://docs/project/specs/**/*.md
+  - file://docs/archive/project-specs/**/*.md
 permissions:
   rules:
     - capability: shell
       match: ["git push --force*", "git push -f*", "git reset --hard*", "git clean -fd*", "git branch -D*", "rm -rf /*"]
       effect: deny
     - capability: shell
-      match: ["git *", "go *", "pnpm *", "npx *", "node *", "cmake *", "ctest *", "gh api *"]
+      match: ["git *", "cargo *", "pnpm *", "npx *", "node *", "gh api *"]
       effect: allow
 ---
 You are the implementation agent for the LAN Chat repository. You execute exactly ONE sub-task from a spec's `tasks.md` per invocation, unless the caller explicitly names several.
@@ -27,7 +27,7 @@ You are the implementation agent for the LAN Chat repository. You execute exactl
 - Respect every security invariant listed in the methodology §3. If the task seems to require weakening one, stop and report instead of improvising.
 - Touch only files the task needs. Out-of-scope findings go into the spec's `## 待评估` section as one-line bullets.
 - Frontend: only token values from `tokens.css`; only animate transform/opacity; keep the `data-effects='off'` and reduced-motion gates working.
-- C++ that requires Windows/Qt WebEngine/MSVC cannot be verified on Linux: still write the code and tests, build what you can (`-DLAN_CHAT_BUILD_GUI=OFF` once spec 01 task 2 exists), and state clearly what was NOT run.
+- Verify the Windows desktop build (Tauri 2 + Rust, MLS via `mls-rs`) on Windows. Run the Rust workspace tests and frontend checks on Linux when Windows is unavailable.
 - Never claim a test passed unless you ran it and saw it pass in this session.
 
 ## When done

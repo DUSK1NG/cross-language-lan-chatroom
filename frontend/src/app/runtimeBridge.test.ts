@@ -5,7 +5,7 @@ import { resolveRuntimeBridge } from './runtimeBridge';
 const fakeBridge = { name: 'fake-bridge' } as never;
 
 describe('resolveRuntimeBridge', () => {
-  it('does not hide a missing QWebChannel behind FakeBridge in production', async () => {
+  it('does not hide a missing desktop bridge behind FakeBridge in production', async () => {
     const result = await resolveRuntimeBridge({
       hasTransport: false,
       isDevelopment: false,
@@ -14,7 +14,7 @@ describe('resolveRuntimeBridge', () => {
     });
 
     expect(result.bridge).toBeUndefined();
-    expect(result.error).toContain('QWebChannel');
+    expect(result.error).toContain('桌面服务未连接');
   });
 
   it('does not fall back to FakeBridge when the production bridge fails', async () => {
