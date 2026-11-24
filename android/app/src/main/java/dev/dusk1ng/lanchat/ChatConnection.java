@@ -2,6 +2,7 @@ package dev.dusk1ng.lanchat;
 
 import android.util.Base64;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -101,6 +102,8 @@ final class ChatConnection implements Closeable {
         request.put("username", username);
         request.put("account_password", password);
         if (code != null) request.put("user_code", code);
+        request.put("capabilities", new JSONArray().put("online-group-management-v1")
+                .put("online-group-attachments-v1"));
         send(request);
         JSONObject response = receive();
         if (!response.getString("type").equals("login_ok")) {
@@ -156,10 +159,11 @@ final class ChatConnection implements Closeable {
         }
     }
 
-    void uploadAttachment(File source, String name, String peer, LongConsumer progress) throws IOException, JSONException {
+    void uploadAttachment(File source, String name, String peer, boolean group, LongConsumer progress)
+            throws IOException, JSONException {
         long size = source.length();
         JSONObject init = request(packet("dm_file_init").put("file_name", name)
-                .put("target_user_code", peer).put("logical_size", size));
+                .put(group ? "group_id" : "target_user_code", peer).put("logical_size", size));
         String id = init.getString("attachment_id");
         if (!id.matches("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
                 || init.getInt("chunk_size") != CHUNK_BYTES) {

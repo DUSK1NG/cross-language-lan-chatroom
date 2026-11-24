@@ -104,11 +104,15 @@ export function JoinRoomDialog({ room, pending, feedback, onClose, onSubmit }: {
   );
 }
 
-export function RoomManageDialog({ open, onOpenChange, room, pending, feedback, onAction }: {
+export type RoomAction = 'invite' | 'remove_member' | 'delete' | 'grant_admin' | 'revoke_admin' | 'set_password';
+
+export function RoomManageDialog({ open, onOpenChange, room, pending, feedback, canDelete, canEditRoles, canSetPassword, onAction }: {
   open: boolean; onOpenChange: (open: boolean) => void; room: string; pending: boolean; feedback: CommandFeedbackProps;
-  onAction: (action: 'invite' | 'remove_member' | 'delete', memberCode: string, reset: () => void) => void;
+  canDelete: boolean; canEditRoles: boolean; canSetPassword: boolean;
+  onAction: (action: RoomAction, memberCode: string, reset: () => void, roomPassword?: string) => void;
 }) {
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const reset = () => setCode('');
   return (
@@ -119,10 +123,26 @@ export function RoomManageDialog({ open, onOpenChange, room, pending, feedback, 
         </label>
         <CommandFeedback {...feedback} />
         <div className="flex flex-wrap justify-end gap-2">
+          {canEditRoles && <>
+            <Button variant="outline" disabled={!code.trim() || pending} onClick={() => onAction('revoke_admin', code.trim(), reset)}>撤销管理员</Button>
+            <Button variant="outline" disabled={!code.trim() || pending} onClick={() => onAction('grant_admin', code.trim(), reset)}>设为管理员</Button>
+          </>}
           <Button variant="outline" disabled={!code.trim() || pending} onClick={() => onAction('remove_member', code.trim(), reset)}>移除成员</Button>
           <Button variant="primary" disabled={!code.trim() || pending} onClick={() => onAction('invite', code.trim(), reset)}>邀请成员</Button>
         </div>
-        <section className="mt-2 border-t border-divider pt-4">
+        {canSetPassword && (
+          <div className="flex flex-col gap-2 border-t border-divider pt-4">
+            <label className="flex flex-col gap-2 text-small text-ink-2">新频道密码
+              <input type="password" autoComplete="new-password" className={fieldClass} value={password}
+                aria-invalid={password !== '' && !validPassword(password)} disabled={pending} onChange={(event) => setPassword(event.target.value)} />
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={pending} onClick={() => onAction('set_password', '', () => setPassword(''), '')}>清除密码</Button>
+              <Button variant="primary" disabled={pending || !validPassword(password)} onClick={() => onAction('set_password', '', () => setPassword(''), password)}>更新密码</Button>
+            </div>
+          </div>
+        )}
+        {canDelete && <section className="mt-2 border-t border-divider pt-4">
           <h3 className="text-body font-medium text-ink">删除频道</h3>
           <p className="mt-1 text-small text-ink-2">删除后频道内的消息与附件对所有成员不可见，无法恢复。</p>
           {confirmDelete ? (
@@ -133,7 +153,7 @@ export function RoomManageDialog({ open, onOpenChange, room, pending, feedback, 
           ) : (
             <div className="mt-3 flex justify-end"><Button variant="danger-outline" disabled={pending} onClick={() => setConfirmDelete(true)}>删除频道</Button></div>
           )}
-        </section>
+        </section>}
       </div>
     </Dialog>
   );

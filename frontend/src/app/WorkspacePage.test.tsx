@@ -39,6 +39,13 @@ const manyRooms: BridgeState = {
   rooms: [...workspaceState.rooms, ...['design', 'ops', 'release', 'random'].map((roomName) => ({ roomName, memberCount: 3, unreadCount: 0 }))]
 };
 
+const studyOwner: BridgeState = {
+  ...workspaceState,
+  navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'study', title: 'study' } },
+  rooms: workspaceState.rooms.map((room) => room.roomName === 'study' ? { ...room, ownerCode: 'a001' } : room),
+  permissions: { activeRoomCanManage: true }
+};
+
 /** Radix menu triggers open from the keyboard in jsdom (pointer events carry no button state). */
 function openMenu(name: string) {
   fireEvent.keyDown(screen.getByRole('button', { name }), { key: 'Enter' });
@@ -387,8 +394,8 @@ describe('WorkspacePage', () => {
   it('opens member administration actions for users when permitted', () => {
     const state = {
       ...workspaceState,
+      identity: { ...workspaceState.identity, admin: true },
       members: workspaceState.members.map((member) => member.userCode === 'B002' ? { ...member, admin: false } : member),
-      permissions: { activeRoomCanManage: true }
     };
     const bridge = createFakeBridge(state);
     render(<WorkspacePage bridge={bridge} state={state} />);
@@ -487,7 +494,7 @@ describe('WorkspacePage', () => {
   });
 
   it('shows completion feedback for channel actions', async () => {
-    const state = { ...workspaceState, permissions: { activeRoomCanManage: true } };
+    const state = studyOwner;
     render(<WorkspacePage bridge={createFakeBridge(state)} state={state} />);
 
     openMenu('更多');
@@ -541,7 +548,7 @@ describe('WorkspacePage', () => {
   });
 
   it('dispatches channel invite and removal actions from channel management', async () => {
-    const state = { ...workspaceState, permissions: { activeRoomCanManage: true } };
+    const state = studyOwner;
     const bridge = createFakeBridge(state);
     render(<WorkspacePage bridge={bridge} state={state} />);
 
@@ -554,13 +561,13 @@ describe('WorkspacePage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '移除成员' }));
 
     expect(bridge.commands).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'room.action', payload: { action: 'invite', room: 'lobby', targetUserCode: 'B002' } }),
-      expect.objectContaining({ type: 'room.action', payload: { action: 'remove_member', room: 'lobby', targetUserCode: 'B003' } })
+      expect.objectContaining({ type: 'room.action', payload: { action: 'invite', room: 'study', targetUserCode: 'B002' } }),
+      expect.objectContaining({ type: 'room.action', payload: { action: 'remove_member', room: 'study', targetUserCode: 'B003' } })
     ]));
   });
 
   it('asks for confirmation before deleting a channel', async () => {
-    const state = { ...workspaceState, permissions: { activeRoomCanManage: true } };
+    const state = studyOwner;
     const bridge = createFakeBridge(state);
     render(<WorkspacePage bridge={bridge} state={state} />);
 
@@ -568,8 +575,8 @@ describe('WorkspacePage', () => {
     const dialog = screen.getByRole('dialog', { name: '频道管理' });
     fireEvent.click(within(dialog).getByRole('button', { name: '删除频道' }));
     expect(bridge.commands.some(({ type }) => type === 'room.action')).toBe(false);
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '确认删除 #lobby' })); });
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '确认删除 #study' })); });
 
-    expect(bridge.commands).toContainEqual(expect.objectContaining({ type: 'room.action', payload: { action: 'delete', room: 'lobby' } }));
+    expect(bridge.commands).toContainEqual(expect.objectContaining({ type: 'room.action', payload: { action: 'delete', room: 'study' } }));
   });
 });

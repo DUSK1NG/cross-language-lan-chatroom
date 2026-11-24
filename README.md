@@ -32,6 +32,8 @@ Android 在线版从 APK 安装，使用同一套账号。手机和电脑可以�
 
 在线服务器使用 `lan-chat-server --mode online` 启动。`--listen` 设置 TCP 地址和端口，`--db` 指定在线数据库，`--cert` 和 `--key` 指定与客户端所填域名或 IP 匹配的 TLS 证书链和私钥，`--max-clients` 设置连接上限。FCM 参数为 `--fcm-service-account`、`--fcm-relay-url`、`--fcm-relay-secret-file`。跨网络使用时，客户端必须能访问服务器的 TCP 端口。
 
+在线附件存放在数据库旁的同名 `.files` 目录。旧附件迁移、清理及备份恢复见[架构说明](docs/architecture.md#在线存储与迁移)。
+
 Android 系统通知使用 Firebase Cloud Messaging。构建时将 Android 应用配置 `google-services.json` 放到 `android/app/`，在线服务器通过 `--fcm-service-account` 读取同一 Firebase 项目的服务账号 JSON。服务账号文件保留在服务端。
 
 ## 开发

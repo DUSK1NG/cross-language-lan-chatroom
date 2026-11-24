@@ -1,0 +1,194 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Validate tag syntax
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]] || { echo 'Invalid release tag'; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate source version
+        id: version
+        run: |
+          version="${RELEASE_TAG#v}"
+          version="${version%%-rc.*}"
+          node --input-type=module -e "import {checkVersions} from './scripts/check-version.mjs'; if (checkVersions() !== process.argv[1]) throw Error('Tag and workspace version differ')" "$version"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    needs: validate
+    runs-on: windows-latest
+    environment: release
+    strategy:
+      matrix:
+        edition: [lan, online]
+    env:
+      EDITION: ${{ matrix.edition }}
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/rust
+      LANCHAT_UPDATER_PUBLIC_KEY: ${{ vars.LANCHAT_UPDATER_PUBLIC_KEY }}
+      LANCHAT_ONLINE_UPDATER_PUBLIC_KEY: ${{ vars.LANCHAT_ONLINE_UPDATER_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> out/rust
+      - name: Validate signing configuration
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:LANCHAT_UPDATER_PUBLIC_KEY) -or [string]::IsNullOrWhiteSpace($env:LANCHAT_ONLINE_UPDATER_PUBLIC_KEY)) { throw 'Desktop update public keys are missing' }
+          if ($env:LANCHAT_UPDATER_PUBLIC_KEY.Trim() -eq $env:LANCHAT_ONLINE_UPDATER_PUBLIC_KEY.Trim()) { throw 'Desktop editions require distinct update signing keys' }
+          if ($env:RELEASE_TAG -cmatch '-rc\.') {
+            "LANCHAT_UPDATER_ENDPOINT=https://github.com/DUSK1NG/cross-language-lan-chatroom/releases/download/$env:RELEASE_TAG/latest-$env:EDITION-rc.json" >> $env:GITHUB_ENV
+          }
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: ./scripts/package-unified-release.ps1 -Edition $env:EDITION
+      - name: Check LAN TLS
+        if: matrix.edition == 'lan'
+        run: node scripts/p10-tls-acceptance.mjs out/desktop/lan-chat-server.exe
+      - run: ./scripts/package-installer.ps1 -Edition $env:EDITION -Version $env:RELEASE_VERSION
+      - name: Sign installer and create edition manifest
+        env:
+          LAN_SIGNING_KEY: ${{ secrets.LANCHAT_UPDATER_PRIVATE_KEY }}
+          LAN_SIGNING_PASSWORD: ${{ secrets.LANCHAT_UPDATER_PRIVATE_KEY_PASSWORD }}
+          ONLINE_SIGNING_KEY: ${{ secrets.LANCHAT_ONLINE_UPDATER_PRIVATE_KEY }}
+          ONLINE_SIGNING_PASSWORD: ${{ secrets.LANCHAT_ONLINE_UPDATER_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ($env:EDITION -eq 'online') {
+            $env:TAURI_SIGNING_PRIVATE_KEY = $env:ONLINE_SIGNING_KEY
+            $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:ONLINE_SIGNING_PASSWORD
+          } else {
+            $env:TAURI_SIGNING_PRIVATE_KEY = $env:LAN_SIGNING_KEY
+            $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:LAN_SIGNING_PASSWORD
+          }
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'Update private key is missing' }
+          $installer = if ($env:EDITION -eq 'online') { 'LANChat-Online-Setup-x64.exe' } else { 'LANChat-Setup-x64.exe' }
+          npm exec --yes --package '@tauri-apps/cli@2.12.6' -- tauri signer sign --app-version $env:RELEASE_VERSION "release/$installer"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node scripts/make-updater-manifest.mjs $env:RELEASE_TAG release "docs/release-notes/v$env:RELEASE_VERSION.md" $env:EDITION
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.edition }}
+          path: |
+            release/*.zip
+            release/*.exe
+            release/*.sig
+            release/latest-*.json
+          if-no-files-found: error
+
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.1' 'ndk;30.0.16248370'
+      - run: rustup target add aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: android/transport-rust -> ../app/build/rust-target
+      - name: Build signed Android package
+        env:
+          LANCHAT_ANDROID_KEYSTORE_BASE64: ${{ secrets.LANCHAT_ANDROID_KEYSTORE_BASE64 }}
+          LANCHAT_ANDROID_KEY_ALIAS: ${{ secrets.LANCHAT_ANDROID_KEY_ALIAS }}
+          LANCHAT_ANDROID_STORE_PASSWORD: ${{ secrets.LANCHAT_ANDROID_STORE_PASSWORD }}
+          LANCHAT_ANDROID_KEY_PASSWORD: ${{ secrets.LANCHAT_ANDROID_KEY_PASSWORD }}
+          LANCHAT_ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.LANCHAT_ANDROID_GOOGLE_SERVICES_JSON }}
+        run: |
+          test -n "$LANCHAT_ANDROID_KEYSTORE_BASE64"
+          test -n "$LANCHAT_ANDROID_GOOGLE_SERVICES_JSON"
+          export LANCHAT_ANDROID_KEYSTORE="$RUNNER_TEMP/android-release.jks"
+          trap 'rm -f "$LANCHAT_ANDROID_KEYSTORE" android/app/google-services.json' EXIT
+          printf '%s' "$LANCHAT_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$LANCHAT_ANDROID_KEYSTORE"
+          printf '%s' "$LANCHAT_ANDROID_GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          gradle -p android --no-daemon :app:assembleRelease
+          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify android/app/build/outputs/apk/release/app-release.apk
+          mkdir -p release
+          cp android/app/build/outputs/apk/release/app-release.apk release/LANChat-Android-arm64.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: release/LANChat-Android-arm64.apk
+          if-no-files-found: error
+
+  draft:
+    needs: [validate, desktop, android]
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Create draft with signed assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $candidate = $env:RELEASE_TAG -cmatch '-rc\.'
+          $suffix = if ($candidate) { '-rc' } else { '' }
+          $files = @('LANChat-Desktop-Windows-x64.zip', 'LANChat-Online-Windows-x64.zip', 'LANChat-Setup-x64.exe', 'LANChat-Online-Setup-x64.exe', 'LANChat-Setup-x64.exe.sig', 'LANChat-Online-Setup-x64.exe.sig', "latest-lan$suffix.json", "latest-online$suffix.json", 'LANChat-Android-arm64.apk')
+          Push-Location release
+          try {
+            $sums = foreach ($file in $files) {
+              $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$hash  $file"
+            }
+            $sums | Set-Content -LiteralPath SHA256SUMS -Encoding ascii
+            $releaseArgs = @($env:RELEASE_TAG) + $files + @('SHA256SUMS', '--draft', '--verify-tag', '--title', "LAN Chat $env:RELEASE_TAG", '--notes-file', "../docs/release-notes/v$env:RELEASE_VERSION.md")
+            if ($candidate) { $releaseArgs += @('--prerelease', '--latest=false') }
+            gh release create @releaseArgs
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }

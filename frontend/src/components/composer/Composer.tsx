@@ -50,9 +50,11 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const active = state.navigation.activeConversation;
-  const canSendImage = state.edition === 'online' && active?.kind === 'dm';
-  const fileTarget = state.onlineFiles && active?.kind === 'dm' ? active.userCode : undefined;
-  const uploadConversation = active?.kind === 'room' ? active.id : active?.kind === 'dm' ? `dm:${active.userCode}` : undefined;
+  const groupId = active?.kind === 'group' && state.groupAttachments ? active.id : undefined;
+  const canSendImage = state.edition === 'online' && (active?.kind === 'dm' || Boolean(groupId));
+  const fileTarget = state.onlineFiles ? active?.kind === 'dm' ? active.userCode : groupId : undefined;
+  const uploadConversation = active?.kind === 'room' ? active.id
+    : active?.kind === 'dm' ? `dm:${active.userCode}` : active?.kind === 'group' ? `group:${active.id}` : undefined;
   latestDraftRef.current = draft;
   const hasText = draft.trim().length > 0;
   const closeEmoji = useCallback((restoreFocus: boolean) => {
@@ -94,6 +96,7 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
     const content = quote ? `> ${quote.displayName}: ${quote.content}\n${trimmed}` : trimmed;
     const command = active.kind === 'room'
       ? createCommand('chat.sendRoom', { room: active.id, content })
+      : active.kind === 'group' ? createCommand('chat.sendGroup', { groupId: active.id, content })
       : createCommand('chat.sendPrivate', { targetUserCode: active.userCode, content });
     pendingIdRef.current = command.id;
     setPending(true);
@@ -156,10 +159,11 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
 
   const sendFiles = useCallback((paths?: string[]) => {
     if (!fileTarget || paths?.length === 0) return;
-    const command = createCommand(paths ? 'onlineFile.dropUpload' : 'onlineFile.chooseUpload', { targetUserCode: fileTarget, ...(paths ? { paths } : {}) });
-    beginUpload(command.id, `dm:${fileTarget}`);
+    const scope = groupId ? { groupId } : { targetUserCode: fileTarget };
+    const command = createCommand(paths ? 'onlineFile.dropUpload' : 'onlineFile.chooseUpload', { ...scope, ...(paths ? { paths } : {}) });
+    beginUpload(command.id, groupId ? `group:${groupId}` : `dm:${fileTarget}`);
     bridge.dispatch(command);
-  }, [fileTarget, beginUpload, bridge]);
+  }, [fileTarget, groupId, beginUpload, bridge]);
 
   useEffect(() => {
     const runtime = window.runtime;
@@ -170,8 +174,8 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
 
   const chooseImage = () => {
     if (!active || pendingIdRef.current) return;
-    if (active.kind === 'dm' && canSendImage) {
-      const command = createCommand('image.chooseUpload', { targetUserCode: active.userCode });
+    if (canSendImage && (active.kind === 'dm' || groupId)) {
+      const command = createCommand('image.chooseUpload', active.kind === 'dm' ? { targetUserCode: active.userCode } : { groupId });
       pendingIdRef.current = command.id;
       setPending(true);
       setFeedback({ status: 'pending', message: '正在发送图片…' });

@@ -17,10 +17,18 @@
 git checkout master
 git pull --ff-only
 git status --short            # 必须为空
-node .\scripts\check-version.mjs   # 必须输出“版本一致：X.Y.Z”
+node .\scripts\check-version.mjs   # 必须输出“发布版本一致：X.Y.Z”
 ```
 
-三处版本号（`installer/LANChat.iss`、`scripts/package-installer.ps1`、`frontend/src/changelog/releaseNotes.ts`）必须都是 `X.Y.Z`；不一致先修，再继续。发行说明 `docs/release-notes/vX.Y.Z.md` 必须已存在。
+先修改根 `Cargo.toml` 的工作区版本和桌面版本说明，再运行 `node scripts/check-version.mjs --sync`。发行说明位于 `docs/release-notes/vX.Y.Z.md`。
+
+签名发布由 `.github/workflows/release.yml` 处理。在 GitHub 的 `release` 环境配置发布审批。LAN 使用 `LANCHAT_UPDATER_PRIVATE_KEY` 和 `LANCHAT_UPDATER_PRIVATE_KEY_PASSWORD`，Online 使用 `LANCHAT_ONLINE_UPDATER_PRIVATE_KEY` 和 `LANCHAT_ONLINE_UPDATER_PRIVATE_KEY_PASSWORD`，两版使用不同的签名密钥。仓库变量 `LANCHAT_UPDATER_PUBLIC_KEY` 和 `LANCHAT_ONLINE_UPDATER_PUBLIC_KEY` 配置各版随客户端编译的公钥。
+
+Android 发布使用 Secrets `LANCHAT_ANDROID_KEYSTORE_BASE64`、`LANCHAT_ANDROID_KEY_ALIAS`、`LANCHAT_ANDROID_STORE_PASSWORD`、`LANCHAT_ANDROID_KEY_PASSWORD` 和 `LANCHAT_ANDROID_GOOGLE_SERVICES_JSON`。签名密钥须能覆盖已发行 APK。工作流解码 keystore 到 runner 临时目录，构建结束后删除临时签名文件。
+
+工作流根据已存在的 `vX.Y.Z` 或 `vX.Y.Z-rc.N` 标签生成两版桌面 ZIP、Inno 安装器、签名、独立清单和已签名 Android APK。稳定版使用 `latest-lan.json` 与 `latest-online.json`，候选版清单名带 `-rc`，候选客户端绑定该候选标签的更新地址。清单生成时核对安装器实际产品名和版本。全部资产构建成功后创建草稿，公开发布按批准范围执行。
+
+首次启用签名更新时，用安装器覆盖现有安装。之后在设置的「关于」主动检查、下载并确认安装。安装包校验 HTTPS、包大小、发布签名和签名中的版本。便携版从对应发布页下载 ZIP 后解压运行。更新异常时撤回发布清单并按配套的数据备份恢复合适版本。
 
 ## 2. 确认 CI 绿灯
 
@@ -82,20 +90,14 @@ Get-FileHash .\out\desktop\LANChat.exe -Algorithm SHA256
 # 预发布演练
 git tag vX.Y.Z-rc.1
 git push origin vX.Y.Z-rc.1
-gh release create vX.Y.Z-rc.1 --prerelease --title "LAN Chat X.Y.Z-rc.1" --notes-file .\docs\release-notes\vX.Y.Z.md `
-  .\release\LANChat-Setup-x64.exe .\release\LANChat-Desktop-Windows-x64.zip .\release\SHA256SUMS.txt
 
 # 正式发布（用户确认后）
 git tag vX.Y.Z
 git push origin vX.Y.Z
-gh release create vX.Y.Z --title "LAN Chat X.Y.Z" --notes-file .\docs\release-notes\vX.Y.Z.md `
-  .\release\LANChat-Setup-x64.exe .\release\LANChat-Desktop-Windows-x64.zip .\release\SHA256SUMS.txt
 ```
 
 说明：
-- 等待标签对应的 `Windows desktop host` 检查通过，再创建正式 Release。
-- 发行说明里的卡片图片指向 `master` 上的 `assets/release-card-vX.Y.Z.svg`，该文件必须已合并。
-- 目前没有代码签名证书：发行说明末尾须注明“未签名，请核对 SHA256”。
+- 工作流创建草稿后，核对标签对应的 `Windows desktop host` 检查、签名、清单及批准的交付资产，再按用户授权公开。
 - 发布后：把 `docs/release-checklist.md` 记录与 `docs/known-issues.md` 中已验证的条目更新并走 PR。
 
 ## 回滚

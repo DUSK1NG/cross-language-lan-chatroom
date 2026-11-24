@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Result, ensure};
 use lan_chat_protocol::{Message, ROOM_PASSWORD_MAX_BYTES, RoomInfo};
@@ -22,8 +22,12 @@ impl Room {
                 || peer.room == name)
     }
 
-    fn can_manage(&self, peer: &Peer) -> bool {
+    fn can_administer(&self, peer: &Peer) -> bool {
         peer.admin || self.owner == peer.identity.code
+    }
+
+    pub(super) fn can_manage(&self, peer: &Peer) -> bool {
+        self.can_administer(peer) || (peer.room_roles && self.admins.contains(&peer.identity.code))
     }
 }
 
@@ -76,12 +80,11 @@ impl Hub {
             owner: owner.clone(),
             private: request.private,
             allowed: HashMap::from([(owner, true)]),
+            admins: HashSet::new(),
             password_hash: hash,
             generation: Uuid::new_v4(),
         };
-        if let Some(hash) = &room.password_hash {
-            self.store.save_protected_room(&request.room, &room, hash)?;
-        }
+        self.store.save_lan_room(&request.room, &room)?;
         self.rooms.insert(request.room.clone(), room);
         self.system(id, "", &format!("Channel #{} created", request.room));
         self.move_room(id, &request.room);
@@ -132,80 +135,148 @@ impl Hub {
         let missing = Rejected("Channel not found or cannot be changed");
         ensure!(request.room != LOBBY, missing);
         let room = self.rooms.get(&request.room).ok_or(missing)?;
+        let actor = &self.clients[&id];
+        let administrator = room.can_administer(actor);
+        let roles = actor.room_roles;
         ensure!(
-            room.can_manage(&self.clients[&id]),
+            room.can_manage(actor),
             Rejected("Channel owner or administrator permission required")
         );
 
         if request.content == "delete" {
-            if room.password_hash.is_some() {
-                self.store.delete_protected_room(&request.room)?;
-            }
+            ensure!(
+                administrator,
+                Rejected("Only the channel owner or host can delete this channel")
+            );
+            self.store.delete_lan_room(&request.room)?;
             let members = self.room_clients(&request.room);
-            for member in &members {
-                self.clients
-                    .get_mut(member)
-                    .expect("room client exists")
-                    .room = LOBBY.into();
-            }
+            self.rooms.remove(&request.room);
             for member in members {
+                self.evict_room_member(member);
                 self.system(
                     member,
                     "",
                     &format!("Channel #{} was deleted", request.room),
                 );
             }
-            self.rooms.remove(&request.room);
+            self.refresh_room_directories();
+            if roles {
+                self.confirm_room(id, request);
+            }
             return Ok(());
         }
 
-        let invite = match request.content.as_str() {
-            "invite" => true,
-            "remove_member" => false,
+        let mut updated = room.clone();
+        let mut target = None;
+        let feedback = match request.content.as_str() {
+            "set_password" => {
+                ensure!(
+                    roles && administrator && room.private,
+                    Rejected("Only the channel owner or host can set a private channel password")
+                );
+                validate_password(&request.room_password)?;
+                updated.password_hash = if request.room_password.is_empty() {
+                    None
+                } else {
+                    Some(password_hash(&request.room_password)?)
+                };
+                "Channel password updated"
+            }
+            action @ ("invite" | "remove_member" | "grant_admin" | "revoke_admin") => {
+                let code = user_code(&request.target_user_code)?;
+                target = self.codes.get(&code).copied();
+                match action {
+                    "invite" => {
+                        updated.allowed.insert(code, true);
+                        "Member invited to"
+                    }
+                    "remove_member" => {
+                        ensure!(
+                            code != room.owner
+                                && (administrator || !room.admins.contains(&code))
+                                && !target.is_some_and(|target| self.clients[&target].admin),
+                            Rejected("Cannot remove that channel member")
+                        );
+                        updated.allowed.remove(&code);
+                        updated.admins.remove(&code);
+                        "Member removed from"
+                    }
+                    "grant_admin" => {
+                        ensure!(
+                            roles
+                                && administrator
+                                && code != room.owner
+                                && (!room.private || room.allowed.get(&code) == Some(&true)),
+                            Rejected(
+                                "Invite the member before granting channel administrator permissions"
+                            )
+                        );
+                        updated.admins.insert(code);
+                        "Channel administrator appointed in"
+                    }
+                    "revoke_admin" => {
+                        ensure!(
+                            roles && administrator,
+                            Rejected(
+                                "Only the channel owner or host can revoke channel administrator permissions"
+                            )
+                        );
+                        updated.admins.remove(&code);
+                        "Channel administrator revoked in"
+                    }
+                    _ => unreachable!("room action"),
+                }
+            }
             _ => return Err(Rejected("Unsupported room action").into()),
         };
-        let code = user_code(&request.target_user_code)?;
-        let room = self.rooms.get_mut(&request.room).expect("channel exists");
-        let previous = if invite {
-            room.allowed.insert(code.clone(), true)
-        } else {
-            room.allowed.remove(&code)
-        };
-        let protected = room.password_hash.is_some();
-        if let Some(hash) = &room.password_hash
-            && let Err(error) = self.store.save_protected_room(&request.room, room, hash)
-        {
-            if let Some(value) = previous {
-                room.allowed.insert(code, value);
-            } else {
-                room.allowed.remove(&code);
-            }
-            return Err(error);
-        }
-
-        let target = self.codes.get(&code).copied();
-        if invite {
-            self.system(id, "", &format!("Member invited to #{}", request.room));
-            if let Some(target) = target
-                && protected
-                && self.clients.contains_key(&target)
-            {
-                self.rooms(target);
-            }
-        } else {
-            if let Some(target) = target
-                && self.clients[&target].room == request.room
-            {
-                self.clients.get_mut(&target).expect("target exists").room = LOBBY.into();
+        self.store.save_lan_room(&request.room, &updated)?;
+        self.rooms.insert(request.room.clone(), updated);
+        if let Some(target) = target {
+            if request.content == "remove_member" && self.clients[&target].room == request.room {
+                self.evict_room_member(target);
                 self.system(
                     target,
                     "",
                     &format!("You were removed from #{}", request.room),
                 );
             }
-            self.system(id, "", &format!("Member removed from #{}", request.room));
+            self.rooms(target);
+        }
+        if request.content == "set_password" {
+            self.refresh_room_directories();
+        }
+        self.system(id, "", &format!("{feedback} #{}", request.room));
+        if roles {
+            self.confirm_room(id, request);
         }
         Ok(())
+    }
+
+    fn refresh_room_directories(&mut self) {
+        let clients: Vec<_> = self
+            .clients
+            .iter()
+            .filter_map(|(id, peer)| peer.room_roles.then_some(*id))
+            .collect();
+        for id in clients {
+            self.rooms(id);
+        }
+    }
+
+    fn evict_room_member(&mut self, id: Uuid) {
+        let peer = self.clients.get_mut(&id).expect("active room member");
+        peer.room = LOBBY.into();
+        peer.attachment_session = Uuid::new_v4();
+        if peer.room_roles {
+            self.deliver(
+                id,
+                Message {
+                    kind: "room_join".into(),
+                    room: LOBBY.into(),
+                    ..Message::default()
+                },
+            );
+        }
     }
 
     fn move_room(&mut self, id: Uuid, room: &str) {
@@ -217,6 +288,7 @@ impl Hub {
         self.room_system(&old, &format!("{name} left room {old}"));
         if let Some(peer) = self.clients.get_mut(&id) {
             peer.room = room.into();
+            peer.attachment_session = Uuid::new_v4();
             self.room_system(room, &format!("{name} joined room {room}"));
         }
     }

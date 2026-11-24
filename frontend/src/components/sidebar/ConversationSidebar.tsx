@@ -19,6 +19,7 @@ type ConversationSidebarProps = {
   onFilterChange: (filter: ConversationFilter) => void;
   onCreateRoom: () => void;
   onStartPrivate?: () => void;
+  onGroupTools?: () => void;
   onJoinProtectedRoom: (room: string) => void;
   onSettings?: () => void;
   onConnectionApprovals?: () => void;
@@ -32,13 +33,13 @@ type ConversationSidebarProps = {
 /** Below this many conversations the separate search field is hidden (spec §3). */
 const searchThreshold = 6;
 
-export function ConversationSidebar({ state, bridge, filter, onFilterChange, onCreateRoom, onStartPrivate, onJoinProtectedRoom, onSettings, onConnectionApprovals, onManageRoom, canManageRoom, onSelected, footer }: ConversationSidebarProps) {
+export function ConversationSidebar({ state, bridge, filter, onFilterChange, onCreateRoom, onStartPrivate, onGroupTools, onJoinProtectedRoom, onSettings, onConnectionApprovals, onManageRoom, canManageRoom, onSelected, footer }: ConversationSidebarProps) {
   const online = state.edition === 'online';
   const newLabel = online ? '发起私信' : '新建频道';
   const onNew = online ? onStartPrivate : onCreateRoom;
   const [query, setQuery] = useState('');
   const entries = useMemo(() => buildEntries(state, filter, query), [state, filter, query]);
-  const total = state.rooms.length + state.directMessages.length;
+  const total = state.rooms.length + state.directMessages.length + (state.groups?.length ?? 0);
   const showSearch = total >= searchThreshold || query.length > 0;
   const approvals = state.connectionApprovals?.length ?? 0;
 
@@ -51,6 +52,7 @@ export function ConversationSidebar({ state, bridge, filter, onFilterChange, onC
     }
     bridge.dispatch(entry.kind === 'room'
       ? createCommand('conversation.selectRoom', { room: entry.room.roomName })
+      : entry.kind === 'group' ? createCommand('conversation.selectGroup', { groupId: entry.group.id })
       : createCommand('conversation.selectDirect', { userCode: entry.direct.userCode }));
     onSelected?.();
   };
@@ -60,8 +62,10 @@ export function ConversationSidebar({ state, bridge, filter, onFilterChange, onC
     ...(state.identity.admin && onConnectionApprovals ? [{ label: '连接审批', icon: <ShieldCheck />, onSelect: onConnectionApprovals, trailing: approvals > 0 ? <span className="num text-small text-danger-text">{approvals}</span> : undefined }] : []),
     ...(canManageRoom && onManageRoom ? [{ label: '频道管理', icon: <SlidersHorizontal />, onSelect: onManageRoom }] : []),
     ...(onNew ? [{ label: newLabel, icon: <Plus />, onSelect: onNew }] : []),
+    ...(onGroupTools ? [{ label: '群聊与好友', icon: <MessagesSquare />, onSelect: onGroupTools }] : []),
     { label: '刷新列表', icon: <RefreshCw />, onSelect: () => {
       if (!online) bridge.dispatch(createCommand('directory.refreshRooms', {}));
+      if (state.onlineGroups) bridge.dispatch(createCommand('directory.refreshGroups', {}));
       bridge.dispatch(createCommand('directory.refreshUsers', {}));
     } }
   ];
@@ -89,7 +93,8 @@ export function ConversationSidebar({ state, bridge, filter, onFilterChange, onC
       ) : (
         <div className="min-h-0 flex-1">
           {query ? <EmptyState icon={<Search />} title="没有匹配的会话" description={`没有找到与“${query}”相关的频道或私信。`} />
-            : online ? <EmptyState icon={<MessagesSquare />} title="还没有私信" description="点击右上角＋，输入对方的用户代码。" />
+            : online ? <EmptyState icon={<MessagesSquare />} title={onGroupTools ? '还没有会话' : '还没有私信'} description="点击右上角＋，输入对方的用户代码。"
+                action={onGroupTools && <Button variant="outline" onClick={onGroupTools}>群聊与好友</Button>} />
             : <EmptyState icon={<MessagesSquare />} title={filter === 'direct' ? '还没有私信' : '还没有频道'}
                 description={filter === 'direct' ? '在成员列表中选择一位成员即可开始私聊。' : '创建一个频道，或等待房主邀请你加入。'}
                 action={<Button variant="primary" onClick={onCreateRoom}><Plus size={16} aria-hidden="true" />创建或加入频道</Button>} />}

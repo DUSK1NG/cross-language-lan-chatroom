@@ -25,6 +25,10 @@ pub struct OnlineProfile {
     pub bio: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub friendship: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub role: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub joined_at: String,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -33,6 +37,18 @@ pub struct OnlineGroup {
     pub id: String,
     pub name: String,
     pub member_count: i64,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub owner_user_code: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub announcement: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub created_at: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub role: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub invited_by_user_code: String,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub joined_after: i64,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]

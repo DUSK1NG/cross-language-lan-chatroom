@@ -44,6 +44,27 @@ export function installDesktopRuntime(tauri: Tauri): void {
   };
 }
 
+export type DesktopUpdate = {
+  version: string;
+  notes: string | null;
+  date: string | null;
+  size: number;
+  installed: boolean;
+  portableUrl: string;
+};
+
+export function desktopUpdateRuntime() {
+  const tauri = window.__TAURI__;
+  if (!tauri) return undefined;
+  return {
+    check: () => tauri.core.invoke<DesktopUpdate | null>('check_desktop_update'),
+    download: (version: string) => tauri.core.invoke<void>('download_desktop_update', { version }),
+    install: (version: string) => tauri.core.invoke<void>('install_desktop_update', { version }),
+    progress: (update: (received: number) => void) => tauri.event.listen<number>('desktop-update:progress', ({ payload }) => update(payload)),
+    openZip: (url: string) => tauri.core.invoke<void>('chat_open_url', { url })
+  };
+}
+
 export type RuntimeBridgeResolution = {
   bridge?: ChatBridgeClient;
   error?: string;

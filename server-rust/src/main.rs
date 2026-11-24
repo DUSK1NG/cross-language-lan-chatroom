@@ -17,9 +17,9 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, ValueEnum};
 use lan_chat_protocol::{
     HEARTBEAT, HEARTBEAT_TIMEOUT_SECS, MAX_FRAME_BYTES, Message, ONLINE_ACCOUNTS, ONLINE_FILES,
-    ONLINE_GROUPS, ONLINE_IMAGES, ONLINE_MESSAGE_EDIT, ONLINE_SOCIAL, read_message,
-    write_message,
+    ONLINE_GROUPS, ONLINE_IMAGES, ONLINE_MESSAGE_EDIT, ONLINE_SOCIAL, read_message, write_message,
 };
+use lan_chat_protocol::{ONLINE_GROUP_ATTACHMENTS, ONLINE_GROUP_MANAGEMENT, ONLINE_HISTORY_PAGES};
 use online::Online;
 use store::{Rejected, Store};
 use tokio::{
@@ -72,6 +72,12 @@ struct Args {
     listen: SocketAddr,
     #[arg(long)]
     db: PathBuf,
+    #[arg(long)]
+    migrate_storage: bool,
+    #[arg(long, requires = "migrate_storage")]
+    dry_run: bool,
+    #[arg(long, requires = "migrate_storage", conflicts_with = "dry_run")]
+    prune_legacy: bool,
     #[arg(long)]
     cert: Option<PathBuf>,
     #[arg(long)]
@@ -141,6 +147,13 @@ async fn main() -> Result<()> {
         Semaphore::MAX_PERMITS
     );
     ensure!(!args.db.as_os_str().is_empty(), "db 路径不能为空");
+    if args.migrate_storage {
+        ensure!(
+            args.online || args.mode == Some(Mode::Online),
+            "迁移附件需要 --mode online"
+        );
+        return online::migrate_storage(&args.db, args.dry_run, args.prune_legacy);
+    }
     args.cert = args
         .cert
         .or_else(|| env::var_os("CHAT_TLS_CERT").map(PathBuf::from));
@@ -237,6 +250,14 @@ async fn serve(
     .context("TLS 握手或认证消息超时")??;
 
     let heartbeat = wants_heartbeat(&request);
+    let group_management = request
+        .capabilities
+        .iter()
+        .any(|value| value == ONLINE_GROUP_MANAGEMENT);
+    let group_attachments = request
+        .capabilities
+        .iter()
+        .any(|value| value == ONLINE_GROUP_ATTACHMENTS);
     let login_state = online.clone();
     let identity = spawn_blocking(move || {
         login_state
@@ -269,11 +290,18 @@ async fn serve(
         ONLINE_FILES,
         ONLINE_SOCIAL,
         ONLINE_GROUPS,
+        ONLINE_HISTORY_PAGES,
     ]
     .map(str::to_owned)
     .to_vec();
     if heartbeat {
         capabilities.push(HEARTBEAT.into());
+    }
+    if group_management {
+        capabilities.push(ONLINE_GROUP_MANAGEMENT.into());
+    }
+    if group_attachments {
+        capabilities.push(ONLINE_GROUP_ATTACHMENTS.into());
     }
     send(
         &mut stream,
@@ -299,7 +327,7 @@ async fn serve(
         register_state
             .lock()
             .expect("online state poisoned")
-            .register(id, identity, tx)
+            .register(id, identity, tx, group_management, group_attachments)
     })
     .await?;
     let result = match register_result {

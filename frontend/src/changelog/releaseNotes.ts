@@ -18,6 +18,14 @@ export const currentRelease: ReleaseNotes = {
   summary: '局域网与在线版的开发和兼容性测试版本。',
   sections: [
     {
+      kind: 'new',
+      title: '局域网',
+      items: [
+        { title: '频道权限可恢复', detail: '房主重启后恢复频道、密码、白名单、频道管理员及禁言。访客每次连接仍需房主批准。' },
+        { title: '搜索和更新', detail: '消息支持查找更早的匹配结果。可从设置的「关于」主动检查更新。' }
+      ]
+    },
+    {
       kind: 'fixed',
       title: '修复',
       items: [

@@ -162,7 +162,7 @@ function OnlineImage({ message, bridge }: { message: MessageItemData; bridge: Ch
   const [source, setSource] = useState('');
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
-  const { messageId, userCode, imagePeer, imageSize } = message;
+  const { messageId, userCode, imagePeer, imageGroup, imageSize } = message;
 
   useEffect(() => {
     const node = holder.current;
@@ -171,7 +171,7 @@ function OnlineImage({ message, bridge }: { message: MessageItemData; bridge: Ch
     const observer = new IntersectionObserver((entries) => {
       if (!entries.some((entry) => entry.isIntersecting)) return;
       observer.disconnect();
-      const command = createCommand('image.read', { messageId, userCode, targetUserCode: imagePeer, imageSize });
+      const command = createCommand('image.read', { messageId, userCode, targetUserCode: imagePeer, groupId: imageGroup, imageSize });
       unsubscribe = bridge.subscribeCommandResult((result) => {
         if (result.id !== command.id) return;
         unsubscribe?.();
@@ -182,7 +182,7 @@ function OnlineImage({ message, bridge }: { message: MessageItemData; bridge: Ch
     });
     observer.observe(node);
     return () => { observer.disconnect(); unsubscribe?.(); };
-  }, [bridge, messageId, userCode, imagePeer, imageSize]);
+  }, [bridge, messageId, userCode, imagePeer, imageGroup, imageSize]);
 
   return (
     <div ref={holder}>
@@ -252,6 +252,6 @@ function areEqual(previous: MessageBubbleProps, next: MessageBubbleProps) {
     && previous.onRecall === next.onRecall && previous.onJumpToQuote === next.onJumpToQuote
     && a.messageId === b.messageId && a.content === b.content && a.time === b.time && a.createdAt === b.createdAt && a.displayName === b.displayName
     && a.userCode === b.userCode && a.selfMessage === b.selfMessage && a.systemMessage === b.systemMessage
-    && a.deliveryState === b.deliveryState && a.attachment === b.attachment && a.imageSize === b.imageSize && a.imagePeer === b.imagePeer;
+    && a.deliveryState === b.deliveryState && a.attachment === b.attachment && a.imageSize === b.imageSize && a.imagePeer === b.imagePeer && a.imageGroup === b.imageGroup;
 }
 

@@ -1,5 +1,8 @@
+mod files;
 mod social;
 mod transfer;
+
+pub(crate) use files::{migrate_schema, migrate_storage};
 
 use std::{
     collections::HashMap,
@@ -24,6 +27,15 @@ struct Peer {
     sender: Sender<Message>,
     backlog_end: Option<i64>,
     image: Option<transfer::ImageUpload>,
+    group_management: bool,
+    group_attachments: bool,
+}
+
+fn hide_group_attachment(message: &mut Message) {
+    message.image_size = 0;
+    message.attachment_id.clear();
+    message.file_name.clear();
+    message.logical_size = 0;
 }
 
 pub struct Online {
@@ -68,6 +80,8 @@ impl Online {
         id: Uuid,
         identity: Identity,
         sender: Sender<Message>,
+        group_management: bool,
+        group_attachments: bool,
     ) -> Result<()> {
         self.peers.insert(
             id,
@@ -76,6 +90,8 @@ impl Online {
                 sender,
                 backlog_end: None,
                 image: None,
+                group_management,
+                group_attachments,
             },
         );
         self.send_backlog(id)
@@ -162,7 +178,8 @@ impl Online {
             "private_chat" => self.private_chat(id, identity, request, None)?,
             "dm_image_chunk" => self.receive_image(id, identity, request)?,
             "dm_image_get" => self.read_image(id, identity, request)?,
-            "dm_file_init" | "dm_file_chunk" | "dm_file_commit" | "dm_file_get" => {
+            "dm_file_init" | "dm_file_chunk" | "dm_file_commit" | "dm_file_get"
+            | "dm_file_cancel" => {
                 self.transfer_file(id, identity, request)?;
             }
             "dm_edit" => self.edit(identity, request)?,
@@ -185,13 +202,14 @@ impl Online {
                 self.social(id, identity, request)?;
             }
             "group_list" | "group_create" | "group_detail" | "group_send" | "group_history"
-            | "group_leave" => {
+            | "group_leave" | "group_invite" | "group_kick" | "group_role" | "group_transfer"
+            | "group_update" | "group_announce" => {
                 self.group(id, identity, request)?;
             }
             "history_request" if request.private => {
                 let target = private_target(identity, request)?;
                 let key = conversation(&identity.code, &target);
-                self.history(id, "private", &key, request)?;
+                self.history(id, "private", &key, request, 0)?;
             }
             "history_request" => bail!(Rejected("在线版仅提供私信")),
             _ => bail!(Rejected("在线版不支持此命令")),
@@ -204,7 +222,7 @@ impl Online {
         id: Uuid,
         identity: &Identity,
         request: &Message,
-        image: Option<&[u8]>,
+        image: Option<&transfer::PublishedImage>,
     ) -> Result<()> {
         let target = private_target(identity, request)?;
         ensure!(
@@ -223,7 +241,7 @@ impl Online {
             user_code: identity.display_code.clone(),
             target_user_code: target.clone(),
             content: request.content.clone(),
-            image_size: image.map_or(0, |data| data.len() as i64),
+            image_size: image.map_or(0, |image| image.size),
             created_at: now(),
             delivery_state: "sent".into(),
             ..Message::default()
@@ -233,10 +251,14 @@ impl Online {
             Rejected("私信超过服务器允许的长度")
         );
         let key = conversation(&identity.code, &target);
-        if self
-            .store
-            .insert_chat(&message, "private", &key, &identity.code, &target, image)?
-        {
+        if self.store.insert_online_message(
+            &message,
+            "private",
+            &key,
+            &identity.code,
+            &target,
+            image,
+        )? {
             self.publish_private(&identity.code, &message);
         } else {
             let state = self.store.0.query_row(
@@ -286,7 +308,7 @@ impl Online {
         (edited.username, edited.created_at, edited.delivery_state, edited.revision) = self.store.0.query_row(
             "UPDATE chat_messages SET content=?,revision=revision+1
              WHERE kind='private' AND conversation_key=? AND sender_code=? AND target_code=?
-               AND message_id=? AND revision=? AND recalled=0 AND COALESCE(length(online_image),0)=0 AND crypto_json IS NULL
+               AND message_id=? AND revision=? AND recalled=0 AND COALESCE(online_image_size,length(online_image),0)=0 AND crypto_json IS NULL
                AND NOT EXISTS (SELECT 1 FROM online_files WHERE chat_id=chat_messages.id)
              RETURNING sender_username,created_at,delivery_state,revision",
             params![request.content, conversation(&identity.code, &target), identity.code, target, request.message_id, request.revision],
@@ -364,8 +386,20 @@ impl Online {
         self.send_backlog(id)
     }
 
-    fn history(&mut self, id: Uuid, kind: &str, key: &str, request: &Message) -> Result<()> {
-        let (messages, has_more) = self.store.history(kind, key, request)?;
+    fn history(
+        &mut self,
+        id: Uuid,
+        kind: &str,
+        key: &str,
+        request: &Message,
+        after_id: i64,
+    ) -> Result<()> {
+        let (mut messages, has_more) = self.store.history(kind, key, request, after_id)?;
+        if kind == "online_group" && !self.peers[&id].group_attachments {
+            for message in &mut messages {
+                hide_group_attachment(message);
+            }
+        }
         let mut reply = Message {
             kind: "history_response".into(),
             command_id: request.command_id.clone(),
@@ -413,5 +447,236 @@ fn delivery_receipt(message_id: String, state: &str) -> Message {
         delivery_state: state.into(),
         content: state.into(),
         ..Message::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use tokio::sync::mpsc;
+
+    use super::*;
+
+    #[test]
+    fn online_migration_group_visibility_and_legacy_transfer() -> Result<()> {
+        let directory = std::env::temp_dir().join(format!("lan-chat-online-{}", Uuid::new_v4()));
+        fs::create_dir(&directory)?;
+        let database = directory.join("chat.db");
+        let store = Store::open(&database)?;
+        for code in ["alice", "bobby", "carol"] {
+            store.0.execute(
+                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                [code],
+            )?;
+        }
+        store.0.execute("INSERT INTO online_friendships VALUES ('alice','bobby','alice',1),('alice','carol','alice',1)", [])?;
+        let legacy_id = Uuid::new_v4().to_string();
+        let original = b"old sqlite attachment";
+        let photo = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1sAAAAASUVORK5CYII=";
+        let legacy_photo = STANDARD.decode(photo)?;
+        let chat_id: i64 = store.0.query_row(
+            "INSERT INTO chat_messages(message_id,kind,conversation_key,sender_username,sender_code,target_code,content,created_at,online_image)
+             VALUES (?,'private','alice:bobby','alice','alice','bobby','旧版附件搜索','',?) RETURNING id",
+            params![legacy_id, legacy_photo], |row| row.get(0),
+        )?;
+        store.0.execute(
+            "INSERT INTO online_files(id,owner,recipient,name,size,received,expires,chat_id)
+                 VALUES (?1,'alice','bobby','fixture.txt',?2,?2,0,?3)",
+            params![legacy_id, original.len(), chat_id],
+        )?;
+        store.0.execute(
+            "INSERT INTO online_file_chunks VALUES (?,0,?)",
+            params![legacy_id, original],
+        )?;
+        drop(store);
+        migrate_storage(&database, true, false)?;
+        assert!(!directory.join("chat.db.files").exists());
+        migrate_storage(&database, false, false)?;
+        migrate_storage(&database, false, false)?;
+        migrate_storage(&database, false, true)?;
+
+        let store = Store::open(&database)?;
+        assert_eq!(
+            store
+                .0
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            3
+        );
+        assert_eq!(
+            store
+                .0
+                .query_row("SELECT COUNT(*) FROM online_file_chunks", [], |row| row
+                    .get::<_, i64>(0))?,
+            0
+        );
+        assert_eq!(
+            store
+                .history(
+                    "private",
+                    "alice:bobby",
+                    &Message {
+                        search_query: "附件搜索".into(),
+                        ..Message::default()
+                    },
+                    0
+                )?
+                .0[0]
+                .image_size,
+            legacy_photo.len() as i64
+        );
+        let mut online = Online::new(store, None);
+        let mut connect = |code: &str, modern| -> Result<_> {
+            let id = Uuid::new_v4();
+            let identity = Identity {
+                username: code.into(),
+                display_code: code.into(),
+                code: code.into(),
+            };
+            let (sender, receiver) = mpsc::channel(128);
+            online.register(id, identity.clone(), sender, modern, modern)?;
+            Ok((id, identity, receiver))
+        };
+        let (a, alice, mut ar) = connect("alice", true)?;
+        let (b, bobby, mut br) = connect("bobby", true)?;
+        let (_, _, mut legacy) = connect("bobby", false)?;
+        let (c, carol, mut cr) = connect("carol", true)?;
+        let pop = |rx: &mut mpsc::Receiver<Message>, kind: &str| -> Result<Message> {
+            while let Ok(message) = rx.try_recv() {
+                if message.kind == kind {
+                    return Ok(message);
+                }
+            }
+            bail!("missing {kind}")
+        };
+
+        let get = Message {
+            kind: "dm_file_get".into(),
+            attachment_id: legacy_id.clone(),
+            ..Message::default()
+        };
+        assert!(online.handle_command(c, &carol, &get).is_err());
+        online.handle_command(b, &bobby, &get)?;
+        assert_eq!(
+            STANDARD.decode(pop(&mut br, "dm_file_get")?.file_data)?,
+            original
+        );
+        online.handle_command(
+            b,
+            &bobby,
+            &Message {
+                kind: "dm_image_get".into(),
+                user_code: "alice".into(),
+                target_user_code: "alice".into(),
+                message_id: legacy_id,
+                ..Message::default()
+            },
+        )?;
+        assert_eq!(
+            STANDARD.decode(pop(&mut br, "dm_image_get")?.image_data)?,
+            legacy_photo
+        );
+
+        online.handle_command(
+            a,
+            &alice,
+            &Message {
+                kind: "group_create".into(),
+                room: "迁移测试群".into(),
+                users: vec!["bobby".into()],
+                ..Message::default()
+            },
+        )?;
+        let group = pop(&mut ar, "group_create")?.groups.remove(0).id;
+        let request = |kind: &str, target: &str, content: &str| Message {
+            kind: kind.into(),
+            group_id: group.clone(),
+            target_user_code: target.into(),
+            content: content.into(),
+            ..Message::default()
+        };
+        online.handle_command(
+            a,
+            &alice,
+            &Message {
+                message_id: Uuid::new_v4().to_string(),
+                ..request("group_send", "", "邀请前的消息")
+            },
+        )?;
+        assert!(
+            online
+                .handle_command(b, &bobby, &request("group_invite", "carol", ""))
+                .is_err()
+        );
+        online.handle_command(a, &alice, &request("group_invite", "carol", ""))?;
+        online.handle_command(c, &carol, &request("group_history", "", ""))?;
+        assert!(pop(&mut cr, "history_response")?.messages.is_empty());
+
+        online.handle_command(
+            a,
+            &alice,
+            &Message {
+                file_name: "group.txt".into(),
+                logical_size: original.len() as i64,
+                ..request("dm_file_init", "", "")
+            },
+        )?;
+        let file = pop(&mut ar, "dm_file_init")?.attachment_id;
+        online.handle_command(
+            a,
+            &alice,
+            &Message {
+                attachment_id: file.clone(),
+                file_data: STANDARD.encode(original),
+                ..request("dm_file_chunk", "", "")
+            },
+        )?;
+        online.handle_command(
+            a,
+            &alice,
+            &Message {
+                attachment_id: file.clone(),
+                ..request("dm_file_commit", "", "")
+            },
+        )?;
+        let _ = pop(&mut legacy, "group_message")?;
+        let old_view = pop(&mut legacy, "group_message")?;
+        assert_eq!(old_view.content, "[文件] group.txt");
+        assert!(old_view.attachment_id.is_empty());
+        let get = Message {
+            attachment_id: file,
+            ..request("dm_file_get", "", "")
+        };
+        online.handle_command(c, &carol, &get)?;
+        assert_eq!(
+            STANDARD.decode(pop(&mut cr, "dm_file_get")?.file_data)?,
+            original
+        );
+        online.handle_command(
+            a,
+            &alice,
+            &Message {
+                message_id: Uuid::new_v4().to_string(),
+                image_size: legacy_photo.len() as i64,
+                image_data: photo.into(),
+                ..request("dm_image_chunk", "", "")
+            },
+        )?;
+        assert_eq!(pop(&mut legacy, "group_message")?.image_size, 0);
+        online.handle_command(a, &alice, &request("group_kick", "carol", ""))?;
+        assert!(online.handle_command(c, &carol, &get).is_err());
+        online.handle_command(a, &alice, &request("group_invite", "carol", ""))?;
+        assert!(online.handle_command(c, &carol, &get).is_err());
+        online.handle_command(a, &alice, &request("group_transfer", "bobby", ""))?;
+        assert!(
+            online
+                .handle_command(b, &bobby, &request("group_leave", "", ""))
+                .is_err()
+        );
+        online.handle_command(a, &alice, &request("group_leave", "", ""))?;
+        drop(online);
+        fs::remove_dir_all(directory)?;
+        Ok(())
     }
 }

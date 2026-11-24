@@ -14,10 +14,10 @@ type ConversationRowProps = { entry: ConversationEntry; active: boolean; onSelec
  */
 export const ConversationRow = memo(function ConversationRow({ entry, active, onSelect }: ConversationRowProps) {
   const label = entryLabel(entry);
-  const mls = entry.kind === 'room' ? entry.room.mls : entry.direct.mls;
+  const mls = entry.kind === 'room' ? entry.room.mls : entry.kind === 'dm' && entry.direct.mls;
   const secondary = entry.kind === 'room'
     ? `${entry.room.memberCount} 人${entry.room.private ? ' · 私有' : ''}`
-    : `#${entry.direct.userCode}`;
+    : entry.kind === 'group' ? `${entry.group.memberCount} 人` : `#${entry.direct.userCode}`;
   return (
     <button type="button" aria-label={label} aria-current={active ? 'page' : undefined} onClick={() => onSelect(entry)}
       className={cn('press group flex h-16 w-full cursor-pointer items-center gap-3 rounded-md px-2 text-left',

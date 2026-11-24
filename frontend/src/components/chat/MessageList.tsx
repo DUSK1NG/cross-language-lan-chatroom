@@ -32,7 +32,7 @@ type MessageListProps = {
 export function conversationKey(state: BridgeState) {
   const conversation = state.navigation.activeConversation;
   if (!conversation) return '';
-  return conversation.kind === 'room' ? `room:${conversation.id}` : `dm:${conversation.userCode}`;
+  return conversation.kind === 'dm' ? `dm:${conversation.userCode}` : `${conversation.kind}:${conversation.id}`;
 }
 
 /** Reads the scroller's client box so the virtualiser works with mocked geometry in jsdom too. */

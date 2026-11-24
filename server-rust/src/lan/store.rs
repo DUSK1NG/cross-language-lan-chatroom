@@ -1,8 +1,13 @@
-use std::{collections::HashMap, path::Path, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    time::Duration,
+};
 
 use anyhow::{Context, Result, ensure};
 use lan_chat_protocol::{LOCAL_HOST_PASSWORD_MAX_BYTES, Message};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
+use uuid::Uuid;
 
 use super::{LOBBY, Room, validate_room_name};
 use crate::store::{Identity, Rejected, Store, now, user_code};
@@ -11,12 +16,6 @@ const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS local_host_credential (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     password_hash BLOB NOT NULL
-);
-CREATE TABLE IF NOT EXISTS protected_rooms (
-    name TEXT PRIMARY KEY,
-    owner_code TEXT NOT NULL,
-    password_hash BLOB NOT NULL,
-    allowed_members TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS offline_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,6 +119,63 @@ CREATE INDEX IF NOT EXISTS idx_attachments_room
     ON attachments(room);
 ";
 
+fn migrate_lan_rooms(tx: &Connection) -> Result<()> {
+    let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version >= 2 {
+        return Ok(());
+    }
+    tx.execute_batch(
+        "CREATE TABLE lan_rooms (
+            name TEXT PRIMARY KEY CHECK(name <> 'lobby'),
+            owner_code TEXT NOT NULL,
+            private INTEGER NOT NULL CHECK(private IN (0, 1)),
+            password_hash TEXT CHECK(password_hash IS NULL OR private = 1),
+            allowed_members TEXT NOT NULL,
+            admins TEXT NOT NULL,
+            generation TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE lan_mutes (user_code TEXT PRIMARY KEY);",
+    )?;
+    let legacy: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='protected_rooms')",
+        [],
+        |row| row.get(0),
+    )?;
+    if legacy {
+        {
+            let mut statement = tx.prepare(
+                "SELECT name,owner_code,password_hash,allowed_members FROM protected_rooms",
+            )?;
+            let mut rows = statement.query([])?;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(0)?;
+                validate_room_name(&name)?;
+                let owner: String = row.get(1)?;
+                ensure!(
+                    user_code(&owner)? == owner,
+                    "频道 {name} 的房主代码未规范化"
+                );
+                let hash = String::from_utf8(row.get(2)?)?;
+                hash.parse::<bcrypt::HashParts>()
+                    .with_context(|| format!("频道 {name} 的密码哈希无效"))?;
+                let members: String = row.get(3)?;
+                let allowed: HashMap<String, bool> = serde_json::from_str(&members)?;
+                for code in allowed.keys() {
+                    ensure!(user_code(code)? == *code, "频道 {name} 的成员代码未规范化");
+                }
+                tx.execute(
+                    "INSERT INTO lan_rooms(name,owner_code,private,password_hash,allowed_members,admins,generation)
+                     VALUES (?,?,1,?,?,'[]',?)",
+                    params![name, owner, hash, members, Uuid::new_v4().to_string()],
+                )?;
+            }
+        }
+        tx.execute_batch("DROP TABLE protected_rooms;")?;
+    }
+    tx.pragma_update(None, "user_version", 2)?;
+    Ok(())
+}
+
 impl Store {
     pub(super) fn open_lan(path: &Path) -> Result<Self> {
         let mut store = Self::open_mode(path, "lan")?;
@@ -179,6 +235,7 @@ impl Store {
             }
         }
         tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS idx_offline_messages_message_id ON offline_messages(message_id);")?;
+        migrate_lan_rooms(&tx)?;
         tx.commit()?;
         Ok(store)
     }
@@ -262,45 +319,79 @@ impl Store {
         Ok(())
     }
 
-    pub(super) fn protected_rooms(&self) -> Result<HashMap<String, Room>> {
+    pub(super) fn lan_rooms(&self) -> Result<HashMap<String, Room>> {
         let mut statement = self
             .0
-            .prepare("SELECT name,owner_code,password_hash,allowed_members FROM protected_rooms")?;
+            .prepare("SELECT name,owner_code,private,password_hash,allowed_members,admins,generation FROM lan_rooms")?;
         let mut rows = statement.query([])?;
         let mut rooms = HashMap::new();
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
             validate_room_name(&name)?;
-            let hash = String::from_utf8(row.get::<_, Vec<u8>>(2)?)?;
+            let owner: String = row.get(1)?;
+            let private: bool = row.get(2)?;
+            let hash = row.get::<_, Option<String>>(3)?;
+            let allowed: HashMap<String, bool> = serde_json::from_str(&row.get::<_, String>(4)?)?;
+            let admins: HashSet<String> = serde_json::from_str(&row.get::<_, String>(5)?)?;
             ensure!(
-                name != LOBBY && !hash.is_empty(),
-                "私有频道 {name} 的数据库记录无效"
+                name != LOBBY && user_code(&owner)? == owner && (private || hash.is_none()),
+                "频道 {name} 的数据库记录无效"
             );
-            let generation = uuid::Uuid::new_v4();
+            if let Some(hash) = &hash {
+                hash.parse::<bcrypt::HashParts>()
+                    .with_context(|| format!("频道 {name} 的密码哈希无效"))?;
+            }
+            for code in allowed.keys().chain(&admins) {
+                ensure!(user_code(code)? == *code, "频道 {name} 的成员代码未规范化");
+            }
             rooms.insert(
                 name,
                 Room {
-                    owner: row.get(1)?,
-                    password_hash: Some(hash),
-                    allowed: serde_json::from_str(&row.get::<_, String>(3)?)?,
-                    private: true,
-                    generation,
+                    owner,
+                    password_hash: hash,
+                    allowed,
+                    admins,
+                    private,
+                    generation: Uuid::parse_str(&row.get::<_, String>(6)?)?,
                 },
             );
         }
         Ok(rooms)
     }
 
-    pub(super) fn save_protected_room(&self, name: &str, room: &Room, hash: &str) -> Result<()> {
+    pub(super) fn save_lan_room(&self, name: &str, room: &Room) -> Result<()> {
         self.0.execute(
-            "INSERT INTO protected_rooms (name,owner_code,password_hash,allowed_members)
-             VALUES (?,?,?,?) ON CONFLICT(name) DO UPDATE SET allowed_members=excluded.allowed_members",
-            params![name, room.owner, hash.as_bytes(), serde_json::to_string(&room.allowed)?],
+            "INSERT INTO lan_rooms (name,owner_code,private,password_hash,allowed_members,admins,generation)
+             VALUES (?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET
+                password_hash=excluded.password_hash, allowed_members=excluded.allowed_members, admins=excluded.admins",
+            params![name, room.owner, room.private, room.password_hash,
+                    serde_json::to_string(&room.allowed)?, serde_json::to_string(&room.admins)?, room.generation.to_string()],
         )?;
         Ok(())
     }
 
-    pub(super) fn delete_protected_room(&mut self, name: &str) -> Result<()> {
+    pub(super) fn is_lan_muted(&self, code: &str) -> Result<bool> {
+        Ok(self.0.query_row(
+            "SELECT EXISTS(SELECT 1 FROM lan_mutes WHERE user_code=?)",
+            [code],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub(super) fn set_lan_muted(&self, code: &str, muted: bool) -> Result<()> {
+        if muted {
+            self.0.execute(
+                "INSERT INTO lan_mutes (user_code) VALUES (?) ON CONFLICT DO NOTHING",
+                [code],
+            )?;
+        } else {
+            self.0
+                .execute("DELETE FROM lan_mutes WHERE user_code=?", [code])?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn delete_lan_room(&mut self, name: &str) -> Result<()> {
         let tx = self.0.transaction()?;
         for sql in [
             "DELETE FROM chat_messages WHERE kind='room' AND room=?",
@@ -313,7 +404,7 @@ impl Store {
             "DELETE FROM mls_group_welcomes WHERE group_id IN (SELECT group_id FROM mls_groups WHERE room=?)",
             "DELETE FROM mls_group_members WHERE group_id IN (SELECT group_id FROM mls_groups WHERE room=?)",
             "DELETE FROM mls_groups WHERE room=?",
-            "DELETE FROM protected_rooms WHERE name=?",
+            "DELETE FROM lan_rooms WHERE name=?",
         ] {
             tx.execute(sql, [name])?;
         }
@@ -393,4 +484,70 @@ fn normalize_username(value: &str) -> String {
 
 pub(super) fn password_hash(password: &str) -> Result<String> {
     Ok(bcrypt::hash_with_result(password, 10)?.format_for_version(bcrypt::Version::TwoA))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lan_room_migration_and_writes_are_atomic() -> Result<()> {
+        let path = std::env::temp_dir().join(format!("lan-rooms-{}.db", Uuid::new_v4()));
+        let legacy = Connection::open(&path)?;
+        legacy.execute_batch(
+            "CREATE TABLE protected_rooms (
+                name TEXT PRIMARY KEY, owner_code TEXT NOT NULL,
+                password_hash BLOB NOT NULL, allowed_members TEXT NOT NULL
+             );",
+        )?;
+        let hash = bcrypt::hash("legacy-room-password", 4)?;
+        legacy.execute(
+            "INSERT INTO protected_rooms VALUES('legacy','owner1',?,?)",
+            params![hash.as_bytes(), r#"{"guest1":true}"#],
+        )?;
+        drop(legacy);
+
+        let store = Store::open_lan(&path)?;
+        assert_eq!(
+            store
+                .0
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
+            2
+        );
+        let mut room = store
+            .lan_rooms()?
+            .remove("legacy")
+            .context("legacy room missing")?;
+        assert!(room.private && room.allowed["guest1"]);
+        assert_eq!(room.password_hash.as_deref(), Some(hash.as_str()));
+        let generation = room.generation;
+        room.admins.insert("guest1".into());
+        store.save_lan_room("legacy", &room)?;
+        store.set_lan_muted("guest1", true)?;
+        drop(store);
+
+        let mut reopened = Store::open_lan(&path)?;
+        let db_name = "legacy";
+        let mut room = reopened
+            .lan_rooms()?
+            .remove(db_name)
+            .context("persisted room missing")?;
+        assert_eq!(room.generation, generation);
+        assert!(room.admins.contains("guest1") && reopened.is_lan_muted("guest1")?);
+        reopened.0.execute_batch(
+            "CREATE TRIGGER fixture_reject_write BEFORE UPDATE ON lan_rooms
+             BEGIN SELECT RAISE(ABORT,'fixture write rejected'); END;",
+        )?;
+        room.admins.clear();
+        assert!(reopened.save_lan_room(db_name, &room).is_err());
+        assert!(reopened.lan_rooms()?[db_name].admins.contains("guest1"));
+        reopened
+            .0
+            .execute_batch("DROP TRIGGER fixture_reject_write")?;
+        reopened.delete_lan_room(db_name)?;
+        assert!(!reopened.lan_rooms()?.contains_key(db_name));
+        drop(reopened);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
 }

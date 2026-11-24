@@ -115,5 +115,8 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $
 
 $installer = Join-Path $OutputDirectory $(if ($Edition -eq 'online') { 'LANChat-Online-Setup-x64.exe' } else { 'LANChat-Setup-x64.exe' })
 Require-File $installer 'Compiled installer'
+if ((Get-Item -LiteralPath $installer).VersionInfo.ProductVersion.Trim() -ne $Version) {
+    throw "Installed package version differs from $Version."
+}
 Write-Host "Installer: $installer" -ForegroundColor Green
 Write-Host 'Installer behavior: per-user install, Start menu and optional desktop shortcut, Windows uninstall entry, and local host data preserved on uninstall.' -ForegroundColor Green

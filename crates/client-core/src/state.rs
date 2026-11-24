@@ -4,7 +4,9 @@ use std::{
 };
 
 use chrono::{DateTime, Local};
-use lan_chat_protocol::{Message, OnlineUser, RECALLED_MESSAGE, RoomInfo};
+use lan_chat_protocol::{
+    Message, OnlineGroup, OnlineProfile, OnlineUser, RECALLED_MESSAGE, RoomInfo,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -65,13 +67,27 @@ impl Conversation {
         }
     }
 
+    pub fn group(id: &str, name: &str) -> Self {
+        Self {
+            kind: "group",
+            id: id.into(),
+            title: name.into(),
+            user_code: String::new(),
+        }
+    }
+
     pub fn key(&self) -> String {
         format!("{}:{}", self.kind, self.id)
     }
 
     pub fn history(&self, query: &str) -> Message {
         Message {
-            kind: "history_request".into(),
+            kind: if self.kind == "group" {
+                "group_history"
+            } else {
+                "history_request"
+            }
+            .into(),
             search_query: query.into(),
             limit: 100,
             private: self.kind == "dm",
@@ -81,6 +97,11 @@ impl Conversation {
                 String::new()
             },
             target_user_code: self.user_code.clone(),
+            group_id: if self.kind == "group" {
+                self.id.clone()
+            } else {
+                String::new()
+            },
             ..Message::default()
         }
     }
@@ -106,6 +127,8 @@ pub struct Row {
     pub image_size: Option<i64>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub image_peer: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub image_group: String,
     #[serde(skip)]
     pub revision: i64,
 }
@@ -123,6 +146,10 @@ pub struct State {
     pub rooms: Vec<RoomInfo>,
     pub members: Vec<OnlineUser>,
     pub direct: BTreeMap<String, Conversation>,
+    pub groups: BTreeMap<String, OnlineGroup>,
+    pub group_members: Vec<OnlineProfile>,
+    pub friends: Vec<OnlineProfile>,
+    pub group_before: HashMap<String, String>,
     pub histories: HashMap<String, Vec<Row>>,
     pub unread: HashMap<String, usize>,
     pub approvals: HashMap<String, Message>,
@@ -131,6 +158,8 @@ pub struct State {
     pub room_commands: HashSet<String>,
     pub query: String,
     pub search: Vec<Row>,
+    pub search_before: Option<String>,
+    pub search_request: Option<(String, bool)>,
     pub logging: bool,
     pub performance: String,
     pub scan: Option<Uuid>,
@@ -152,6 +181,10 @@ impl State {
             rooms: Vec::new(),
             members: Vec::new(),
             direct: BTreeMap::new(),
+            groups: BTreeMap::new(),
+            group_members: Vec::new(),
+            friends: Vec::new(),
+            group_before: HashMap::new(),
             histories: HashMap::new(),
             unread: HashMap::new(),
             approvals: HashMap::new(),
@@ -160,6 +193,8 @@ impl State {
             room_commands: HashSet::new(),
             query: String::new(),
             search: Vec::new(),
+            search_before: None,
+            search_request: None,
             logging: false,
             performance: "Automatic".into(),
             scan: None,
@@ -169,11 +204,51 @@ impl State {
 
     pub fn select(&mut self, conversation: Conversation) -> Message {
         self.unread.remove(&conversation.key());
+        self.group_members.clear();
         self.query.clear();
         self.search.clear();
+        self.search_before = None;
+        self.search_request = None;
         let request = conversation.history("");
         self.active = Some(conversation);
         request
+    }
+
+    pub fn replace_groups(&mut self, incoming: Vec<OnlineGroup>) {
+        let groups: BTreeMap<_, _> = incoming
+            .into_iter()
+            .map(|group| (group.id.clone(), group))
+            .collect();
+        for (id, old) in &self.groups {
+            if groups
+                .get(id)
+                .is_none_or(|group| group.joined_after != old.joined_after)
+            {
+                let key = format!("group:{id}");
+                self.histories.remove(&key);
+                self.unread.remove(&key);
+                self.group_before.remove(id);
+                self.outgoing.retain(|_, message| message.group_id != *id);
+                if self
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| active.key() == key)
+                {
+                    self.active = None;
+                    self.group_members.clear();
+                    self.query.clear();
+                    self.search.clear();
+                    self.search_before = None;
+                    self.search_request = None;
+                }
+            }
+        }
+        if let Some(active) = self.active.as_mut().filter(|active| active.kind == "group")
+            && let Some(next) = groups.get(&active.id)
+        {
+            active.title.clone_from(&next.name);
+        }
+        self.groups = groups;
     }
 
     pub fn snapshot(&self, edition: Edition, host_available: bool) -> Value {
@@ -188,6 +263,16 @@ impl State {
         let members = self.members.iter().map(|member| json!({
             "displayName":member.username,"userCode":member.user_code,"online":true,"admin":member.is_admin
         })).collect::<Vec<_>>();
+        let groups: Vec<_> = self.groups.values().map(|group| json!({
+            "id":group.id,"name":group.name,"role":group.role,"memberCount":group.member_count,
+            "announcement":group.announcement,"ownerUserCode":group.owner_user_code,"invitedByUserCode":group.invited_by_user_code,
+            "unreadCount":self.unread.get(&format!("group:{}", group.id)).copied().unwrap_or(0),
+        })).collect();
+        let profile = |member: &OnlineProfile| {
+            json!({
+                "displayName":member.display_name,"userCode":member.user_code,"role":member.role,"friendship":member.friendship,
+            })
+        };
         let mut approvals = self.approvals.values().collect::<Vec<_>>();
         approvals.sort_by(|left, right| {
             (&left.content, &left.message_id).cmp(&(&right.content, &right.message_id))
@@ -228,8 +313,15 @@ impl State {
         json!({
             "schemaVersion": 1, "edition":edition.as_str(),"connection":conn,
             "onlineFiles":connected && self.session.as_ref().is_some_and(|session| session.has(lan_chat_protocol::ONLINE_FILES)),
+            "onlineGroups":connected && self.session.as_ref().is_some_and(|session| session.has(lan_chat_protocol::ONLINE_GROUPS)),
+            "groupManagement":connected && self.session.as_ref().is_some_and(|session| session.has(lan_chat_protocol::ONLINE_GROUP_MANAGEMENT)),
+            "groupAttachments":connected && self.session.as_ref().is_some_and(|session| session.has(lan_chat_protocol::ONLINE_GROUP_ATTACHMENTS)),
+            "lanRoomRoles":connected && self.session.as_ref().is_some_and(|session| session.has(lan_chat_protocol::LAN_ROOM_ROLES)),
             "identity": {"displayName":self.identity.username,"userCode":self.identity.user_code,"admin":self.identity.is_admin},
             "navigation": navigation, "rooms":rooms,"directMessages":direct,"activeMessages":visible,"members":members,
+            "groups":groups,"groupMembers":self.group_members.iter().map(profile).collect::<Vec<_>>(),"friends":self.friends.iter().map(profile).collect::<Vec<_>>(),
+            "groupHasMore":self.active.as_ref().is_some_and(|active| active.kind=="group" && self.group_before.contains_key(&active.id)),
+            "searchHasMore":self.search_before.is_some(), "searchLoading":self.search_request.is_some(),
             "permissions":{"activeRoomCanManage": self.active.as_ref().is_some_and(|active| active.kind=="room"
                 && self.rooms.iter().any(|room| room.name == active.id && room.can_manage))},
             "connectionApprovals":approvals,"savedConnection":self.saved,
@@ -249,6 +341,7 @@ impl State {
         unread: bool,
     ) {
         let conversation = match message.kind.as_str() {
+            "group_message" | "group_send" => Conversation::group(&message.group_id, &message.room),
             "chat" => Conversation::room(if message.room.is_empty() {
                 "lobby"
             } else {
@@ -272,7 +365,7 @@ impl State {
             }
         };
         let key = conversation.key();
-        let online = edition == Edition::Online && conversation.kind == "dm";
+        let online = edition == Edition::Online;
         let row = self.row(message, attachment);
         let increase = unread
             && !row.self_message
@@ -322,6 +415,11 @@ impl State {
             delivery_state: message.delivery_state,
             attachment,
             image_size: (message.image_size > 0).then_some(message.image_size),
+            image_group: if message.image_size > 0 {
+                message.group_id
+            } else {
+                String::new()
+            },
             image_peer: if message.image_size <= 0 {
                 String::new()
             } else if own {

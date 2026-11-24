@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import type { ReactNode } from 'react';
 import { Lock, MessageSquare, Settings2, SlidersHorizontal, X } from 'lucide-react';
 
 import type { BridgeState, MemberSummary } from '../../bridge/types';
@@ -20,12 +21,14 @@ type InfoPanelProps = {
   canManage: boolean;
   onManageMember: (member: MemberSummary) => void;
   onManageRoom?: () => void;
+  groupContent?: ReactNode;
 };
 
 /** Right-hand info panel, 340px (spec §2): the conversation, its members, management. */
-export function InfoPanel({ state, open, overlay, onClose, onStartDirect, onViewProfile, canManage, onManageMember, onManageRoom }: InfoPanelProps) {
+export function InfoPanel({ state, open, overlay, onClose, onStartDirect, onViewProfile, canManage, onManageMember, onManageRoom, groupContent }: InfoPanelProps) {
   const conversation = state.navigation.activeConversation;
   const isRoom = conversation?.kind === 'room';
+  const isGroup = conversation?.kind === 'group';
   const online = state.members.filter((member) => member.online).length;
   const local = state.identity.userCode;
   const sorted = [...state.members].sort((a, b) => Number(b.online) - Number(a.online) || Number(b.admin) - Number(a.admin) || a.displayName.localeCompare(b.displayName));
@@ -45,15 +48,15 @@ export function InfoPanel({ state, open, overlay, onClose, onStartDirect, onView
             className={cn('flex h-full w-[var(--info-width)] shrink-0 flex-col border-l border-divider',
               overlay ? 'surface-glass absolute right-0 top-0 z-40 shadow-dialog' : 'surface-chrome')}>
             <header className="flex h-14 shrink-0 items-center gap-2 px-4">
-              <h2 className="flex-1 text-title font-semibold text-ink">{isRoom ? '频道信息' : '用户信息'}</h2>
+              <h2 className="flex-1 text-title font-semibold text-ink">{isGroup ? '群聊信息' : isRoom ? '频道信息' : '用户信息'}</h2>
               <IconButton label="关闭信息面板" onClick={onClose}><X size={20} aria-hidden="true" /></IconButton>
             </header>
-            {conversation && (
+            {isGroup ? groupContent : conversation && (
               <section className="flex flex-col items-center gap-2 border-b border-divider px-4 pb-6 pt-2 text-center">
-                <Avatar name={conversation.title} seed={isRoom ? conversation.id : conversation.userCode} size={80} />
+                <Avatar name={conversation.title} seed={conversation.kind === 'dm' ? conversation.userCode : conversation.id} size={80} />
                 <p className="text-title font-semibold text-ink">{isRoom ? `# ${conversation.title}` : conversation.title}</p>
                 <p className="num text-small text-ink-2">
-                  {isRoom ? <>{state.members.length} 名成员，<span aria-label="在线成员数量">{online}</span> 人在线</> : `#${conversation.userCode}`}
+                  {isRoom ? <>{state.members.length} 名成员，<span aria-label="在线成员数量">{online}</span> 人在线</> : conversation.kind === 'dm' && `#${conversation.userCode}`}
                 </p>
                 {conversation.mls && <p className="inline-flex items-center gap-1 text-small text-ink-2"><Lock size={12} aria-hidden="true" />消息与附件端到端加密</p>}
                 {isRoom && canManage && onManageRoom && (
@@ -84,7 +87,7 @@ export function InfoPanel({ state, open, overlay, onClose, onStartDirect, onView
                             <MessageSquare size={16} aria-hidden="true" />
                           </IconButton>
                         )}
-                        {canManage && !isLocal && (
+                        {state.identity.admin && !isLocal && (
                           <IconButton size="sm" label={`管理 ${member.displayName}`} onClick={() => onManageMember(member)}>
                             <Settings2 size={16} aria-hidden="true" />
                           </IconButton>

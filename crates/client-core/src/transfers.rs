@@ -535,6 +535,7 @@ impl Client {
         network: &Network,
         id: &str,
         target: &str,
+        group: &str,
         path: &Path,
     ) -> Result<()> {
         let name = filename(path)?;
@@ -553,6 +554,7 @@ impl Client {
             .request(Message {
                 kind: "dm_file_init".into(),
                 target_user_code: target.into(),
+                group_id: group.into(),
                 file_name: name.into(),
                 logical_size: size,
                 ..Message::default()
@@ -643,6 +645,7 @@ impl Client {
         &self,
         network: &Network,
         target: &str,
+        group: &str,
         id: &str,
         path: &Path,
     ) -> Result<()> {
@@ -666,6 +669,7 @@ impl Client {
                 kind: "dm_image_chunk".into(),
                 message_id: id.into(),
                 target_user_code: target.into(),
+                group_id: group.into(),
                 image_size: data.len() as i64,
                 chunk_index: Some(index as i64),
                 image_data: STANDARD.encode(chunk),
@@ -691,6 +695,7 @@ impl Client {
                     message_id: request.message_id.clone(),
                     user_code: request.form.user_code.clone(),
                     target_user_code: request.target_user_code.clone(),
+                    group_id: request.group_id.clone(),
                     chunk_index: Some(index as i64),
                     ..Message::default()
                 })
@@ -698,6 +703,7 @@ impl Client {
             let chunk = STANDARD.decode(response.image_data)?;
             ensure!(
                 response.message_id == request.message_id
+                    && response.group_id == request.group_id
                     && response.image_size == request.image_size
                     && response.chunk_index.unwrap_or(0) == index as i64
                     && chunk.len() as i64 == (request.image_size - offset).min(ONLINE_CHUNK_BYTES),

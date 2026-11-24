@@ -2,7 +2,21 @@ export type ConnectionPhase = 'idle' | 'connecting' | 'connected' | 'reconnectin
 
 export type ConversationRef =
   | { kind: 'room'; id: string; title: string; mls?: boolean }
+  | { kind: 'group'; id: string; title: string; mls?: false }
   | { kind: 'dm'; id: string; title: string; userCode: string; mls?: boolean };
+
+export type GroupSummary = {
+  id: string;
+  name: string;
+  role: string;
+  memberCount: number;
+  unreadCount: number;
+  announcement: string;
+  ownerUserCode: string;
+  invitedByUserCode: string;
+};
+
+export type OnlineProfile = { displayName: string; userCode: string; role: string; friendship: string };
 
 export type BridgeError = {
   code: string;
@@ -53,6 +67,7 @@ export type MessageItem = {
   attachment?: MessageAttachment;
   imageSize?: number;
   imagePeer?: string;
+  imageGroup?: string;
 };
 
 export type MemberSummary = {
@@ -121,6 +136,10 @@ export type BridgeState = {
   schemaVersion: 1;
   edition?: 'lan' | 'online';
   onlineFiles?: boolean;
+  onlineGroups?: boolean;
+  groupManagement?: boolean;
+  groupAttachments?: boolean;
+  groupHasMore?: boolean;
   connection: {
     phase: ConnectionPhase;
     statusText: string;
@@ -139,7 +158,13 @@ export type BridgeState = {
   };
   rooms: RoomSummary[];
   directMessages: DirectMessageSummary[];
+  groups?: GroupSummary[];
+  groupMembers?: OnlineProfile[];
+  friends?: OnlineProfile[];
   activeMessages: MessageItem[];
+  searchHasMore?: boolean;
+  searchLoading?: boolean;
+  lanRoomRoles?: boolean;
   members: MemberSummary[];
   permissions: { activeRoomCanManage: boolean };
   connectionApprovals?: ConnectionApprovalRequest[];

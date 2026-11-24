@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - run: cargo +stable test --locked -p lan-chat-protocol -p lan-chat-server
+      - run: cargo +stable test --locked -p lan-chat-protocol -p lan-chat-server --features lan-chat-server/test-hooks
       - run: cargo +stable build --locked --release -p lan-chat-server
 
   frontend:
@@ -51,6 +51,7 @@ jobs:
     runs-on: windows-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/rust
+      CARGO_PROFILE_DEV_DEBUG: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -66,12 +67,34 @@ jobs:
           workspaces: . -> out/rust
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend run build
-      - run: cargo +stable test --locked --workspace
-      - run: cargo +stable clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo +stable test --locked --workspace --features lan-chat-desktop/desktop-updater,lan-chat-server/test-hooks
+      - run: cargo +stable clippy --locked --workspace --all-targets --features lan-chat-desktop/desktop-updater,lan-chat-server/test-hooks -- -D warnings
       - run: ./scripts/package-unified-release.ps1
       - run: ./scripts/package-unified-release.ps1 -Edition online
       - run: ./scripts/package-installer.ps1 -Edition lan -ValidateOnly
+      - run: ./scripts/package-installer.ps1 -Edition online -ValidateOnly
+      - run: cargo +stable clippy --locked -p lan-chat-desktop --all-targets --features online,desktop-updater -- -D warnings
       - run: node scripts/p10-tls-acceptance.mjs out/desktop/lan-chat-server.exe
+
+  android:
+    name: Android debug and Rust JNI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.1' 'ndk;30.0.16248370'
+      - run: rustup target add aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: android/transport-rust -> ../app/build/rust-target
+      - run: gradle -p android --no-daemon :app:assembleDebug
 
   source-launcher:
     name: Windows source launcher

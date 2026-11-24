@@ -10,6 +10,13 @@ if (file('google-services.json').exists()) {
 def rustProject = rootProject.file('transport-rust')
 def rustTarget = layout.buildDirectory.dir('rust-target')
 def rustJni = layout.buildDirectory.dir('generated/rust-jni')
+def workspaceManifest = rootProject.file('../Cargo.toml')
+def workspaceVersion = (workspaceManifest.getText('UTF-8') =~ /(?m)^\[workspace\.package\][^\[]*?^version\s*=\s*"1\.4\.(\d+)"/)
+if (!workspaceVersion.find()) {
+    throw new GradleException('配置 Android 版本映射需要工作区版本 1.4.x')
+}
+def releasePatch = workspaceVersion.group(1).toInteger()
+def releaseKeystore = providers.environmentVariable('LANCHAT_ANDROID_KEYSTORE').orNull
 
 android {
     namespace 'dev.dusk1ng.lanchat'
@@ -20,9 +27,21 @@ android {
         applicationId 'dev.dusk1ng.lanchat'
         minSdk 28
         targetSdk 35
-        versionCode 15
-        versionName '0.3.3'
+        versionCode (16 + releasePatch)
+        versionName "0.4.${releasePatch}"
         ndk.abiFilters 'arm64-v8a'
+    }
+
+    if (releaseKeystore != null) {
+        signingConfigs {
+            release {
+                storeFile rootProject.file(releaseKeystore)
+                storePassword providers.environmentVariable('LANCHAT_ANDROID_STORE_PASSWORD').get()
+                keyAlias providers.environmentVariable('LANCHAT_ANDROID_KEY_ALIAS').get()
+                keyPassword providers.environmentVariable('LANCHAT_ANDROID_KEY_PASSWORD').get()
+            }
+        }
+        buildTypes.release.signingConfig signingConfigs.release
     }
 
     compileOptions {
@@ -41,6 +60,14 @@ dependencies {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+tasks.matching { it.name == 'packageRelease' }.configureEach {
+    doFirst {
+        if (releaseKeystore == null) {
+            throw new GradleException('发布 APK 需要配置可覆盖已发行版本的 Android 签名密钥')
+        }
+    }
 }
 
 def buildRust = tasks.register('buildRustTransport', Exec) {

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Bell, Info, Palette, Shield, Sparkles, UserRound } from 'lucide-react';
 
 import { createCommand } from '../bridge/chatBridge';
@@ -11,6 +11,7 @@ import { Button } from '../components/ui/button';
 import { SegmentedRadio, Select, Switch } from '../components/ui/controls';
 import { IconButton } from '../components/ui/icon-button';
 import { cn } from '../lib/cn';
+import { desktopUpdateRuntime, type DesktopUpdate } from './runtimeBridge';
 
 type SettingsPageProps = { bridge: ChatBridgeClient; state: BridgeState; onBack(): void; onShowReleaseNotes?(): void };
 type Category = 'account' | 'appearance' | 'notifications' | 'privacy' | 'about';
@@ -110,13 +111,104 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
                   </span>
                   {onShowReleaseNotes && <Button variant="secondary" onClick={onShowReleaseNotes}><Sparkles size={16} aria-hidden="true" />版本说明</Button>}
                 </div>
-                <p className="border-t border-divider px-4 py-3 text-small text-ink-2">Windows 桌面客户端 · Go TLS 服务端</p>
+                <DesktopUpdatePanel edition={state.edition} />
               </Group>
             )}
           </div>
       </section>
     </main>
   );
+}
+
+function DesktopUpdatePanel({ edition }: { edition: BridgeState['edition'] }) {
+  const [api] = useState(desktopUpdateRuntime);
+  const [update, setUpdate] = useState<DesktopUpdate | null>(null);
+  const [busy, setBusy] = useState<'check' | 'download' | 'install' | undefined>();
+  const [error, setError] = useState('');
+  const [current, setCurrent] = useState(false);
+  const [received, setReceived] = useState(0);
+  const [downloaded, setDownloaded] = useState(false);
+  const confirm = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const detailsId = useId();
+  if (!api) return null;
+
+  const check = async () => {
+    setError('');
+    setCurrent(false);
+    setBusy('check');
+    setUpdate(null);
+    setDownloaded(false);
+    try {
+      const found = await api.check();
+      setUpdate(found);
+      setCurrent(found === null);
+    } catch (failure) {
+      setError(String(failure));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const download = async (release: DesktopUpdate) => {
+    setError('');
+    setReceived(0);
+    setBusy('download');
+    let unlisten: (() => void) | undefined;
+    try {
+      unlisten = await api.progress(setReceived);
+      await api.download(release.version);
+      setDownloaded(true);
+    } catch (failure) {
+      setError(String(failure));
+    } finally {
+      unlisten?.();
+      setBusy(undefined);
+    }
+  };
+
+  const install = async (release: DesktopUpdate) => {
+    setError('');
+    setBusy('install');
+    try {
+      await api.install(release.version);
+    } catch (failure) {
+      setError(String(failure));
+      setBusy(undefined);
+    }
+  };
+
+  return <div className="flex flex-col gap-3 border-t border-divider px-4 py-3">
+    <div className="flex flex-wrap items-center gap-3">
+      <Button variant="outline" disabled={busy !== undefined} onClick={() => void check()}>{busy === 'check' ? '正在检查' : '检查更新'}</Button>
+      {current && <span role="status" className="text-small text-ink-2">已是最新版本</span>}
+    </div>
+    {update && <>
+      <p className="text-body font-medium">可更新至 {update.version} · {(update.size / 1048576).toFixed(1)} MiB</p>
+      {update.date && <time dateTime={update.date} className="text-small text-ink-2">{update.date.slice(0, 10)}</time>}
+      {update.notes && <p className="whitespace-pre-wrap text-small text-ink-2">{update.notes}</p>}
+      {busy === 'download' && <progress className="w-full" aria-label="下载安装包进度" value={received} max={update.size} />}
+      <div>
+        {update.installed ? (
+          downloaded ? <Button variant="primary" disabled={busy !== undefined} onClick={() => confirm.current?.showModal()}>安装更新</Button>
+            : <Button variant="primary" disabled={busy !== undefined} onClick={() => void download(update)}>下载安装包</Button>
+        ) : (
+          <Button variant="primary" onClick={() => { void api.openZip(update.portableUrl).catch((failure) => setError(String(failure))); }}>下载新版便携 ZIP</Button>
+        )}
+      </div>
+      <dialog ref={confirm} aria-labelledby={titleId} aria-describedby={detailsId} onCancel={(event) => { if (busy === 'install') event.preventDefault(); }}
+        className="m-auto w-[min(420px,calc(100%-2rem))] overscroll-contain rounded-card border border-divider bg-bg p-5 text-ink shadow-xl backdrop:overflow-hidden backdrop:overscroll-contain backdrop:bg-black/60">
+        <h3 id={titleId} className="text-title font-semibold">安装 {update.version}</h3>
+        <p id={detailsId} className="mt-2 text-body text-ink-2">应用将退出并在安装后重新打开。{edition === 'lan' && '开房中的成员会断开。'}</p>
+        {error && <p role="alert" className="mt-2 text-small text-danger-text">{error}</p>}
+        <form method="dialog" className="mt-4 flex justify-end gap-2">
+          <Button type="submit" variant="ghost" autoFocus disabled={busy === 'install'}>稍后安装</Button>
+          <Button variant="primary" disabled={busy === 'install'} onClick={() => void install(update)}>安装并重启</Button>
+        </form>
+      </dialog>
+    </>}
+    {error && !downloaded && <p role="alert" className="text-small text-danger-text">{error}</p>}
+  </div>;
 }
 
 function Group({ title, children }: { title: string; children: ReactNode }) {

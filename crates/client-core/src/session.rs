@@ -13,8 +13,10 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
 use lan_chat_protocol::{
-    HEARTBEAT, HEARTBEAT_INTERVAL_SECS, HEARTBEAT_TIMEOUT_SECS, LocalHostCredentials,
-    MAX_FRAME_BYTES, Message, ONLINE_ACCOUNTS, ROOM_PASSWORD, read_message, write_message,
+    HEARTBEAT, HEARTBEAT_INTERVAL_SECS, HEARTBEAT_TIMEOUT_SECS, LAN_HISTORY_PAGES, LAN_ROOM_ROLES,
+    LocalHostCredentials, MAX_FRAME_BYTES, Message, ONLINE_ACCOUNTS, ONLINE_GROUP_ATTACHMENTS,
+    ONLINE_GROUP_MANAGEMENT, ONLINE_GROUPS, ONLINE_SOCIAL, ROOM_PASSWORD, read_message,
+    write_message,
 };
 use ring::rand::{SecureRandom, SystemRandom};
 use tokio::{
@@ -326,6 +328,7 @@ impl Client {
                 state.reconnect += 1;
                 state.phase = "reconnecting";
                 state.status = "正在恢复连接…";
+                state.search_request = None;
                 for id in state.room_commands.drain() {
                     self.result(&id, Err(anyhow::anyhow!("连接中断")));
                 }
@@ -371,7 +374,11 @@ impl Client {
                     String::new()
                 },
                 account_password: login.password.clone(),
-                capabilities: vec![HEARTBEAT.into()],
+                capabilities: vec![
+                    HEARTBEAT.into(),
+                    ONLINE_GROUP_MANAGEMENT.into(),
+                    ONLINE_GROUP_ATTACHMENTS.into(),
+                ],
                 ..Message::default()
             }
         } else {
@@ -380,7 +387,12 @@ impl Client {
                 username: form.username.clone(),
                 user_code: form.user_code.clone(),
                 host_session_token: host_token.into(),
-                capabilities: vec![ROOM_PASSWORD.into(), HEARTBEAT.into()],
+                capabilities: vec![
+                    ROOM_PASSWORD.into(),
+                    HEARTBEAT.into(),
+                    LAN_HISTORY_PAGES.into(),
+                    LAN_ROOM_ROLES.into(),
+                ],
                 ..Message::default()
             }
         };
@@ -432,6 +444,22 @@ impl Client {
             state.status = "已连接";
             state.reconnect = 0;
             state.saved = form.clone();
+            if reconnecting && self.edition == Edition::Online {
+                state.histories.retain(|key, _| !key.starts_with("group:"));
+                state.unread.retain(|key, _| !key.starts_with("group:"));
+                state.group_before.clear();
+                state.group_members.clear();
+                if state
+                    .active
+                    .as_ref()
+                    .is_some_and(|conversation| conversation.kind == "group")
+                {
+                    state.query.clear();
+                    state.search.clear();
+                    state.search_before = None;
+                    state.search_request = None;
+                }
+            }
             state.session.as_mut().expect("active session").capabilities = response.capabilities;
         }
 
@@ -449,6 +477,20 @@ impl Client {
                 kind: "dm_contacts".into(),
                 ..Message::default()
             })?;
+            let state = self.state.lock().expect("client state");
+            let session = state.session.as_ref().expect("online session");
+            if session.has(ONLINE_GROUPS) {
+                network.send(Message {
+                    kind: "group_list".into(),
+                    ..Message::default()
+                })?;
+            }
+            if session.has(ONLINE_SOCIAL) {
+                network.send(Message {
+                    kind: "friend_list".into(),
+                    ..Message::default()
+                })?;
+            }
         } else {
             network.send(Message {
                 kind: "rooms_request".into(),
@@ -473,7 +515,9 @@ impl Client {
                         ..Message::default()
                     })?;
                 }
-                network.send(conversation.history(""))?;
+                if conversation.kind != "group" {
+                    network.send(conversation.history(""))?;
+                }
             }
             for message in state.outgoing.values() {
                 network.send(message.clone())?;

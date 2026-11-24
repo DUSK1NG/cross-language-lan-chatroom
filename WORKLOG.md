@@ -54,6 +54,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+### 2026-11-24 — 1.4 完整候选的本机验证
+
+- 执行者：Codex。
+- 改动：`server-rust/src/lan` 按职责拆分，并将附件文件 I/O 移出 Hub 锁。`server-rust/src/online` 增加 FTS5、磁盘附件和旧库迁移、群管理及群附件。桌面和 Android 接入群功能。发布工作流配置两版独立签名和 Android 构建。
+- 验证：Rust 工作区、Clippy、前端 188 项、版本校验 4 项及 LAN TLS 11 项通过。群权限、旧附件迁移和 LAN 附件并发用例通过。两版 ZIP 及安装器已构建。Android 0.4.0 ARM64 APK 构建和 v2 签名通过。
+- 产物：`release/v1.4-candidate/`。双机按用户要求跳过，Android 以本机 APK 验收。候选干净 CI 使用独立测试分支，正式签名和标准安装权限待确认。
+
+### 2026-11-23 — 1.4 局域网候选与本机验收
+
+- 执行者：Codex。
+- 改动：S0 提交 `aa04d78` 推送测试分支。`server-rust` 完成心跳回归、FTS5 历史搜索和房间权限持久化，`client-core` 与 `frontend` 接入搜索分页及房间权限。Tauri、Inno Setup 和 LAN 发布工作流接入签名更新。
+- 验证：S0 干净 CI 四项通过。本机工作区测试和 Clippy、前端 lint/188 项测试/构建、版本检查 4 项、TLS 11 项通过。完成 1.3 与 1.4 双向互通、旧库迁移、隔离签名更新及卸载保留数据。详见[局域网验收记录](docs/release-acceptance.md#140-局域网验收记录)。
+- 工作区与产物：`stage/0-baseline` 上保留后续本地源码改动。`release/v1.4-local-acceptance/LANChat-Desktop-Windows-x64.zip` 仅含客户端、房主服务程序、图标和说明。
+- 待验收：候选干净 CI、正式签名演练、可写注册表和快捷方式的 Windows 安装环境、真实双机发现与重连。完成后交付无数据 LAN 便携 ZIP。
+
 ### 2026-11-23 19:43 — S0 本机基线与局域网便携包
 
 - 执行者：Codex。

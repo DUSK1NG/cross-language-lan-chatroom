@@ -14,8 +14,10 @@ import { Composer, type QuoteDraft } from '../components/composer/Composer';
 import { InfoPanel } from '../components/shell/InfoPanel';
 import { ResizeHandle, useSidebarWidth } from '../components/shell/ResizeHandle';
 import { ApprovalDialog } from '../components/dialogs/ApprovalDialog';
-import { AdminConfirmDialog, CreateRoomDialog, JoinRoomDialog, MemberDialog, RoomManageDialog, StartPrivateDialog, type AdminAction } from '../components/dialogs/RoomDialogs';
+import { OnlineGroupInfo, OnlineGroupTools } from '../components/dialogs/OnlineGroups';
+import { AdminConfirmDialog, CreateRoomDialog, JoinRoomDialog, MemberDialog, RoomManageDialog, StartPrivateDialog, type AdminAction, type RoomAction } from '../components/dialogs/RoomDialogs';
 import { Avatar } from '../components/ui/avatar';
+import { Button } from '../components/ui/button';
 import { IconButton } from '../components/ui/icon-button';
 import type { CommandFeedbackProps } from '../components/CommandFeedback';
 import { useHotkeys } from '../hooks/useHotkeys';
@@ -47,7 +49,8 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
   const [phoneView, setPhoneView] = useState<'list' | 'chat'>('list');
   const online = state.edition === 'online';
-  const [filter, setFilter] = useState<ConversationFilter>(online ? 'direct' : 'rooms');
+  const [filter, setFilter] = useState<ConversationFilter>(online ? 'all' : 'rooms');
+  const [groupTools, setGroupTools] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
@@ -82,9 +85,14 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   };
 
   const active = state.navigation.activeConversation;
+  const activeGroup = active?.kind === 'group' ? state.groups?.find(({ id }) => id === active.id) : undefined;
   const key = conversationKey(state);
   const activeRoom = active?.kind === 'room' ? active.id : '';
-  const canManageRoom = state.identity.admin || state.permissions.activeRoomCanManage;
+  const room = state.rooms.find(({ roomName }) => roomName === activeRoom);
+  const canManageRoom = Boolean(activeRoom && activeRoom !== 'lobby' && (state.identity.admin || state.permissions.activeRoomCanManage));
+  const canAdministerRoom = state.identity.admin || room?.ownerCode?.toLowerCase() === state.identity.userCode.toLowerCase();
+  const canEditRoomRoles = Boolean(state.lanRoomRoles && canAdministerRoom);
+  const canModerateRoom = Boolean(state.lanRoomRoles && canManageRoom);
   const approvals = state.connectionApprovals ?? [];
 
   // Unread a conversation had just before it was opened (the bridge zeroes it on selection).
@@ -99,13 +107,14 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
     const snapshot = new Map<string, number>();
     state.rooms.forEach((room) => snapshot.set(`room:${room.roomName}`, room.unreadCount));
     state.directMessages.forEach((direct) => snapshot.set(`dm:${direct.userCode}`, direct.unreadCount));
+    state.groups?.forEach((group) => snapshot.set(`group:${group.id}`, group.unreadCount));
     unreadSnapshot.current = snapshot;
-  }, [state.rooms, state.directMessages]);
+  }, [state.rooms, state.directMessages, state.groups]);
 
   // Per-conversation drafts; switching conversations restores each one and drops the reply.
   const draft = drafts[key] ?? '';
   const setDraft = useCallback((value: string) => setDrafts((current) => ({ ...current, [key]: value })), [key]);
-  useEffect(() => { setQuote(null); setHistoryQuery(''); setSearchOpen(false); }, [key]);
+  useEffect(() => { setQuote(null); setHistoryQuery(''); setSearchOpen(false); setManageOpen(false); }, [key]);
 
   // A new member request opens the approval dialog for the owner.
   const approvalCount = useRef(0);
@@ -118,7 +127,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
 
   const startDirect = (member: MemberSummary) => {
     bridge.dispatch(createCommand('conversation.openPrivate', { displayName: member.displayName, userCode: member.userCode }));
-    setFilter('direct');
+    if (!online) setFilter('direct');
     setInfoOpen(false);
     setProfile(null);
     selectFromList();
@@ -128,7 +137,8 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
     setQuote({ displayName: message.displayName, content: parseQuote(message.content).body });
     setFocusToken((token) => token + 1);
   }, []);
-  const canRecall = useCallback((message: MessageItem) => !online && (state.identity.admin || message.userCode === state.identity.userCode), [online, state.identity.admin, state.identity.userCode]);
+  const canRecall = useCallback((message: MessageItem) => !online && (state.identity.admin || canModerateRoom
+    || message.userCode === state.identity.userCode), [online, state.identity.admin, state.identity.userCode, canModerateRoom]);
 
   const updateHistoryQuery = (query: string) => {
     setHistoryQuery(query);
@@ -174,9 +184,9 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
     bridge.dispatch(command);
   };
 
-  const roomAction = (action: 'invite' | 'remove_member' | 'delete', memberCode: string, reset: () => void) => {
+  const roomAction = (action: RoomAction, memberCode: string, reset: () => void, roomPassword?: string) => {
     if (!activeRoom || managePending) return;
-    const command = createCommand('room.action', { action, room: activeRoom, ...(memberCode ? { targetUserCode: memberCode } : {}) });
+    const command = createCommand('room.action', { action, room: activeRoom, ...(memberCode ? { targetUserCode: memberCode } : {}), ...(roomPassword === undefined ? {} : { roomPassword }) });
     setManagePending(true);
     setManageFeedback({ status: 'pending', message: '正在执行操作…' });
     const stop = track(onResult(bridge, command.id, (ok, message) => {
@@ -187,7 +197,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
       setManageFeedback({ status: 'success', message: '操作成功。' });
       if (action === 'delete') {
         setManageOpen(false);
-        bridge.dispatch(createCommand('conversation.selectRoom', { room: 'lobby' }));
+        if (!state.lanRoomRoles) bridge.dispatch(createCommand('conversation.selectRoom', { room: 'lobby' }));
       }
     }));
     bridge.dispatch(command);
@@ -227,6 +237,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   };
   const refresh = () => {
     if (!online) bridge.dispatch(createCommand('directory.refreshRooms', {}));
+    if (state.onlineGroups) bridge.dispatch(createCommand('directory.refreshGroups', {}));
     bridge.dispatch(createCommand('directory.refreshUsers', {}));
   };
 
@@ -241,10 +252,11 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
     }
     bridge.dispatch(next.kind === 'room'
       ? createCommand('conversation.selectRoom', { room: next.room.roomName })
+      : next.kind === 'group' ? createCommand('conversation.selectGroup', { groupId: next.group.id })
       : createCommand('conversation.selectDirect', { userCode: next.direct.userCode }));
   };
 
-  const anyDialog = createOpen || privateOpen || joinRoom !== null || manageOpen || approvalsOpen || profile !== null || pendingAdmin !== null;
+  const anyDialog = createOpen || privateOpen || groupTools || joinRoom !== null || manageOpen || approvalsOpen || profile !== null || pendingAdmin !== null;
   useHotkeys({
     focusSearch: (event) => {
       const search = document.querySelector<HTMLInputElement>('[data-hotkey="search"]');
@@ -263,7 +275,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
     }
   });
 
-  const canDropOnline = state.onlineFiles && active?.kind === 'dm';
+  const canDropOnline = state.onlineFiles && (active?.kind === 'dm' || (active?.kind === 'group' && state.groupAttachments));
   const onDragOver = (event: DragEvent) => {
     if ((!canDropOnline && active?.kind !== 'room') || !event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
@@ -284,6 +296,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
       {showList && (
         <div className={cn('surface-chrome relative flex h-full shrink-0 flex-col border-r border-divider', narrow && 'view-enter')} style={{ width: narrow ? '100%' : sidebarWidth }}>
           <ConversationSidebar state={state} bridge={bridge} filter={filter} onFilterChange={setFilter} onCreateRoom={openCreate} onStartPrivate={online ? openPrivate : undefined} onJoinProtectedRoom={openJoin}
+            onGroupTools={state.onlineGroups ? () => setGroupTools(true) : undefined}
             onSettings={onSettings} onConnectionApprovals={() => setApprovalsOpen(true)} onManageRoom={openManage}
             canManageRoom={canManageRoom && Boolean(activeRoom)} onSelected={selectFromList}
             footer={<IdentityCard state={state} onSettings={onSettings} />} />
@@ -307,6 +320,17 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
               historyQuery={historyQuery} onHistoryQueryChange={updateHistoryQuery} searchOpen={searchOpen} onSearchOpenChange={setSearchOpen}
               onBack={narrow ? () => setPhoneView('list') : undefined} />
             <ConnectionBanner connection={state.connection} onReconnect={onReconnect} />
+            {searchOpen && historyQuery.trim() && state.searchHasMore && (
+              <Button variant="ghost" size="sm" className="self-center" aria-disabled={state.searchLoading}
+                onClick={() => { if (!state.searchLoading) bridge.dispatch(createCommand('history.searchMore', {})); }}>
+                {state.searchLoading ? '正在加载' : '加载更早的搜索结果'}
+              </Button>
+            )}
+            {activeGroup && state.groupHasMore && !historyQuery.trim() && (
+              <Button variant="ghost" size="sm" className="self-center" onClick={() => bridge.dispatch(createCommand('history.groupMore', {}))}>
+                加载更早的群消息
+              </Button>
+            )}
             <MessageList state={state} bridge={bridge} onQuote={quoteMessage} canRecall={canRecall} entryUnread={entryUnread.current} sendAnchor={sendAnchor} />
             <Composer state={state} bridge={bridge} quote={quote} onClearQuote={() => setQuote(null)} draft={draft} onDraftChange={setDraft}
               onCommandResult={() => undefined} focusAtEndToken={focusToken} uploadRequestToken={uploadToken} theme={theme} sendAnchor={sendAnchor} />
@@ -322,6 +346,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
             </AnimatePresence>
           </div>
           <InfoPanel state={state} open={infoOpen} overlay={compact} onClose={() => setInfoOpen(false)} onStartDirect={startDirect}
+            groupContent={activeGroup && <OnlineGroupInfo key={activeGroup.id} group={activeGroup} bridge={bridge} state={state} />}
             onViewProfile={(member) => { setAdminFeedback(idle); setProfile(member); }} canManage={canManageRoom}
             onManageMember={(member) => { setAdminFeedback(idle); setProfile(member); }} onManageRoom={openManage} />
         </section>
@@ -329,11 +354,14 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
 
       <CreateRoomDialog open={createOpen} onOpenChange={setCreateOpen} pending={createPending} feedback={createFeedback} onSubmit={submitCreate} />
       {privateOpen && <StartPrivateDialog pending={privateFeedback.status === 'pending'} feedback={privateFeedback} onClose={() => setPrivateOpen(false)} onSubmit={submitPrivate} />}
+      {groupTools && <OnlineGroupTools state={state} bridge={bridge} onClose={() => setGroupTools(false)}
+        onCreated={() => { setGroupTools(false); selectFromList(); }} />}
       {joinRoom && <JoinRoomDialog room={joinRoom} pending={joinPending} feedback={joinFeedback}
         onClose={() => setJoinRoom(null)} onSubmit={(password) => submitJoin(joinRoom, password)} />}
-      <RoomManageDialog open={manageOpen} onOpenChange={setManageOpen} room={activeRoom} pending={managePending} feedback={manageFeedback} onAction={roomAction} />
+      <RoomManageDialog key={activeRoom} open={manageOpen && canManageRoom} onOpenChange={setManageOpen} room={activeRoom} pending={managePending} feedback={manageFeedback}
+        canDelete={canAdministerRoom} canEditRoles={canEditRoomRoles} canSetPassword={canEditRoomRoles && room?.private === true} onAction={roomAction} />
       <ApprovalDialog open={approvalsOpen} onOpenChange={setApprovalsOpen} requests={approvals} onResolve={resolveApproval} />
-      <MemberDialog member={profile} localUserCode={state.identity.userCode} canManage={canManageRoom} feedback={adminFeedback} pending={adminPending}
+      <MemberDialog member={profile} localUserCode={state.identity.userCode} canManage={state.identity.admin} feedback={adminFeedback} pending={adminPending}
         onOpenChange={(open) => { if (!open) setProfile(null); }} onDirect={startDirect}
         onAdmin={(action, member) => { setAdminFeedback(idle); setPendingAdmin({ action, member }); }} />
       <AdminConfirmDialog pendingAction={pendingAdmin} busy={adminPending} onCancel={() => setPendingAdmin(null)} onConfirm={confirmAdmin} />

@@ -8,15 +8,18 @@ rust-version = "1.91"
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 online = []
+desktop-updater = ["dep:reqwest", "dep:tauri-plugin-updater"]
 
 [dependencies]
 anyhow.workspace = true
 lan-chat-client-core = { path = "../../../crates/client-core" }
+reqwest = { version = "=0.13.5", default-features = false, optional = true }
 serde_json.workspace = true
 tauri = "=2.12.7"
 tauri-plugin-clipboard-manager = "=2.5.0"
 tauri-plugin-dialog = "=2.8.4"
 tauri-plugin-opener = "=2.7.3"
+tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls"], optional = true }
 
 [build-dependencies]
 tauri-build = "=2.7.6"

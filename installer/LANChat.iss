@@ -30,6 +30,8 @@ AppId={{B9E987BA-7785-40E1-9D12-2E3C1AC7E1F8}
 #endif
 AppName={#DisplayName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
+VersionInfoProductVersion={#AppVersion}
 AppPublisher=LAN Chat
 DefaultDirName={localappdata}\Programs\{#DisplayName}
 DefaultGroupName={#DisplayName}
@@ -63,10 +65,16 @@ Name: "{autoprograms}\{#DisplayName}"; Filename: "{app}\LANChat.exe"; WorkingDir
 Name: "{autoprograms}\{#DisplayName}\卸载 {#DisplayName}"; Filename: "{uninstallexe}"; Comment: "卸载 {#DisplayName}"
 Name: "{autodesktop}\{#DisplayName}"; Filename: "{app}\LANChat.exe"; WorkingDir: "{app}"; IconFilename: "{app}\LANChat.ico"; Comment: "启动 {#DisplayName}"; Tasks: desktopicon
 
+; Host data is stored under the current user's LocalAppData, outside the installation.
 [Run]
 Filename: "{app}\LANChat.exe"; Description: "启动 {#DisplayName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\LANChat.exe"; WorkingDir: "{app}"; Flags: nowait skipifnotsilent; Check: IsLanChatUpdate
 
-; The uninstaller removes files installed above and the Windows uninstall entry.
-; Host-created TLS keys and chat data live under the current user's LocalAppData
-; directory and are intentionally outside the install tree. The uninstaller
-; therefore never silently deletes a host identity or chat history.
+[INI]
+Filename: "{app}\lan-chat.install"; Section: "Install"; Key: "Edition"; String: "{#Edition}"; Flags: uninsdeleteentry uninsdeletesectionifempty
+
+[Code]
+function IsLanChatUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:LANCHATUPDATE|0}') = '1';
+end;

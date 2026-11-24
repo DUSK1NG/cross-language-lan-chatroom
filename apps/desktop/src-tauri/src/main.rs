@@ -13,6 +13,9 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
+#[cfg(all(windows, feature = "desktop-updater"))]
+mod updates;
+
 struct Desktop(AppHandle);
 
 impl Ui for Desktop {
@@ -104,14 +107,25 @@ fn main() {
     } else {
         Edition::Lan
     };
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(all(windows, feature = "desktop-updater"))]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Updates::default());
+    builder
         .invoke_handler(tauri::generate_handler![
             chat_state,
             chat_dispatch,
-            chat_open_url
+            chat_open_url,
+            #[cfg(all(windows, feature = "desktop-updater"))]
+            updates::check_desktop_update,
+            #[cfg(all(windows, feature = "desktop-updater"))]
+            updates::download_desktop_update,
+            #[cfg(all(windows, feature = "desktop-updater"))]
+            updates::install_desktop_update,
         ])
         .setup(move |app| {
             let name = if edition == Edition::Online {

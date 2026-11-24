@@ -63,6 +63,8 @@ TCP 不保证一次 `send()` 对应一次 `recv()`，因此双方必须循环读
 
 用户名可以重复，用户代码由服务端按不区分大小写的规则保证唯一。
 
+LAN 客户端和服务端在登录时协商 `heartbeat-v1`。服务端回显该能力后，客户端每 20 秒发送 `{"type":"ping"}`，服务端回复 `{"type":"pong"}`。连续 60 秒无入站帧的连接会关闭。心跳沿用帧格式，业务命令配额保持独立。旧连接沿用原空闲时限，访客重连仍需房主审批。
+
 ## 4. 群聊
 
 客户端发送：
@@ -112,6 +114,16 @@ TCP 不保证一次 `send()` 对应一次 `recv()`，因此双方必须循环读
 ```
 
 频道只能由 `room_create` 创建；`room_join` 只会加入已存在的频道。私有频道仅管理员、频道创建者和被邀请的成员可见、可加入。
+
+协商 `lan-room-roles-v1` 后，`room_action` 支持 `grant_admin`、`revoke_admin` 和 `set_password`。角色命令使用 `target_user_code`，密码命令使用 `room_password`，空密码清除私密频道的密码。服务端提交修改后用原 `command_id` 确认。移除成员和删除频道时，受影响客户端收到切回大厅的 `room_join` 通知。房主的连接审批与全局禁言权限独立于频道管理员。
+
+协商 `lan-history-pages-v1` 后，桌面搜索用 `history_request` 的 `before_message_id` 请求更早一页，用 `history_response.has_more` 与回显的 `command_id` 更新当前查询。LAN 搜索按原会话权限过滤，短关键词使用 `instr`，长关键词使用 FTS5 字面匹配，已撤回内容从搜索结果中排除。普通历史仍保留撤回占位。
+
+Online 历史用 `online-history-pages-v1` 协商搜索分页。`group_history` 使用 `group_id`，支持同样的搜索、游标和 `has_more`。新入群成员只收到加入之后的群历史，退出或移除即撤销后续访问。
+
+Online 群管理协商 `online-group-management-v1`。`group_invite`、`group_kick`、`group_role` 和 `group_transfer` 使用 `group_id` 与 `target_user_code`。`group_role` 的 `content` 为 `admin` 或 `member`。`group_update` 和 `group_announce` 的 `content` 分别为群名和公告。`group_list` 返回当前角色、邀请人和 `joined_after`，`group_detail` 还返回公告和成员角色。
+
+Online 群附件协商 `online-group-attachments-v1`。`dm_file_init`、`dm_image_chunk` 和 `dm_image_get` 附带 `group_id`。文件按 `attachment_id` 下载，服务端对每个分块核对成员权限与历史边界。`dm_file_cancel` 取消发送者尚未发布的上传。附件上限为图片 4 MiB、文件 32 MiB。旧客户端的群附件消息显示为文本。群 FCM 路由包含 `recipient`、`groupId`、`senderUserCode` 与 `messageId`。
 
 客户端可以在 `login.capabilities` 中声明 `room-password-v1`。服务端在 `login_ok.capabilities` 中确认后，私有频道的创建和加入请求可携带 `room_password`，密码留空表示创建普通私有频道。密码最多 72 个 UTF-8 字节。服务端通过 `room_details[].password_required` 提示当前用户需要密码，创建者可直接进入。携带 `command_id` 的创建或加入请求会收到同类型确认，失败时返回对应的 `error`。
 

@@ -19,6 +19,8 @@ node --test scripts/check-version.test.mjs
 
 2026-11-23 本机 S0 回归通过工作区离线测试和 Clippy、LAN 附件连续 12 次、前端 188 项测试、版本校验 4 项及 TLS 11 项。MSVC 报 D8050 时，在当前 PowerShell 设 `CARGO_TARGET_DIR=C:/lc-target` 和 `CARGO_PROFILE_DEV_DEBUG=0` 后复跑。TLS 测试临时目录写入失败时，可在当前进程将 `TEMP` 和 `TMP` 指向工作区下可写的测试目录。
 
+在 Windows 验证局域网更新构建时，为工作区测试和 Clippy 命令加 `--features lan-chat-desktop/lan-updater`。房主 SQLite 迁移验收使用旧版库的隔离副本，保留迁移前数据库、证书与附件目录的同一份备份。[1.4.0 局域网验收记录](release-acceptance.md#140-局域网验收记录)记录迁移、自愈与兼容结果。
+
 ## Windows 发布包
 
 ~~~powershell

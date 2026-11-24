@@ -154,6 +154,7 @@ public final class MainActivity extends Activity {
     private final ExecutorService socialRequests = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Map<String, Contact> contacts = new LinkedHashMap<>();
+    private final Map<String, Group> groupDirectory = new LinkedHashMap<>();
     private final Map<String, Map<String, ChatMessage>> histories = new LinkedHashMap<>();
     private final Map<String, String> historyCursor = new LinkedHashMap<>();
     private final Set<String> initializedHistory = new HashSet<>();
@@ -184,6 +185,9 @@ public final class MainActivity extends Activity {
     private Runnable socialBack;
     private boolean socialAvailable;
     private boolean groupsAvailable;
+    private boolean groupManagementAvailable;
+    private boolean groupAttachmentsAvailable;
+    private Contact groupDetails;
     private boolean directorySelected;
     private LinearLayout messages;
     private ConversationScroll scroll;
@@ -207,8 +211,10 @@ public final class MainActivity extends Activity {
     private String ownCode;
     private String username;
     private String pendingImagePeer;
+    private boolean pendingImageGroup;
     private Uri pendingImageUri;
     private String pendingFilePeer;
+    private boolean pendingFileGroup;
     private Uri pendingFileUri;
     private SavedDocument pendingSave;
     private ProgressDialog transferDialog;
@@ -246,6 +252,8 @@ public final class MainActivity extends Activity {
     private record Contact(String code, String name, boolean group) {
         Contact(String code, String name) { this(code, name, false); }
     }
+    private record Group(Contact contact, int memberCount, String role, String announcement,
+                         String invitedBy, long joinedAfter) {}
     private record PendingText(Contact peer, String text, Instant time) {}
     private record ChatMessage(String id, String author, String authorName, String text, int imageSize, Instant time, String delivery,
                                long revision, boolean recalled, ChatConnection.Attachment attachment) {
@@ -322,8 +330,10 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         if (state != null) {
             pendingImagePeer = state.getString("imagePeer");
+            pendingImageGroup = state.getBoolean("imageGroup");
             pendingImageUri = state.getParcelable("imageUri");
             pendingFilePeer = state.getString("filePeer");
+            pendingFileGroup = state.getBoolean("fileGroup");
             pendingFileUri = state.getParcelable("fileUri");
             if (state.containsKey("saveSource")) {
                 pendingSave = new SavedDocument(new File(getCacheDir(), state.getString("saveSource")),
@@ -345,8 +355,10 @@ public final class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
         state.putString("imagePeer", pendingImagePeer);
+        state.putBoolean("imageGroup", pendingImageGroup);
         state.putParcelable("imageUri", pendingImageUri);
         state.putString("filePeer", pendingFilePeer);
+        state.putBoolean("fileGroup", pendingFileGroup);
         state.putParcelable("fileUri", pendingFileUri);
         if (pendingSave != null) {
             state.putString("saveSource", pendingSave.source().getName());
@@ -460,6 +472,8 @@ public final class MainActivity extends Activity {
                 boolean supportsEditing = supports(capabilities, "online-message-edit-v1");
                 boolean supportsSocial = supports(capabilities, "online-social-v1");
                 boolean supportsGroups = supports(capabilities, "online-groups-v1");
+                boolean supportsGroupManagement = supports(capabilities, "online-group-management-v1");
+                boolean supportsGroupAttachments = supports(capabilities, "online-group-attachments-v1");
                 main.post(() -> {
                     if (isDestroyed() || generation != attempt) {
                         closeConnection(session);
@@ -482,12 +496,15 @@ public final class MainActivity extends Activity {
                     connection = session;
                     MessagePushService.foregroundConnected = foreground;
                     ownCode = userCode;
+                    preferences().edit().putString(MessagePushService.ACCOUNT, key(userCode)).apply();
                     username = accountName;
                     imagesAvailable = supportsImages;
                     filesAvailable = supportsFiles;
                     editingAvailable = supportsEditing;
                     socialAvailable = supportsSocial;
                     groupsAvailable = supportsGroups;
+                    groupManagementAvailable = supportsGroupManagement;
+                    groupAttachmentsAvailable = supportsGroupAttachments;
                     authenticating = false;
                     reconnectDelay = 2000;
                     if (firstLogin) {
@@ -496,16 +513,16 @@ public final class MainActivity extends Activity {
                         showHome(false);
                     } else {
                         showConnectionStatus("");
-                        if (active != null) {
+                        if (active != null && !active.group()) {
                             MessagePushService.markRead(this, ownCode, active.code());
                             requestHistory(active, "");
-                        } else if (!settings) {
+                        } else if (active == null && !settings) {
                             renderContacts(false);
                             if (friendRows != null) refreshFriends();
-                            if (groupRows != null) refreshGroups();
                         }
                     }
                     refreshContacts.run();
+                    if (groupsAvailable) refreshGroups(true);
                     syncNotifications(false);
                     openNotificationChat();
                     if (pendingImageUri != null) {
@@ -581,12 +598,23 @@ public final class MainActivity extends Activity {
     private void openNotificationChat() {
         if (connection == null) return;
         Uri route = getIntent().getData();
-        if (route == null || !"lanchat".equals(route.getScheme()) || !"dm".equals(route.getAuthority())) return;
+        if (route == null || !"lanchat".equals(route.getScheme())) return;
         getIntent().setData(null);
         List<String> parts = route.getPathSegments();
-        if (parts.size() != 2 || !ownCode.equalsIgnoreCase(parts.get(0))
-                || !MessagePushService.validUserCode(parts.get(1))) return;
+        if (parts.size() != 2 || !ownCode.equalsIgnoreCase(parts.get(0))) return;
         String peer = parts.get(1);
+        if ("group".equals(route.getAuthority()) && MessagePushService.validGroupId(peer)) {
+            MessagePushService.clearGroup(this, ownCode, peer);
+            if (groupsAvailable) {
+                socialRequest("group_detail", response -> {
+                    Group group = readGroup(response.getJSONArray("groups").getJSONObject(0));
+                    groupDirectory.put(key(peer), group);
+                    openChat(group.contact());
+                }, "group_id", peer);
+            }
+            return;
+        }
+        if (!"dm".equals(route.getAuthority()) || !MessagePushService.validUserCode(peer)) return;
         Contact contact = contacts.get(key(peer));
         if (contact != null) openChat(contact);
         else send("dm_lookup", "target_user_code", peer, "command_id", UUID.randomUUID().toString());
@@ -628,19 +656,26 @@ public final class MainActivity extends Activity {
                     MessagePushService.markUnread(this, ownCode, peer, row.id());
                 }
                 if (!self && live) {
-                    if (fresh && (!foreground || !isActive(peer))) MessagePushService.show(this, ownCode, author);
+                    if (fresh && (!foreground || !isActive(peer))) MessagePushService.show(this, ownCode, author, false);
                     send("dm_received", "message_id", packet.getString("message_id"), "target_user_code", author);
                 }
                 if (active == null && !settings) renderContacts(false);
             }
             case "group_message" -> {
                 String group = packet.getString("group_id");
+                if (!MessagePushService.validGroupId(group)) throw new JSONException("服务器返回了无效的群编号");
                 ChatMessage row = message(packet);
                 boolean self = ownCode.equalsIgnoreCase(row.author());
                 if (self) confirmText(row.id());
                 if (addMessage(group, row, true) && !self && !isActive(group)) {
-                    MessagePushService.markUnread(this, ownCode, group, row.id());
-                    if (groupRows != null) refreshGroups();
+                    MessagePushService.markUnread(this, ownCode, group, messageKey(row));
+                    MessagePushService.show(this, ownCode, group, true);
+                    if (groupDirectory.containsKey(key(group))) {
+                        renderGroups();
+                        renderContacts(false);
+                    } else {
+                        refreshGroups(false);
+                    }
                 }
             }
             case "history_response" -> {
@@ -704,7 +739,7 @@ public final class MainActivity extends Activity {
                 if (friendRows != null) refreshFriends();
             }
             case "groups_changed" -> {
-                if (groupRows != null) refreshGroups();
+                refreshGroups(false, packet.optString("group_id"));
             }
             case "error" -> {
                 String command = packet.optString("command_id");
@@ -774,6 +809,7 @@ public final class MainActivity extends Activity {
         boolean returningFromChat = active != null;
         releaseChatPanels();
         socialBack = null;
+        groupDetails = null;
         friendRows = null;
         groupRows = null;
         settings = false;
@@ -886,17 +922,20 @@ public final class MainActivity extends Activity {
     }
 
     private void socialRequest(String type, SocialReply reply, Object... fields) {
+        socialRequest(page, type, reply, fields);
+    }
+
+    private void socialRequest(LinearLayout source, String type, SocialReply reply, Object... fields) {
         ChatConnection session = connection;
         if (session == null) {
             toast("连接尚未恢复，请稍后重试");
             return;
         }
-        LinearLayout source = page;
         socialRequests.execute(() -> {
             try {
                 JSONObject response = session.request(packet(type, fields));
                 main.post(() -> {
-                    if (isDestroyed() || connection != session || page != source) return;
+                    if (isDestroyed() || connection != session || (source != null && page != source)) return;
                     try {
                         reply.accept(response);
                     } catch (JSONException error) {
@@ -905,7 +944,9 @@ public final class MainActivity extends Activity {
                 });
             } catch (IOException | JSONException error) {
                 main.post(() -> {
-                    if (!isDestroyed() && page == source) toast(error.getMessage());
+                    if (!isDestroyed() && connection == session && (source == null || page == source)) {
+                        toast(error.getMessage());
+                    }
                 });
             }
         });
@@ -914,6 +955,7 @@ public final class MainActivity extends Activity {
     private LinearLayout socialPage(String title, Runnable back, boolean slideFromLeft) {
         releaseChatPanels();
         active = null;
+        groupDetails = null;
         settings = false;
         contactRows = null;
         friendRows = null;
@@ -943,7 +985,8 @@ public final class MainActivity extends Activity {
             directoryHeading(body, "群聊", "创建群聊", this::chooseGroupMembers);
             groupRows = column();
             addSpaced(body, groupRows, 4);
-            refreshGroups();
+            if (groupDirectory.isEmpty()) refreshGroups(false);
+            else renderGroups();
         }
     }
 
@@ -955,23 +998,91 @@ public final class MainActivity extends Activity {
         addSpaced(body, row, 14);
     }
 
-    private void refreshGroups() {
-        socialRequest("group_list", response -> {
-            groupRows.removeAllViews();
+    private static Group readGroup(JSONObject value) throws JSONException {
+        String id = value.getString("id");
+        if (!MessagePushService.validGroupId(id)) throw new JSONException("服务器返回了无效的群编号");
+        return new Group(new Contact(id, value.getString("name"), true), value.getInt("member_count"),
+                value.optString("role"), value.optString("announcement"), value.optString("invited_by_user_code"),
+                value.optLong("joined_after"));
+    }
+
+    private void refreshGroups(boolean reconnected) {
+        refreshGroups(reconnected, "");
+    }
+
+    private void refreshGroups(boolean reconnected, String affected) {
+        socialRequest(null, "group_list", response -> {
+            Map<String, Group> refreshed = new LinkedHashMap<>();
             JSONArray groups = response.optJSONArray("groups");
-            if (groups == null || groups.length() == 0) {
-                addSpaced(groupRows, label("还没有群聊", 14, MUTED), 12);
-                return;
+            if (groups != null) {
+                for (int i = 0; i < groups.length(); i++) {
+                    Group group = readGroup(groups.getJSONObject(i));
+                    refreshed.put(key(group.contact().code()), group);
+                }
             }
-            for (int i = 0; i < groups.length(); i++) {
-                JSONObject value = groups.getJSONObject(i);
-                Contact group = new Contact(value.getString("id"), value.getString("name"), true);
-                String summary = value.getInt("member_count") + " 位成员";
-                int unread = MessagePushService.unreadCount(this, ownCode, group.code());
-                if (unread > 0) summary += " · " + unread + " 条未读";
-                addSpaced(groupRows, personCard(group.name(), summary, () -> openChat(group)), 8);
+            Set<String> changedMemberships = new HashSet<>();
+            for (Map.Entry<String, Group> entry : groupDirectory.entrySet()) {
+                Group current = refreshed.get(entry.getKey());
+                if (current == null || current.joinedAfter() != entry.getValue().joinedAfter()) {
+                    changedMemberships.add(entry.getKey());
+                }
             }
+            groupDirectory.clear();
+            groupDirectory.putAll(refreshed);
+            for (String group : changedMemberships) {
+                if (groupDirectory.containsKey(group)) clearGroupHistory(group);
+                else forgetGroup(group);
+            }
+            if (MessagePushService.validGroupId(affected) && !refreshed.containsKey(key(affected))) {
+                MessagePushService.clearGroup(this, ownCode, affected);
+            }
+            if (active != null && active.group()) {
+                Group current = refreshed.get(key(active.code()));
+                if (current != null && !active.equals(current.contact())) openChat(current.contact());
+                else if (current != null && (reconnected || changedMemberships.contains(key(active.code())))) {
+                    renderMessages(false, false);
+                    requestHistory(active, "");
+                }
+            }
+            if (groupDetails != null && (reconnected || groupDetails.code().equals(affected))) {
+                showGroupDetails(groupDetails);
+            }
+            renderGroups();
+            renderContacts(false);
         });
+    }
+
+    private void renderGroups() {
+        if (groupRows == null) return;
+        groupRows.removeAllViews();
+        if (groupDirectory.isEmpty()) {
+            addSpaced(groupRows, label("还没有群聊", 14, MUTED), 12);
+        }
+        for (Group group : groupDirectory.values()) {
+            Contact contact = group.contact();
+            String summary = group.memberCount() + " 位成员";
+            int unread = MessagePushService.unreadCount(this, ownCode, contact.code());
+            if (unread > 0) summary += " · " + unread + " 条未读";
+            addSpaced(groupRows, personCard(contact.name(), summary, () -> openChat(contact)), 8);
+        }
+    }
+
+    private void forgetGroup(String group) {
+        groupDirectory.remove(group);
+        clearGroupHistory(group);
+        if (isActive(group) || (groupDetails != null && groupDetails.code().equals(group))) showHome(true);
+    }
+
+    private void clearGroupHistory(String group) {
+        for (String id : new ArrayList<>(pendingTexts.keySet())) {
+            if (group.equals(key(pendingTexts.get(id).peer().code()))) confirmText(id);
+        }
+        histories.remove(group);
+        initializedHistory.remove(group);
+        pendingHistory.remove(group);
+        historyCursor.remove(group);
+        if (download != null && group.equals(key(download.peer().code()))) download = null;
+        MessagePushService.clearGroup(this, ownCode, group);
     }
 
     private void chooseGroupMembers() {
@@ -1022,8 +1133,9 @@ public final class MainActivity extends Activity {
                 }
                 dialog.dismiss();
                 socialRequest("group_create", created -> {
-                    JSONObject group = created.getJSONArray("groups").getJSONObject(0);
-                    openChat(new Contact(group.getString("id"), group.getString("name"), true));
+                    Group group = readGroup(created.getJSONArray("groups").getJSONObject(0));
+                    groupDirectory.put(key(group.contact().code()), group);
+                    openChat(group.contact());
                 }, "room", title, "users", members);
             }));
             dialog.show();
@@ -1032,22 +1144,133 @@ public final class MainActivity extends Activity {
 
     private void showGroupDetails(Contact group) {
         socialRequest("group_detail", response -> {
+            Group details = readGroup(response.getJSONArray("groups").getJSONObject(0));
+            Contact current = details.contact();
+            groupDirectory.put(key(current.code()), details);
+            boolean owner = "owner".equals(details.role());
+            boolean administer = groupManagementAvailable && (owner || "admin".equals(details.role()));
             JSONArray members = response.getJSONArray("profiles");
-            LinearLayout body = socialPage(group.name(), () -> openChat(group), false);
+            LinearLayout body = socialPage(current.name(), () -> openChat(current), false);
+            groupDetails = current;
+            if (groupManagementAvailable) {
+                if (!details.invitedBy().isEmpty()) {
+                    addSpaced(body, label("由 " + details.invitedBy() + " 邀请加入", 14, MUTED), 12);
+                }
+                if (!details.announcement().isEmpty()) {
+                    addSpaced(body, label("群公告", 14, MUTED), 12);
+                    addSpaced(body, label(details.announcement(), 16, INK), 4);
+                }
+                if (administer) {
+                    if (members.length() < 20) {
+                        addSpaced(body, button("邀请好友", false, () -> inviteGroupFriend(current, members)), 10);
+                    }
+                    addSpaced(body, button("编辑群公告", false,
+                            () -> editGroupSetting(current, true, details.announcement())), 8);
+                }
+                if (owner) addSpaced(body, button("修改群名", false,
+                        () -> editGroupSetting(current, false, current.name())), 8);
+            }
             addSpaced(body, label(members.length() + " 位成员", 14, MUTED), 12);
             for (int i = 0; i < members.length(); i++) {
                 JSONObject member = members.getJSONObject(i);
                 String code = member.getString("user_code");
-                addSpaced(body, personCard(member.getString("display_name"), code,
-                        () -> openProfile(code, () -> showGroupDetails(group))), 8);
+                String name = member.getString("display_name");
+                String role = member.optString("role");
+                String summary = switch (role) {
+                    case "owner" -> code + " · 群主";
+                    case "admin" -> code + " · 管理员";
+                    default -> code;
+                };
+                boolean manageMember = administer && !ownCode.equalsIgnoreCase(code) && !"owner".equals(role)
+                        && (owner || !"admin".equals(role));
+                addSpaced(body, personCard(name, summary, manageMember
+                        ? () -> showGroupMemberActions(current, name, code, role, owner)
+                        : () -> openProfile(code, () -> showGroupDetails(current))), 8);
             }
-            addSpaced(body, button("退出群聊", false, () -> new AlertDialog.Builder(this)
-                    .setTitle("退出「" + group.name() + "」？").setNegativeButton("取消", null)
-                    .setPositiveButton("退出", (dialog, which) -> socialRequest("group_leave", left -> {
-                        MessagePushService.markRead(this, ownCode, group.code());
-                        showHome(true);
-                    }, "group_id", group.code())).show()), 14);
+            if (owner && groupManagementAvailable) {
+                addSpaced(body, label("转让群主后可退出群聊", 14, MUTED), 14);
+            } else {
+                addSpaced(body, button("退出群聊", false, () -> new AlertDialog.Builder(this)
+                        .setTitle("退出「" + current.name() + "」？").setNegativeButton("取消", null)
+                        .setPositiveButton("退出", (dialog, which) -> socialRequest("group_leave", left -> {
+                            forgetGroup(key(current.code()));
+                        }, "group_id", current.code())).show()), 14);
+            }
         }, "group_id", group.code());
+    }
+
+    private void inviteGroupFriend(Contact group, JSONArray members) {
+        socialRequest("friend_list", response -> {
+            Set<String> present = new HashSet<>();
+            for (int index = 0; index < members.length(); index++) {
+                present.add(key(members.getJSONObject(index).getString("user_code")));
+            }
+            ArrayList<Profile> choices = new ArrayList<>();
+            JSONArray profiles = response.optJSONArray("profiles");
+            if (profiles != null) {
+                for (int index = 0; index < profiles.length(); index++) {
+                    Profile friend = Profile.read(profiles.getJSONObject(index));
+                    if ("friend".equals(friend.friendship()) && !present.contains(key(friend.code()))) choices.add(friend);
+                }
+            }
+            if (choices.isEmpty()) {
+                toast("没有可以邀请的好友");
+                return;
+            }
+            String[] labels = choices.stream().map(friend -> friend.name() + " · " + friend.code()).toArray(String[]::new);
+            new AlertDialog.Builder(this).setTitle("邀请好友").setNegativeButton("取消", null)
+                    .setItems(labels, (dialog, index) -> groupAction(group, "group_invite", choices.get(index).code(), ""))
+                    .show();
+        });
+    }
+
+    private void showGroupMemberActions(Contact group, String name, String code, String role, boolean owner) {
+        Map<String, Runnable> actions = new LinkedHashMap<>();
+        actions.put("查看个人主页", () -> openProfile(code, () -> showGroupDetails(group)));
+        actions.put("移出群聊", () -> confirmGroupAction("将「" + name + "」移出群聊？", "移出",
+                () -> groupAction(group, "group_kick", code, "")));
+        if (owner) {
+            boolean admin = "admin".equals(role);
+            actions.put(admin ? "取消管理员" : "设为管理员",
+                    () -> groupAction(group, "group_role", code, admin ? "member" : "admin"));
+            actions.put("转让群主", () -> confirmGroupAction("将群主转让给「" + name + "」？", "转让",
+                    () -> groupAction(group, "group_transfer", code, "")));
+        }
+        String[] labels = actions.keySet().toArray(new String[0]);
+        new AlertDialog.Builder(this).setTitle(name).setNegativeButton("取消", null)
+                .setItems(labels, (dialog, index) -> actions.get(labels[index]).run()).show();
+    }
+
+    private void confirmGroupAction(String title, String action, Runnable confirm) {
+        new AlertDialog.Builder(this).setTitle(title).setNegativeButton("取消", null)
+                .setPositiveButton(action, (dialog, which) -> confirm.run()).show();
+    }
+
+    private void editGroupSetting(Contact group, boolean announcement, String value) {
+        String title = announcement ? "群公告" : "群名称";
+        LinearLayout form = column();
+        form.setPadding(dp(18), dp(12), dp(18), 0);
+        EditText input = field(title, InputType.TYPE_CLASS_TEXT);
+        input.setSingleLine(true);
+        input.setText(value);
+        form.addView(input);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("编辑" + title).setView(form)
+                .setNegativeButton("取消", null).setPositiveButton("保存", null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            String text = input.getText().toString().trim();
+            if (text.codePointCount(0, text.length()) > (announcement ? 300 : 32) || (!announcement && text.isEmpty())) {
+                input.setError(announcement ? "群公告最多 300 字" : "群名需要 1–32 字");
+                return;
+            }
+            dialog.dismiss();
+            groupAction(group, announcement ? "group_announce" : "group_update", "", text);
+        }));
+        dialog.show();
+    }
+
+    private void groupAction(Contact group, String type, String member, String value) {
+        socialRequest(type, response -> showGroupDetails(group),
+                "group_id", group.code(), "target_user_code", member, "content", value);
     }
 
     private void refreshFriends() {
@@ -1192,14 +1415,16 @@ public final class MainActivity extends Activity {
         if (contactRows == null) return;
         boolean reveal = animate || (contactRows.getChildCount() == 1 && contactRows.getChildAt(0) instanceof TextView);
         contactRows.removeAllViews();
-        if (contacts.isEmpty()) {
+        List<Contact> conversations = new ArrayList<>(contacts.values());
+        for (Group group : groupDirectory.values()) conversations.add(group.contact());
+        if (conversations.isEmpty()) {
             TextView empty = label("还没有会话", 15, MUTED);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(dp(12), dp(42), dp(12), dp(42));
             contactRows.addView(empty);
         }
         int index = 0;
-        for (Contact person : contacts.values()) {
+        for (Contact person : conversations) {
             LinearLayout entry = new LinearLayout(this);
             entry.setGravity(Gravity.CENTER_VERTICAL);
             entry.setPadding(dp(13), dp(12), dp(13), dp(12));
@@ -1219,7 +1444,8 @@ public final class MainActivity extends Activity {
             if (conversation != null) {
                 latest = conversation.values().stream().max(MESSAGE_ORDER).orElse(null);
             }
-            String preview = latest == null ? person.code() : latest.imageSize() > 0 ? "图片" : latest.text();
+            String preview = latest == null ? (person.group() ? "群聊" : person.code())
+                    : latest.imageSize() > 0 ? "图片" : latest.text();
             TextView summary = label(preview, 13, MUTED);
             summary.setMaxLines(1);
             summary.setEllipsize(TextUtils.TruncateAt.END);
@@ -1275,12 +1501,14 @@ public final class MainActivity extends Activity {
         socialBack = contact.group() || directorySelected ? () -> showHome(true) : null;
         friendRows = null;
         groupRows = null;
+        groupDetails = null;
         active = contact;
         settings = false;
         selectedQuote = null;
         visibleHistoryLimit = INITIAL_HISTORY;
         revealedSearchMessage = null;
-        MessagePushService.markRead(this, ownCode, contact.code());
+        if (contact.group()) MessagePushService.clearGroup(this, ownCode, contact.code());
+        else MessagePushService.markRead(this, ownCode, contact.code());
         contactRows = null;
         page = newPage(1);
         LinearLayout header = bar(contact.name());
@@ -1294,7 +1522,7 @@ public final class MainActivity extends Activity {
         iconPosition.setMarginStart(dp(9));
         TextView identity = avatar(contact.name());
         if (contact.group()) {
-            identity.setContentDescription("群聊成员");
+            identity.setContentDescription("群聊详情");
             identity.setOnClickListener(view -> showGroupDetails(contact));
         } else if (socialAvailable) {
             identity.setContentDescription("查看 " + contact.name() + " 的个人主页");
@@ -1364,7 +1592,7 @@ public final class MainActivity extends Activity {
                     else launchAttachmentPicker(contact, true);
                 });
         attachment.setEnabled(imagesAvailable || filesAvailable);
-        if (contact.group()) attachment.setVisibility(View.GONE);
+        if (contact.group() && !groupAttachmentsAvailable) attachment.setVisibility(View.GONE);
         composer.addView(attachment);
         ImageButton emoji = iconButton("选择表情", R.drawable.ic_emoji, false, () -> {
             if (isActive(contact.code())) composerPanels.toggle(ComposerTool.EMOJI);
@@ -2077,8 +2305,9 @@ public final class MainActivity extends Activity {
             cluster.addView(imageTile(active, row), new LinearLayout.LayoutParams(imageWidth, imageWidth * 3 / 4));
         } else if (row.attachment() != null) {
             ChatConnection.Attachment file = row.attachment();
+            Contact conversation = active;
             Button save = button(file.name() + "\n保存 · " + android.text.format.Formatter.formatFileSize(this, file.size()),
-                    false, () -> downloadFile(file));
+                    false, () -> downloadFile(conversation, file));
             save.setMaxWidth(bubbleWidth);
             save.setMaxLines(3);
             save.setEllipsize(TextUtils.TruncateAt.END);
@@ -2454,8 +2683,13 @@ public final class MainActivity extends Activity {
             return;
         }
         composerPanels.hide();
-        if (image) pendingImagePeer = contact.code();
-        else pendingFilePeer = contact.code();
+        if (image) {
+            pendingImagePeer = contact.code();
+            pendingImageGroup = contact.group();
+        } else {
+            pendingFilePeer = contact.code();
+            pendingFileGroup = contact.group();
+        }
         Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType(image ? "image/*" : "*/*")
                 .addCategory(Intent.CATEGORY_OPENABLE);
         startActivityForResult(picker, image ? IMAGE_PICK : FILE_PICK);
@@ -2504,7 +2738,8 @@ public final class MainActivity extends Activity {
             toast("请等待当前文件传输完成");
             return;
         }
-        if (!filesAvailable) {
+        boolean group = pendingFileGroup;
+        if (!filesAvailable || (group && !groupAttachmentsAvailable)) {
             toast("服务器暂未开放普通文件传输");
             return;
         }
@@ -2534,7 +2769,7 @@ public final class MainActivity extends Activity {
                     }
                 }
                 long size = staging.length();
-                session.uploadAttachment(staging, name, peer, count -> updateTransfer(progress, count, size));
+                session.uploadAttachment(staging, name, peer, group, count -> updateTransfer(progress, count, size));
             } catch (IOException | JSONException | SecurityException error) {
                 detail = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
             } finally {
@@ -2550,12 +2785,13 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private void downloadFile(ChatConnection.Attachment file) {
+    private void downloadFile(Contact conversation, ChatConnection.Attachment file) {
         ChatConnection session = connection;
         if (session == null || transferringFile) {
             toast(session == null ? "连接尚未恢复，请稍后重试" : "请等待当前文件传输完成");
             return;
         }
+        Group membership = groupDirectory.get(key(conversation.code()));
         ProgressDialog progress = beginFileTransfer("正在下载文件");
         fileTransfers.execute(() -> {
             File staging = null;
@@ -2565,6 +2801,16 @@ public final class MainActivity extends Activity {
                 SavedDocument document = new SavedDocument(staging, file.name(), "application/octet-stream", true);
                 main.post(() -> {
                     transferringFile = false;
+                    Group current = groupDirectory.get(key(conversation.code()));
+                    if (conversation.group() && (membership == null || current == null
+                            || membership.joinedAfter() != current.joinedAfter())) {
+                        document.source().delete();
+                        if (!isDestroyed()) {
+                            progress.dismiss();
+                            toast("该群聊的成员资格已变更");
+                        }
+                        return;
+                    }
                     if (isDestroyed() || ownCode == null || !foreground) {
                         document.source().delete();
                         if (!isDestroyed()) progress.dismiss();
@@ -2612,7 +2858,17 @@ public final class MainActivity extends Activity {
 
     private void sendImage(Uri uri) {
         String peer = pendingImagePeer;
+        boolean group = pendingImageGroup;
+        if (!imagesAvailable || (group && !groupAttachmentsAvailable)) {
+            toast("服务器暂未开放图片传输");
+            return;
+        }
         ChatConnection session = connection;
+        if (transferringFile) {
+            toast("请等待当前文件传输完成");
+            return;
+        }
+        ProgressDialog progress = beginFileTransfer("正在发送图片");
         writers.execute(() -> {
             try {
                 Bitmap picture = ImageDecoder.decodeBitmap(ImageDecoder.createSource(getContentResolver(), uri), (decoder, info, source) -> {
@@ -2630,13 +2886,19 @@ public final class MainActivity extends Activity {
                 String id = UUID.randomUUID().toString();
                 for (int index = 0, offset = 0; offset < bytes.length; index++) {
                     int length = TransportCodec.chunkLength(bytes.length, index);
-                    session.send(packet("dm_image_chunk", "message_id", id, "target_user_code", peer,
+                    session.send(packet("dm_image_chunk", "message_id", id, group ? "group_id" : "target_user_code", peer,
                             "image_size", bytes.length, "chunk_index", index,
                             "image_data", Base64.encodeToString(bytes, offset, length, Base64.NO_WRAP)));
                     offset += length;
+                    updateTransfer(progress, offset, bytes.length);
                 }
             } catch (IOException | JSONException error) {
                 main.post(() -> toast("图片发送失败 · " + error.getMessage()));
+            } finally {
+                main.post(() -> {
+                    transferringFile = false;
+                    if (!isDestroyed()) progress.dismiss();
+                });
             }
         });
     }
@@ -2714,8 +2976,10 @@ public final class MainActivity extends Activity {
     }
 
     private void requestImageChunk() {
+        Contact peer = download.peer();
         send("dm_image_get", "message_id", download.message().id(), "user_code", download.message().author(),
-                "target_user_code", download.peer().code(), "chunk_index", download.bytes().size() / ChatConnection.CHUNK_BYTES,
+                peer.group() ? "group_id" : "target_user_code", peer.code(),
+                "chunk_index", download.bytes().size() / ChatConnection.CHUNK_BYTES,
                 "command_id", download.command());
     }
 
@@ -2734,6 +2998,9 @@ public final class MainActivity extends Activity {
         long chunkIndex = packet.has("chunk_index") ? packet.getLong("chunk_index") : 0;
         int expectedIndex = offset / ChatConnection.CHUNK_BYTES;
         if (chunkIndex != expectedIndex || total != packet.getInt("image_size")
+                || (download.peer().group() && (!download.message().id().equals(packet.getString("message_id"))
+                    || !download.message().author().equalsIgnoreCase(packet.getString("user_code"))
+                    || !download.peer().code().equals(packet.getString("group_id"))))
                 || data.length != TransportCodec.chunkLength(total, expectedIndex)) {
             download = null;
             throw new IOException("图片分片序号或大小与预期不符");
@@ -2916,6 +3183,7 @@ public final class MainActivity extends Activity {
         socialBack = this::restoreHome;
         friendRows = null;
         groupRows = null;
+        groupDetails = null;
         settings = true;
         active = null;
         visibleImages.clear();
@@ -2952,7 +3220,7 @@ public final class MainActivity extends Activity {
         notificationTitle.setPadding(dp(4), 0, 0, 0);
         addSpaced(options, notificationTitle, 24);
         Switch permission = new Switch(this);
-        permission.setText("私信系统通知");
+        permission.setText("消息系统通知");
         permission.setTextSize(16);
         permission.setTextColor(INK);
         permission.setMinHeight(dp(60));
@@ -3010,7 +3278,7 @@ public final class MainActivity extends Activity {
     }
 
     private void syncNotificationsBeforeLogout() {
-        preferences().edit().putBoolean(MessagePushService.ENABLED, false).apply();
+        preferences().edit().putBoolean(MessagePushService.ENABLED, false).remove(MessagePushService.ACCOUNT).apply();
         if (!FirebaseApp.getApps(this).isEmpty()) FirebaseMessaging.getInstance().deleteToken();
     }
 
@@ -3092,12 +3360,14 @@ public final class MainActivity extends Activity {
         socialBack = null;
         friendRows = null;
         groupRows = null;
+        groupDetails = null;
         historyCursor.clear();
         initializedHistory.clear();
         disconnect();
         active = null;
         settings = false;
         contacts.clear();
+        groupDirectory.clear();
         histories.clear();
         pendingTexts.clear();
         contactRows = null;

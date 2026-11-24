@@ -19,7 +19,7 @@ $rustTarget = if ($env:CARGO_TARGET_DIR) { [IO.Path]::GetFullPath($env:CARGO_TAR
 pnpm.cmd --dir $frontend run build
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
 
-$features = if ($Edition -eq 'online') { 'custom-protocol,online' } else { 'custom-protocol' }
+$features = if ($Edition -eq 'online') { 'custom-protocol,online,desktop-updater' } else { 'custom-protocol,desktop-updater' }
 cargo build --manifest-path $manifest --locked --release --target-dir $rustTarget -p lan-chat-desktop --features $features
 if ($LASTEXITCODE -ne 0) { throw 'Tauri desktop build failed.' }
 

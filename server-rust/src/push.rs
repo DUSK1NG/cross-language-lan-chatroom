@@ -35,6 +35,7 @@ struct Notification {
     recipient: String,
     sender: String,
     message_id: String,
+    group_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -109,12 +110,21 @@ impl Push {
     }
 
     pub fn notify(&self, recipient: &str, sender: &str, message_id: &str) {
+        self.enqueue(recipient, sender, message_id, None);
+    }
+
+    pub fn notify_group(&self, recipient: &str, sender: &str, message_id: &str, group: &str) {
+        self.enqueue(recipient, sender, message_id, Some(group));
+    }
+
+    fn enqueue(&self, recipient: &str, sender: &str, message_id: &str, group: Option<&str>) {
         if self
             .0
             .try_send(Notification {
                 recipient: recipient.into(),
                 sender: sender.into(),
                 message_id: message_id.into(),
+                group_id: group.map(str::to_owned),
             })
             .is_err()
         {
@@ -254,10 +264,23 @@ impl Gateway {
 
     fn notify(&mut self, store: &Connection, message: &Notification) -> Result<()> {
         let tokens = {
-            let mut statement =
-                store.prepare("SELECT token FROM online_push_devices WHERE user_code=?")?;
+            let mut statement = store.prepare(
+                "SELECT token FROM online_push_devices WHERE user_code=?1 AND (?2 IS NULL OR EXISTS (
+                    SELECT 1 FROM online_group_members g JOIN chat_messages c
+                      ON c.kind='online_group' AND c.conversation_key=g.group_id AND c.id>g.joined_after
+                    WHERE g.user_code=?1 AND g.group_id=?2 AND c.sender_code=?3 AND c.message_id=?4 AND c.recalled=0
+                 ))",
+            )?;
             statement
-                .query_map([&message.recipient], |row| row.get::<_, String>(0))?
+                .query_map(
+                    params![
+                        message.recipient,
+                        message.group_id,
+                        message.sender,
+                        message.message_id
+                    ],
+                    |row| row.get::<_, String>(0),
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
         for token in tokens {
@@ -279,12 +302,18 @@ impl Gateway {
         if let Some(secret) = &self.relay_secret {
             request = request.header("X-Relay-Secret", secret);
         }
+        let data = match &message.group_id {
+            Some(group_id) => json!({
+                "type": "group_message", "recipient": message.recipient,
+                "groupId": group_id, "senderUserCode": message.sender, "messageId": message.message_id
+            }),
+            None => {
+                json!({"type": "direct_message", "recipient": message.recipient, "sender": message.sender, "message_id": message.message_id})
+            }
+        };
         let mut response = request.send_json(json!({"message": {
             "token": token,
-            "data": {
-                "type": "direct_message", "recipient": message.recipient, "sender": message.sender,
-                "message_id": message.message_id
-            },
+            "data": data,
             "android": {"priority": "HIGH", "ttl": "300s"}
         }}))?;
         if response.status() == StatusCode::OK {

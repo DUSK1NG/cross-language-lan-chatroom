@@ -13,7 +13,11 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use chrono::{SecondsFormat, Utc};
-use lan_chat_protocol::{MAX_FRAME_BYTES, Message, ONLINE_FILES, ONLINE_IMAGES, ROOM_PASSWORD};
+use lan_chat_protocol::{
+    LAN_HISTORY_PAGES, LAN_ROOM_ROLES, MAX_FRAME_BYTES, Message, ONLINE_FILES,
+    ONLINE_GROUP_ATTACHMENTS, ONLINE_GROUP_MANAGEMENT, ONLINE_GROUPS, ONLINE_HISTORY_PAGES,
+    ONLINE_IMAGES, ONLINE_SOCIAL, ROOM_PASSWORD,
+};
 use ring::digest::{SHA256, digest};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -82,6 +86,8 @@ struct Payload {
     host_id: String,
     display_name: String,
     target_user_code: String,
+    group_id: String,
+    users: Vec<String>,
     message_id: String,
     attachment_id: String,
     image_size: i64,
@@ -297,14 +303,24 @@ impl Client {
                     result?;
                 } else if kind == "image.read" {
                     ensure!(session.has(ONLINE_IMAGES), "当前在线服务器不支持图片私信");
+                    ensure!(
+                        payload.group_id.is_empty() || session.has(ONLINE_GROUP_ATTACHMENTS),
+                        "当前服务端不支持群图片"
+                    );
                     let url = self.read_image(&session.connection, payload).await?;
                     return Ok(Some(json!({"imageUrl":url})));
                 } else if kind == "image.chooseUpload" {
                     ensure!(session.has(ONLINE_IMAGES), "当前在线服务器不支持图片私信");
+                    ensure!(
+                        payload.group_id.is_empty() || session.has(ONLINE_GROUP_ATTACHMENTS),
+                        "当前服务端不支持群图片"
+                    );
+                    self.validate_online_scope(&payload.target_user_code, &payload.group_id)?;
                     if let Some(path) = self.choose(Pick::Image).await?.into_iter().next() {
                         self.upload_image(
                             &session.connection,
                             &payload.target_user_code,
+                            &payload.group_id,
                             id,
                             &path,
                         )
@@ -317,7 +333,11 @@ impl Client {
                         .transfer
                         .try_lock()
                         .context("正在发送附件")?;
-                    self.validate_dm(&payload.target_user_code)?;
+                    ensure!(
+                        payload.group_id.is_empty() || session.has(ONLINE_GROUP_ATTACHMENTS),
+                        "当前服务端不支持群文件"
+                    );
+                    self.validate_online_scope(&payload.target_user_code, &payload.group_id)?;
                     let paths = if kind == "onlineFile.chooseUpload" {
                         self.choose(Pick::OnlineFiles).await?
                     } else {
@@ -328,6 +348,7 @@ impl Client {
                             &session.connection,
                             id,
                             &payload.target_user_code,
+                            &payload.group_id,
                             &path,
                         )
                         .await?;
@@ -348,6 +369,16 @@ impl Client {
                 let mut delayed = false;
                 match kind {
                     "directory.refreshRooms" => message.kind = "rooms_request".into(),
+                    "directory.refreshGroups" => {
+                        ensure!(session.has(ONLINE_GROUPS), "服务器不支持群聊");
+                        message.kind = "group_list".into();
+                        if session.has(ONLINE_SOCIAL) {
+                            session.connection.send(Message {
+                                kind: "friend_list".into(),
+                                ..Message::default()
+                            })?;
+                        }
+                    }
                     "directory.refreshUsers" => {
                         message.kind = if self.edition == Edition::Online {
                             "dm_contacts"
@@ -395,26 +426,136 @@ impl Client {
                             message = state.select(reference);
                         }
                     }
-                    "history.search" => {
-                        let reference = state.active.as_ref().context("请选择会话")?;
-                        message = reference.history(&payload.query);
-                        state.query = payload.query;
-                        state.search.clear();
+                    "conversation.selectGroup" => {
+                        ensure!(session.has(ONLINE_GROUPS), "服务器不支持群聊");
+                        let group = state
+                            .groups
+                            .get(&payload.group_id)
+                            .context("这个群聊已不可访问")?;
+                        let reference = Conversation::group(&group.id, &group.name);
+                        session.connection.send(Message {
+                            kind: "group_detail".into(),
+                            group_id: reference.id.clone(),
+                            ..Message::default()
+                        })?;
+                        message = state.select(reference);
                     }
-                    "chat.sendRoom" | "chat.sendPrivate" => {
+                    "group.create" | "group.action" => {
+                        ensure!(session.has(ONLINE_GROUPS), "服务器不支持群聊");
+                        message.kind = if kind == "group.create" {
+                            "group_create"
+                        } else {
+                            let action = match payload.action.as_str() {
+                                "leave" => "group_leave",
+                                "invite" => "group_invite",
+                                "kick" => "group_kick",
+                                "role" => "group_role",
+                                "transfer" => "group_transfer",
+                                "rename" => "group_update",
+                                "announce" => "group_announce",
+                                _ => bail!("未知群管理操作"),
+                            };
+                            ensure!(
+                                action == "group_leave" || session.has(ONLINE_GROUP_MANAGEMENT),
+                                "服务器不支持群管理"
+                            );
+                            ensure!(
+                                state.groups.contains_key(&payload.group_id),
+                                "这个群聊已不可访问"
+                            );
+                            action
+                        }
+                        .into();
+                        message.group_id = payload.group_id;
+                        message.room = payload.room;
+                        message.users = payload.users;
+                        message.target_user_code = payload.target_user_code;
+                        message.content = payload.content;
+                        message.command_id = id.clone();
+                        delayed = true;
+                    }
+                    "friend.request" | "friend.respond" => {
+                        ensure!(session.has(ONLINE_SOCIAL), "服务器不支持好友操作");
+                        message.kind = if kind == "friend.request" {
+                            "friend_request"
+                        } else {
+                            "friend_respond"
+                        }
+                        .into();
+                        message.target_user_code = payload.target_user_code;
+                        message.action = payload.action;
+                        message.command_id = id.clone();
+                        delayed = true;
+                    }
+                    "history.groupMore" => {
+                        let group = state
+                            .active
+                            .as_ref()
+                            .filter(|active| active.kind == "group")
+                            .context("请先选择群聊")?;
+                        message = group.history("");
+                        message.before_message_id = state
+                            .group_before
+                            .get(&group.id)
+                            .cloned()
+                            .context("没有更早的群消息")?;
+                    }
+                    "history.search" | "history.searchMore" => {
+                        let reference = state.active.as_ref().context("请选择会话")?;
+                        let paged =
+                            session.has(LAN_HISTORY_PAGES) || session.has(ONLINE_HISTORY_PAGES);
+                        let append = kind == "history.searchMore";
+                        let query = if append { &state.query } else { &payload.query };
+                        let mut request =
+                            reference.history(if paged { query.trim() } else { query });
+                        if append {
+                            ensure!(
+                                paged && state.search_request.is_none(),
+                                "当前不能加载更多搜索结果"
+                            );
+                            request.before_message_id =
+                                state.search_before.clone().context("没有更早的搜索结果")?;
+                        }
+                        let track = paged && !query.trim().is_empty();
+                        if track {
+                            request.command_id.clone_from(id);
+                        }
+                        session.connection.send(request)?;
+                        if !append {
+                            state.query = if paged {
+                                payload.query.trim().into()
+                            } else {
+                                payload.query
+                            };
+                            state.search.clear();
+                            state.search_before = None;
+                        }
+                        state.search_request = track.then(|| (id.clone(), append));
+                        self.publish(&state);
+                        return Ok(Some(json!({})));
+                    }
+                    "chat.sendRoom" | "chat.sendPrivate" | "chat.sendGroup" => {
                         ensure!(
                             !payload.content.trim().is_empty()
                                 && payload.content.len() <= MAX_FRAME_BYTES,
                             "消息为空或超过长度上限"
                         );
-                        message.kind = if kind == "chat.sendRoom" {
-                            "chat"
-                        } else {
-                            "private_chat"
+                        message.kind = match kind {
+                            "chat.sendRoom" => "chat",
+                            "chat.sendGroup" => {
+                                ensure!(
+                                    session.has(ONLINE_GROUPS)
+                                        && state.groups.contains_key(&payload.group_id),
+                                    "这个群聊已不可访问"
+                                );
+                                "group_send"
+                            }
+                            _ => "private_chat",
                         }
                         .into();
                         message.room = payload.room;
                         message.target_user_code = payload.target_user_code;
+                        message.group_id = payload.group_id;
                         message.content = payload.content;
                         message.message_id = id.clone();
                         message.command_id = id.clone();
@@ -433,6 +574,11 @@ impl Client {
                         message.room = payload.room;
                         message.content = payload.action;
                         message.target_user_code = payload.target_user_code;
+                        message.room_password = payload.room_password;
+                        if session.has(LAN_ROOM_ROLES) {
+                            message.command_id = id.clone();
+                            delayed = true;
+                        }
                     }
                     "admin.action" | "message.recall" => {
                         message.kind = "admin_action".into();
@@ -444,7 +590,8 @@ impl Client {
                         message.target_user_code = payload.target_user_code;
                         message.message_id = payload.message_id;
                         message.command_id = id.clone();
-                        delayed = kind == "message.recall";
+                        delayed = kind == "message.recall"
+                            || (session.has(LAN_ROOM_ROLES) && message.content == "mute");
                     }
                     "message.removeLocal" => {
                         state.hidden.insert(payload.message_id);
@@ -493,7 +640,7 @@ impl Client {
 
     fn apply(&self, state: &mut State, network: &Network, message: &mut Message) -> Result<()> {
         match message.kind.as_str() {
-            "chat" | "private_chat" | "offline_message" | "dm_edited" => {
+            "chat" | "private_chat" | "offline_message" | "dm_edited" | "group_message" => {
                 let attachment = self.received_attachment(network, message);
                 let offline = message.kind == "offline_message";
                 if self.edition == Edition::Online
@@ -508,6 +655,14 @@ impl Client {
                         target_user_code: message.user_code.clone(),
                         ..Message::default()
                     })?;
+                }
+                if message.kind == "group_message"
+                    && state
+                        .identity
+                        .user_code
+                        .eq_ignore_ascii_case(&message.user_code)
+                {
+                    state.outgoing.remove(&message.message_id);
                 }
                 state.add(message.clone(), self.edition, attachment, !offline);
             }
@@ -538,8 +693,65 @@ impl Client {
                     state.direct.insert(reference.id.clone(), reference);
                 }
             }
-            "dm_lookup" | "room_join" | "room_create" => {
+            "group_list" => {
+                state.replace_groups(std::mem::take(&mut message.groups));
+                if let Some(active) = state
+                    .active
+                    .as_ref()
+                    .filter(|active| active.kind == "group")
+                {
+                    network.send(Message {
+                        kind: "group_detail".into(),
+                        group_id: active.id.clone(),
+                        ..Message::default()
+                    })?;
+                    if !state.histories.contains_key(&active.key()) {
+                        network.send(active.history(""))?;
+                    }
+                }
+            }
+            "group_detail" => {
+                if state
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| active.kind == "group" && active.id == message.group_id)
+                    && let Some(group) = message.groups.pop()
+                {
+                    state.groups.insert(group.id.clone(), group);
+                    state.group_members = std::mem::take(&mut message.profiles);
+                }
+            }
+            "groups_changed" => network.send(Message {
+                kind: "group_list".into(),
+                ..Message::default()
+            })?,
+            "friends_changed" => network.send(Message {
+                kind: "friend_list".into(),
+                ..Message::default()
+            })?,
+            "friend_list" => state.friends = std::mem::take(&mut message.profiles),
+            "group_create" => {
                 if state.room_commands.remove(&message.command_id) {
+                    let group = message.groups.pop().context("服务器未返回新建群聊")?;
+                    let reference = Conversation::group(&group.id, &group.name);
+                    state.groups.insert(group.id.clone(), group);
+                    network.send(Message {
+                        kind: "group_detail".into(),
+                        group_id: reference.id.clone(),
+                        ..Message::default()
+                    })?;
+                    self.result(&message.command_id, network.send(state.select(reference)));
+                }
+            }
+            "dm_lookup" | "room_join" | "room_create" => {
+                let requested = state.room_commands.remove(&message.command_id);
+                let reassigned = message.kind == "room_join"
+                    && message.command_id.is_empty()
+                    && state
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| session.has(LAN_ROOM_ROLES));
+                if requested || reassigned {
                     let reference = if message.kind == "dm_lookup" {
                         let item = Conversation::dm(&message.user_code, &message.username);
                         state.direct.insert(item.id.clone(), item.clone());
@@ -547,37 +759,55 @@ impl Client {
                     } else {
                         Conversation::room(&message.room)
                     };
-                    self.result(&message.command_id, network.send(state.select(reference)));
+                    let result = network.send(state.select(reference));
+                    if requested {
+                        self.result(&message.command_id, result);
+                    } else {
+                        result?;
+                    }
+                }
+            }
+            "room_action" | "admin_action" | "friend_request" | "friend_respond"
+            | "group_leave" | "group_invite" | "group_kick" | "group_role" | "group_transfer"
+            | "group_update" | "group_announce" => {
+                if state.room_commands.remove(&message.command_id) {
+                    self.result(&message.command_id, Ok(()));
                 }
             }
             "history_response" => {
-                let reference = if message.private {
+                let reference = if !message.group_id.is_empty() {
+                    let Some(group) = state.groups.get(&message.group_id) else {
+                        return Ok(());
+                    };
+                    Conversation::group(&group.id, &group.name)
+                } else if message.private {
                     Conversation::dm(&message.target_user_code, "")
                 } else {
                     Conversation::room(&message.room)
                 };
                 let key = reference.key();
+                let online = self.edition == Edition::Online;
                 let mut rows = Vec::new();
                 for item in std::mem::take(&mut message.messages) {
                     let attachment = self.received_attachment(network, &item);
                     let row = state.row(item, attachment);
-                    merge(
-                        &mut rows,
-                        row,
-                        self.edition == Edition::Online && message.private,
-                    );
+                    merge(&mut rows, row, online);
                 }
                 if message.search_query.is_empty() {
+                    if reference.kind == "group" {
+                        if let Some(first) = rows.first().filter(|_| message.has_more) {
+                            state
+                                .group_before
+                                .insert(reference.id, first.message_id.clone());
+                        } else {
+                            state.group_before.remove(&reference.id);
+                        }
+                    }
                     if let Some(previous) = state.histories.get(&key) {
                         for row in previous {
-                            if (self.edition == Edition::Online && message.private)
-                                || !rows.iter().any(|item| item.message_id == row.message_id)
+                            if online || !rows.iter().any(|item| item.message_id == row.message_id)
                             {
-                                merge(
-                                    &mut rows,
-                                    row.clone(),
-                                    self.edition == Edition::Online && message.private,
-                                );
+                                merge(&mut rows, row.clone(), online);
                             }
                         }
                     }
@@ -588,6 +818,26 @@ impl Client {
                     .is_some_and(|active| active.key() == key)
                     && state.query == message.search_query
                 {
+                    if state.session.as_ref().is_some_and(|session| {
+                        session.has(LAN_HISTORY_PAGES) || session.has(ONLINE_HISTORY_PAGES)
+                    }) {
+                        let Some((request_id, append)) = &state.search_request else {
+                            return Ok(());
+                        };
+                        if request_id != &message.command_id {
+                            return Ok(());
+                        }
+                        state.search_before = message
+                            .has_more
+                            .then(|| rows.first().map(|row| row.message_id.clone()))
+                            .flatten();
+                        if *append {
+                            for previous in std::mem::take(&mut state.search) {
+                                merge(&mut rows, previous, online);
+                            }
+                        }
+                        state.search_request = None;
+                    }
                     state.search = rows;
                 }
             }
@@ -606,6 +856,13 @@ impl Client {
                 }
             }
             "error" => {
+                if state
+                    .search_request
+                    .as_ref()
+                    .is_some_and(|(id, _)| id == &message.command_id)
+                {
+                    state.search_request = None;
+                }
                 if !message.message_id.is_empty() {
                     state.update_delivery(&message.message_id, "failed");
                 }
@@ -651,17 +908,19 @@ impl Client {
         }
     }
 
-    fn validate_dm(&self, target: &str) -> Result<()> {
+    fn validate_online_scope(&self, target: &str, group: &str) -> Result<()> {
         ensure!(
             self.state
                 .lock()
                 .expect("client state")
                 .active
                 .as_ref()
-                .is_some_and(
-                    |active| active.kind == "dm" && active.user_code.eq_ignore_ascii_case(target)
-                ),
-            "请选择支持文件传输的在线私聊"
+                .is_some_and(|active| if group.is_empty() {
+                    active.kind == "dm" && active.user_code.eq_ignore_ascii_case(target)
+                } else {
+                    active.kind == "group" && active.id == group
+                }),
+            "请先选择该在线会话"
         );
         Ok(())
     }

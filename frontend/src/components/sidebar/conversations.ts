@@ -1,10 +1,11 @@
-import type { BridgeState, ConversationRef, DirectMessageSummary, RoomSummary } from '../../bridge/types';
+import type { BridgeState, ConversationRef, DirectMessageSummary, GroupSummary, RoomSummary } from '../../bridge/types';
 
 export type ConversationFilter = 'all' | 'rooms' | 'direct';
 
 /** One row in the unified list. Built only from fields the bridge already publishes. */
 export type ConversationEntry =
   | { kind: 'room'; key: string; title: string; seed: string; unread: number; room: RoomSummary }
+  | { kind: 'group'; key: string; title: string; seed: string; unread: number; group: GroupSummary }
   | { kind: 'dm'; key: string; title: string; seed: string; unread: number; direct: DirectMessageSummary; online?: boolean };
 
 export function buildEntries(state: BridgeState, filter: ConversationFilter, query: string): ConversationEntry[] {
@@ -17,11 +18,15 @@ export function buildEntries(state: BridgeState, filter: ConversationFilter, que
   const dms: ConversationEntry[] = filter === 'rooms' ? [] : state.directMessages
     .filter((direct) => `${direct.displayName} ${direct.userCode}`.toLowerCase().includes(q))
     .map((direct) => ({ kind: 'dm', key: `dm:${direct.userCode}`, title: direct.displayName, seed: direct.userCode, unread: direct.unreadCount, direct, online: presence.get(direct.userCode) }));
-  return [...rooms, ...dms];
+  const groups: ConversationEntry[] = filter === 'direct' ? [] : (state.groups ?? [])
+    .filter((group) => group.name.toLowerCase().includes(q))
+    .map((group) => ({ kind: 'group', key: `group:${group.id}`, title: group.name, seed: group.id, unread: group.unreadCount, group }));
+  return [...rooms, ...groups, ...dms];
 }
 
 export function isActive(entry: ConversationEntry, active: ConversationRef | undefined): boolean {
   if (!active) return false;
+  if (entry.kind === 'group') return active.kind === 'group' && active.id === entry.group.id;
   return entry.kind === 'room'
     ? active.kind === 'room' && active.id === entry.room.roomName
     : active.kind === 'dm' && active.userCode === entry.direct.userCode;
@@ -34,5 +39,6 @@ export function formatUnread(count: number): string {
 
 /** Accessible names kept from the previous sidebar so commands and tests stay stable. */
 export function entryLabel(entry: ConversationEntry): string {
+  if (entry.kind === 'group') return `群聊 ${entry.group.name}`;
   return entry.kind === 'room' ? `room-${entry.room.roomName}` : `direct-${entry.direct.displayName.toLowerCase()}`;
 }

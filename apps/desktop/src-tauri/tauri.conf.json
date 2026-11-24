@@ -25,6 +25,12 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "requireSignedVersion": true
+    }
+  },
   "bundle": {
     "active": false,
     "icon": [
