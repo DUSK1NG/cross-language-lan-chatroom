@@ -6,7 +6,7 @@ import { ChevronDown, MessageCircle } from 'lucide-react';
 import type { BridgeState, ChatBridgeClient, MessageItem } from '../../bridge/types';
 import { groupPositions, isRenderable, messageDate } from '../../lib/messageGroups';
 import { cn } from '../../lib/cn';
-import { ease, effectsDisabled, scaled } from '../../lib/motion';
+import { ease, scaled } from '../../lib/motion';
 import { useAppSettings } from '../../state/appSettings';
 import { EmptyState, Skeleton } from '../ui/states';
 import { MessageBubble, parseQuote } from './MessageBubble';
@@ -64,7 +64,8 @@ function observeClientRect(instance: Virtualizer<HTMLDivElement, Element>, callb
  */
 export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0, sendAnchor }: MessageListProps) {
   const settings = useAppSettings();
-  const smooth = settings.scrollMotion === 'smooth' && state.performance?.effectsEnabled !== false;
+  const effectsEnabled = state.performance?.effectsEnabled !== false;
+  const smooth = settings.scrollMotion === 'smooth' && effectsEnabled;
   const key = conversationKey(state);
   const isGroupChat = state.navigation.activeConversation?.kind !== 'dm';
   const rows = useMemo(() => state.activeMessages.filter(isRenderable), [state.activeMessages]);
@@ -85,6 +86,8 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
   const rowLayout = useRef({ key: '', top: 0, scrollTop: 0, rows: new Map<string, RowPosition>() });
   const rowAnimations = useRef(new Map<string, AnimationPlaybackControls>());
   const atBottomRef = useRef(true);
+  const followingBottomRef = useRef(false);
+  const wasSmoothRef = useRef(smooth);
   const knownIdsRef = useRef<Set<string> | null>(null);
   const keyRef = useRef('');
   const [atBottom, setAtBottom] = useState(true);
@@ -119,6 +122,7 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
   const scrollToBottom = useCallback(() => {
     const element = scrollRef.current;
     if (!element) return;
+    followingBottomRef.current = smooth && element.scrollTop < element.scrollHeight - element.clientHeight;
     if (smooth) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
     else element.scrollTop = element.scrollHeight;
     markBottom(true);
@@ -129,21 +133,40 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
   const scrollToMessage = useCallback((messageId: string, align: 'start' | 'center' = 'center') => {
     const index = rows.findIndex((message) => message.messageId === messageId);
     if (index < 0) return false;
+    followingBottomRef.current = false;
     const behavior = smooth ? 'smooth' : 'auto';
     if (hasLayout) virtualizer.scrollToIndex(index, { align, behavior });
     else scrollRef.current?.querySelector(`[data-testid="message-${messageId.replace(/["\\]/g, '\\$&')}"]`)?.scrollIntoView({ block: align, behavior });
     return true;
   }, [rows, hasLayout, virtualizer, smooth]);
 
+  useLayoutEffect(() => {
+    const wasSmooth = wasSmoothRef.current;
+    wasSmoothRef.current = smooth;
+    const element = scrollRef.current;
+    if (!wasSmooth || smooth || !element) return;
+    const top = followingBottomRef.current ? element.scrollHeight : element.scrollTop;
+    followingBottomRef.current = false;
+    if (hasLayout) virtualizer.scrollToOffset(top, { behavior: 'instant' });
+    else element.scrollTo({ top, behavior: 'instant' });
+  }, [hasLayout, smooth, virtualizer]);
+
   const onScroll = useCallback(() => {
     const element = scrollRef.current;
     if (!element) return;
     checkLayout();
     const distance = element.scrollHeight - element.clientHeight - element.scrollTop;
+    if (followingBottomRef.current && distance > 1) return;
+    followingBottomRef.current = false;
     const bottom = distance <= bottomThresholdPx;
     if (bottom !== atBottomRef.current) markBottom(bottom);
     else if (bottom) setNewCount(0);
   }, [checkLayout, markBottom]);
+
+  const onScrollEnd = useCallback(() => {
+    followingBottomRef.current = false;
+    onScroll();
+  }, [onScroll]);
 
   // Conversation switches, first snapshot, and appended messages.
   useLayoutEffect(() => {
@@ -151,6 +174,7 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
     if (keyRef.current !== key || knownIdsRef.current === null) {
       keyRef.current = key;
       knownIdsRef.current = ids;
+      followingBottomRef.current = false;
       setEntering(new Set());
       setNewCount(0);
       const firstUnread = entryUnread > 0 && entryUnread <= rows.length ? rows[rows.length - entryUnread] : undefined;
@@ -173,7 +197,7 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
     const appended = rows.slice(firstNew);
     // Only a pure append at the tail counts as "new"; anything else is a history refresh.
     if (appended.some((message) => known.has(message.messageId))) return;
-    setEntering((current) => new Set([...current, ...appended.map((message) => message.messageId)]));
+    if (effectsEnabled) setEntering((current) => new Set([...current, ...appended.map((message) => message.messageId)]));
     const own = appended.some((message) => message.selfMessage || message.userCode === state.identity.userCode);
     if (own || atBottomRef.current) {
       scrollToBottom();
@@ -183,7 +207,7 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
     if (received.length === 0) return;
     setDividerId((current) => current ?? received[0].messageId);
     setNewCount((count) => count + received.length);
-  }, [key, rows, entryUnread, state.identity.userCode, scrollToBottom, scrollToMessage, markBottom]);
+  }, [key, rows, entryUnread, state.identity.userCode, effectsEnabled, scrollToBottom, scrollToMessage, markBottom]);
 
   useLayoutEffect(() => {
     const list = listRef.current;
@@ -207,7 +231,15 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
       exits.replaceChildren();
       return;
     }
-    if (effectsDisabled()) return;
+    if (!effectsEnabled) {
+      exits.replaceChildren();
+      for (const animation of rowAnimations.current.values()) animation.stop();
+      rowAnimations.current.clear();
+      for (const { element } of visible.values()) {
+        (element.firstElementChild as HTMLElement).style.removeProperty('--cirrus-row-offset');
+      }
+      return;
+    }
 
     const currentIds = new Set(rows.map((message) => message.messageId));
     const deleted = [...previous.rows].filter(([id]) => !currentIds.has(id));
@@ -232,7 +264,7 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
     for (const [id, current] of [...visible].reverse()) {
       const prior = previous.rows.get(id);
       const inner = current.element.firstElementChild as HTMLElement;
-      const scrollDelta = atBottomRef.current ? 0 : previous.scrollTop - scroller.scrollTop;
+      const scrollDelta = smooth && atBottomRef.current ? 0 : previous.scrollTop - scroller.scrollTop;
       if (!prior || Math.abs(previous.top - viewport.top) > 1) continue;
       const displacement = prior.top + scrollDelta - current.top;
       if (Math.abs(displacement) < 1) continue;
@@ -248,7 +280,7 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
       });
       rowAnimations.current.set(id, control);
     }
-  }, [key, rows]);
+  }, [effectsEnabled, key, rows, smooth]);
 
   useEffect(() => {
     const animations = rowAnimations.current;
@@ -258,9 +290,13 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
   // Entrance flags are one-shot: clear them so a row re-mounted by the virtualiser does not replay.
   useEffect(() => {
     if (entering.size === 0) return undefined;
+    if (!effectsEnabled) {
+      setEntering(new Set());
+      return undefined;
+    }
     const timer = window.setTimeout(() => setEntering(new Set()), enterMs);
     return () => window.clearTimeout(timer);
-  }, [entering]);
+  }, [effectsEnabled, entering]);
 
   useEffect(() => {
     if (!highlightId) return undefined;
@@ -271,16 +307,16 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
   useLayoutEffect(checkLayout, [checkLayout, rows.length]);
 
   useLayoutEffect(() => {
-    if (entering.size === 0 || !sendAnchor?.current || !listRef.current || effectsDisabled()) return;
-    const anchor = sendAnchor.current.getBoundingClientRect();
+    if (entering.size === 0 || !sendAnchor?.current || !listRef.current || !effectsEnabled) return;
+    const anchor = sendAnchor.current.querySelector('textarea')!.getBoundingClientRect();
     const arrivals = [...listRef.current.querySelectorAll<HTMLElement>('.message--self[data-entering="true"]')]
       .filter((row) => !row.style.getPropertyValue('--send-y'))
       .map((row) => ({ row, bounds: row.getBoundingClientRect() }));
     for (const { row, bounds } of arrivals) {
-      row.style.setProperty('--send-x', `${Math.max(-32, Math.min(32, anchor.right - 22 - bounds.right))}px`);
-      row.style.setProperty('--send-y', `${Math.max(12, Math.min(46, anchor.top - bounds.bottom))}px`);
+      row.style.setProperty('--send-x', `${anchor.right - bounds.right}px`);
+      row.style.setProperty('--send-y', `${anchor.bottom - bounds.bottom}px`);
     }
-  }, [entering, hasLayout, sendAnchor]);
+  }, [effectsEnabled, entering, hasLayout, sendAnchor]);
 
   const jumpToQuote = useCallback((author: string, text: string) => {
     const target = [...rows].reverse().find((message) => !message.systemMessage
@@ -317,7 +353,7 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
     <div className="cirrus-timeline relative flex min-h-0 flex-1 flex-col">
       <div className="cirrus-sky" aria-hidden="true" />
       <motion.div key={key} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: scaled(0.18), ease }}
-        ref={scrollRef} data-testid="message-timeline" role="log" aria-label="消息时间线" aria-live="polite" onScroll={onScroll}
+        ref={scrollRef} data-testid="message-timeline" role="log" aria-label="消息时间线" aria-live="polite" onScroll={onScroll} onScrollEnd={onScrollEnd}
         className="cirrus-history scroll-thin relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="chat-column cirrus-thread relative flex min-h-full flex-col justify-end pb-3">
           {loading ? <LoadingRows /> : rows.length === 0 ? (
@@ -349,7 +385,7 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
           <motion.button type="button" onClick={scrollToBottom}
             aria-label={newCount > 0 ? `查看 ${newCount} 条新消息` : '回到底部'} title="回到底部"
             initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.2, ease }}
+            transition={{ duration: effectsEnabled ? scaled(0.2) : 0, ease }}
             className="press absolute bottom-4 right-4 z-20 inline-flex size-12 cursor-pointer items-center justify-center rounded-full bg-elevated text-ink-2 shadow-float hover:text-ink">
             <ChevronDown size={24} aria-hidden="true" />
             {newCount > 0 && (

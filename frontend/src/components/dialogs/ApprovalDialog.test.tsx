@@ -30,6 +30,7 @@ describe('ApprovalDialog', () => {
     expect(screen.getByText('User1#U001')).toBeInTheDocument();
     expect(screen.getByRole('timer', { name: '剩余 45 秒' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '允许连接' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'close' })).toBeInTheDocument();
 
     await advance(44_000);
     expect(screen.getByRole('timer', { name: '剩余 1 秒' })).toBeInTheDocument();
@@ -41,7 +42,7 @@ describe('ApprovalDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '允许连接' }));
     expect(onResolve).not.toHaveBeenCalled();
 
-    // Expired requests fade out and the dialog becomes dismissible again.
+    // Expired requests fade out; the dialog stays dismissible while requests are pending.
     await advance(1_600);
     expect(screen.queryByText('User1#U001')).not.toBeInTheDocument();
     expect(screen.getByText('没有待确认的连接')).toBeInTheDocument();

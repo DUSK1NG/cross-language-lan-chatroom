@@ -55,6 +55,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+### 2026-11-26 19:50 — 修复六项反人类设计并替换本机双版
+
+- 执行者：lead（DSH）。
+- 改动（按审计项）：
+  1. 草稿不再随切页丢失：`frontend/src/app/App.tsx` 提升 `drafts` 与 `changeDraft`，`frontend/src/app/WorkspacePage.tsx` 通过可选 `drafts`/`onDraftChange` 使用外层状态（独立渲染时仍用本地状态）。
+  2. 局域网刷新不再取消房主选择：`crates/client-core/src/discovery.rs` 每轮 `scan()` 由 `discovered.clear()` 改为 `retain(|_, host| host.recent())`；`frontend/src/app/ConnectPages.tsx` 新增 `selectedHostGraceMs = 10_000`，缺席时保留上次快照并提示「暂时没有收到房主广播」，宽限期后才清空选择。
+  3. 审批弹窗可收起：`frontend/src/components/dialogs/ApprovalDialog.tsx` 去掉 `dismissible={!blocking}`；`WorkspacePage.tsx` 只对**新出现**的申请（`seenApprovals` 去重）自动弹出，已看过的不再重复打扰，待批准状态与头部角标不变。
+  4. 在线登录：`crates/client-core/src/lib.rs` 新增 `ONLINE_DEFAULT_SERVER = "1.15.129.115"`，首次启动预置服务器；`ConnectPages.tsx` 服务器地址/端口收进可折叠「更改服务器」区，密码长度不在 8–72 字节、用户代码非法、端口非法时给出具体原因。
+  5. 保存地址失败不再断开会话：`crates/client-core/src/session.rs` 改为 `save_error = self.save_connection(form).err()`，仍置 `phase="connected"`、状态「已连接 · 地址未保存」，并通过 `chat:presence` 提示「本次已连接，但连接地址保存失败」。
+  6. Android 传输不再锁聊天：`android/app/src/main/java/dev/dusk1ng/lanchat/MainActivity.java` 移除模态 `ProgressDialog`，改为底部浮动进度卡（`beginFileTransfer`/`updateTransfer(bytes,size)`/`endFileTransfer`/`hideTransferChip`），上传、下载、发图共用，传输期间可继续聊天。
+- 测试同步：`frontend/src/app/App.test.tsx` 在线登录改为先点「更改服务器」，新增预置服务器、短密码原因、设置往返草稿、单轮扫描不取消选择四个用例；`WorkspacePage.test.tsx` 的审批用例改为「可收起且申请仍在」；`ApprovalDialog.test.tsx` 断言有待批准申请时也存在 close 按钮。
+- 验证：
+  - `tsc6 --noEmit` 通过；`vitest run` 21 文件 / 195 用例全通过（原 191）。
+  - `cargo test --workspace --locked` 通过（本机沙箱下 `lan-chat-server` 的临时库用例会因 `%TEMP%` 写入被拒报 `os error 5`/`unable to open database file`，需 `TEMP/TMP` 指到工作区 `out/tmp` 再跑；这是沙箱限制，非代码缺陷）。
+  - `cargo clippy --workspace --all-targets --locked -- -D warnings` 无告警。
+  - `scripts/build-desktop.ps1` 两版均构建成功（online 1m50s、lan 31s），产物 `out/desktop`（LANChat.exe 21,803,008 B、lan-chat-server.exe 8,145,408 B）与 `out/desktop-online`（LANChat.exe 22,575,104 B）。
+  - 已覆盖安装到 `%LocalAppData%\Programs\LAN Chat` 与 `LAN Chat Online`，保留 `unins000.*`、`lan-chat.install`、README；两版进程当时未运行，无需先退出。
+- Android：`assembleDebug` 通过（`MainActivity.onDestroy()` 里残留的 `transferDialog.dismiss()` 改为 `hideTransferChip()`，上一轮漏改导致编译失败）；debug APK 13,678,107 B 已 `adb install -r` 到 Redmi（shennong / 23116PN5BC），启动无崩溃、既有会话与历史消息完好。
+- 下一步：桌面双版版本号仍为 1.4.0（本次为同版本手工替换，自动更新不会因此重下）。
+- 阻塞与需拍板：无。
+
 ### 2026-11-26 15:00 — 发布 v1.4.0 为 latest、本机双版升级到 1.4.0 并复核更新验签链
 
 - 执行者：lead（DSH）。

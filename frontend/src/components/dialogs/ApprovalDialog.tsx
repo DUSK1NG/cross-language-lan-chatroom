@@ -55,11 +55,11 @@ export function ApprovalDialog({ open, onOpenChange, requests, onResolve, now = 
   }, [open, requests.length, now]);
 
   const visible = requests.filter((request) => clock < (deadlines.get(request.id) ?? 0) + fadeAfterExpiryMs);
-  const live = visible.filter((request) => clock < (deadlines.get(request.id) ?? 0));
-  const blocking = live.length > 0;
 
+  // Dismissing never resolves anything: the request stays pending in the approval inbox until the
+  // owner allows or rejects it (or the server times it out).
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="连接审批" dismissible={!blocking}
+    <Dialog open={open} onOpenChange={onOpenChange} title="连接审批"
       description="用户名和用户代码不是密码，请通过当面或电话等可信渠道核验对方身份后再允许。">
       {visible.length === 0 ? (
         <EmptyState icon={<ShieldCheck />} title="没有待确认的连接" description="有成员申请加入时会在这里提醒你。" />

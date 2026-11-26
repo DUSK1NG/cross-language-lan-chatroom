@@ -53,7 +53,9 @@ impl Client {
             let mut state = self.state.lock().expect("client state");
             ensure!(state.scan.is_none(), "正在搜索附近聊天室");
             state.scan = Some(id);
-            state.discovered.clear();
+            // Keep hosts that still advertise: a new scan starts before the owner's next broadcast,
+            // so clearing the list here would blank the UI and cancel the user's selection.
+            state.discovered.retain(|_, host| host.recent());
             self.publish(&state);
         }
 

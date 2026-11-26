@@ -114,6 +114,9 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
                 <Row label="聊天区滚动动画">
                   <SegmentedRadio label="聊天区滚动动画" value={settings.scrollMotion} onValueChange={(value) => update('scrollMotion', value)} options={scrollMotionOptions} />
                 </Row>
+                <Row label="输入光标跟随">
+                  <Switch label="输入光标跟随" checked={settings.caretMotion} onCheckedChange={(checked) => update('caretMotion', checked)} />
+                </Row>
               </Group>
               {performanceDiagnosticsEnabled && <PerformanceSection bridge={bridge} state={state} />}
             </>}

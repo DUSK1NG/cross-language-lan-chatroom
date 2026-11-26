@@ -103,6 +103,9 @@ struct Payload {
     revision: i64,
 }
 
+/// 在线版首次启动预置的公共服务器；用户保存过的地址始终优先。
+const ONLINE_DEFAULT_SERVER: &str = "1.15.129.115";
+
 impl Client {
     pub fn new(
         edition: Edition,
@@ -118,7 +121,8 @@ impl Client {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let mut form = ConnectionForm::default();
                 if edition == Edition::Online {
-                    form.server_ip.clear();
+                    // Ship the public server so a fresh install can log in without typing an address.
+                    form.server_ip = ONLINE_DEFAULT_SERVER.into();
                 }
                 form
             }

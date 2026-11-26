@@ -28,6 +28,7 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'local-host-mode' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('密码')).toHaveAttribute('autocomplete', 'current-password');
     fireEvent.click(screen.getByRole('button', { name: '注册账号' }));
+    fireEvent.click(screen.getByRole('button', { name: '更改服务器' }));
     fireEvent.change(screen.getByLabelText('服务器地址'), { target: { value: 'chat.example.com' } });
     fireEvent.change(screen.getByLabelText('用户代码'), { target: { value: 'A001' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'test-password' } });
@@ -36,6 +37,68 @@ describe('App', () => {
     expect(bridge.commands.at(-1)).toMatchObject({ type: 'session.connectOnline', payload: {
       serverIp: 'chat.example.com', serverPort: 8888, username: 'Alice', userCode: 'A001', password: 'test-password', register: true
     } });
+  });
+
+  it('shows the saved server instead of asking for it again', () => {
+    const state: BridgeState = {
+      ...disconnectedState, edition: 'online',
+      savedConnection: { ...disconnectedState.savedConnection, serverIp: '1.15.129.115' }
+    };
+    render(<App bridge={createFakeBridge(state)} />);
+
+    expect(screen.queryByLabelText('服务器地址')).not.toBeInTheDocument();
+    expect(screen.getByText('1.15.129.115:8888')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '更改服务器' }));
+    expect(screen.getByLabelText('服务器地址')).toHaveValue('1.15.129.115');
+  });
+
+  it('explains why a short online password cannot be submitted', () => {
+    render(<App bridge={createFakeBridge({ ...disconnectedState, edition: 'online' })} />);
+
+    fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'short' } });
+
+    expect(screen.getByText('密码需 8–72 个 UTF-8 字节，当前为 5 字节。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '登录' })).toBeDisabled();
+  });
+
+  it('keeps the draft when the settings page is opened and closed', () => {
+    render(<App bridge={createFakeBridge({
+      ...disconnectedState,
+      connection: { phase: 'connected', statusText: '已连接', retryable: false },
+      navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } }
+    })} />);
+
+    fireEvent.change(screen.getByLabelText('消息输入框'), { target: { value: 'half a thought' } });
+    fireEvent.click(screen.getByRole('button', { name: '设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回聊天' }));
+
+    expect(screen.getByLabelText('消息输入框')).toHaveValue('half a thought');
+  });
+
+  it('keeps a selected host through a scan round that does not report it', () => {
+    vi.useFakeTimers();
+    try {
+      const host = {
+        id: 'a'.repeat(64), hostName: 'Alice PC', serverIp: '192.168.8.23', serverPort: 8888,
+        fingerprintSha256: 'a'.repeat(64), known: false
+      };
+      const bridge = createFakeBridge({ ...disconnectedState, lanDiscovery: { scanning: false, hosts: [host] } });
+      render(<App bridge={bridge} />);
+      fireEvent.click(screen.getByRole('button', { name: 'guest-mode' }));
+      fireEvent.click(screen.getByRole('button', { name: 'select-lan-host-Alice PC' }));
+
+      act(() => { bridge.publish({ ...disconnectedState, lanDiscovery: { scanning: true, hosts: [] } }); });
+
+      expect(screen.getByText('暂时没有收到房主广播，正在重新搜索；核对中的选择会保留片刻。')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'one-click-join' })).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(10_100); });
+
+      expect(screen.queryByRole('button', { name: 'one-click-join' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'connect-session' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('displays room presence as a toast instead of a chat message', async () => {

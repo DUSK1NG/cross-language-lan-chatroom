@@ -446,7 +446,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByText('Cara#C003')).toBeInTheDocument();
   });
 
-  it('requires an owner decision before an active connection approval can close', () => {
+  it('lets the owner collapse a pending connection approval without a decision', async () => {
     const state: BridgeState = {
       ...workspaceState,
       identity: { ...workspaceState.identity, admin: true },
@@ -458,8 +458,9 @@ describe('WorkspacePage', () => {
     fireEvent.pointerDown(document.body);
     fireEvent.keyDown(dialog, { key: 'Escape' });
 
-    expect(screen.getByRole('dialog', { name: '连接审批' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'close' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '连接审批' })).not.toBeInTheDocument());
+    // The request is still pending and stays reachable from the header badge.
+    expect(screen.getByRole('button', { name: /连接审批/ })).toBeInTheDocument();
   });
 
   it('keeps the administrator connection approval inbox available when it is empty', () => {

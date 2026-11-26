@@ -25,7 +25,16 @@ import { compactQuery, narrowQuery, useMediaQuery } from '../hooks/useMediaQuery
 import { cn } from '../lib/cn';
 import { ease } from '../lib/motion';
 
-type WorkspacePageProps = { bridge: ChatBridgeClient; state: BridgeState; onSettings?: () => void; onReconnect?: () => void; theme?: 'dark' | 'light' };
+type WorkspacePageProps = {
+  bridge: ChatBridgeClient;
+  state: BridgeState;
+  onSettings?: () => void;
+  onReconnect?: () => void;
+  theme?: 'dark' | 'light';
+  /** Drafts owned by the shell, so leaving this page does not throw the text away. */
+  drafts?: Record<string, string>;
+  onDraftChange?: (key: string, value: string) => void;
+};
 
 const idle: CommandFeedbackProps = { status: 'idle', message: '' };
 
@@ -43,7 +52,7 @@ function onResult(bridge: ChatBridgeClient, id: string, handle: (ok: boolean, me
  * Three-column workspace (spec §2): conversation list (260–420px, resizable) · chat ·
  * optional 340px info panel. <900px the panel overlays; <700px list and chat alternate.
  */
-export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 'dark' }: WorkspacePageProps) {
+export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 'dark', drafts: shellDrafts, onDraftChange }: WorkspacePageProps) {
   const narrow = useMediaQuery(narrowQuery);
   const compact = useMediaQuery(compactQuery);
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
@@ -54,7 +63,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   const [infoOpen, setInfoOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [localDrafts, setLocalDrafts] = useState<Record<string, string>>({});
   const [quote, setQuote] = useState<QuoteDraft | null>(null);
   const [focusToken, setFocusToken] = useState(0);
   const [uploadToken, setUploadToken] = useState(0);
@@ -112,16 +121,23 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   }, [state.rooms, state.directMessages, state.groups]);
 
   // Per-conversation drafts; switching conversations restores each one and drops the reply.
+  const drafts = shellDrafts ?? localDrafts;
   const draft = drafts[key] ?? '';
-  const setDraft = useCallback((value: string) => setDrafts((current) => ({ ...current, [key]: value })), [key]);
+  const setDraft = useCallback((value: string) => {
+    if (onDraftChange) { onDraftChange(key, value); return; }
+    setLocalDrafts((current) => ({ ...current, [key]: value }));
+  }, [key, onDraftChange]);
   useEffect(() => { setQuote(null); setHistoryQuery(''); setSearchOpen(false); setManageOpen(false); }, [key]);
 
-  // A new member request opens the approval dialog for the owner.
-  const approvalCount = useRef(0);
+  // Only a brand-new request pops the dialog; it can be dismissed at any time so the owner can
+  // keep chatting, and requests already seen never re-open it on their own.
+  const seenApprovals = useRef(new Set<string>());
+  const approvalIds = approvals.map((request) => request.id).join(',');
   useEffect(() => {
-    if (state.identity.admin && approvals.length > approvalCount.current) setApprovalsOpen(true);
-    approvalCount.current = approvals.length;
-  }, [approvals.length, state.identity.admin]);
+    const fresh = approvals.filter((request) => !seenApprovals.current.has(request.id));
+    for (const request of approvals) seenApprovals.current.add(request.id);
+    if (state.identity.admin && fresh.length > 0) setApprovalsOpen(true);
+  }, [approvalIds, approvals, state.identity.admin]);
 
   const selectFromList = () => { if (narrow) setPhoneView('chat'); };
 

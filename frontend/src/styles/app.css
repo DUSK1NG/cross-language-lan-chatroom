@@ -114,7 +114,7 @@
     --rgb-color: var(--rgb-text);
     --rgb-accent: var(--rgb-accent);
     --border-radius: var(--radius-card);
-    --emoji-category-duration: var(--dur-panel);
+    --emoji-category-duration: var(--dur-surface);
     height: 360px;
   }
   html[data-effects='off'] .emoji-host em-emoji-picker { --emoji-category-duration: 0ms; }
@@ -303,6 +303,37 @@ body:has(.chat-workspace) .menu-surface[data-state='open'] {
   scrollbar-gutter: stable both-edges;
 }
 
+.input-motion-overlay {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.input-motion-text {
+  position: absolute;
+  inset: 0 auto auto 0;
+  visibility: hidden;
+  overflow-wrap: break-word;
+  unicode-bidi: plaintext;
+  transform: var(--input-motion-offset);
+}
+
+.input-motion-overlay[data-text='true'] .input-motion-text { visibility: visible; }
+
+.input-motion-caret {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 2px;
+  visibility: hidden;
+  border-radius: 1px;
+}
+
+.input-motion-overlay[data-caret='true'] .input-motion-caret {
+  visibility: visible;
+  transition: transform var(--dur-hover) var(--ease);
+}
+
 .cirrus-bubble-column { max-inline-size: min(560px, 78%); }
 .cirrus-row-content { translate: 0 var(--cirrus-row-offset, 0px); }
 .cirrus-word { display: inline-block; max-inline-size: 100%; }
@@ -347,17 +378,20 @@ body:has(.chat-workspace) .menu-surface[data-state='open'] {
   .cirrus-bubble:active:not([data-state='open']) { scale: .97; }
 }
 
+.message[data-entering='true'] {
+  --cirrus-arrival-fade: cirrus-fade var(--dur-enter) var(--ease) both;
+}
 .message--self[data-entering='true'] .cirrus-bubble-column {
   transform-origin: bottom right;
-  animation: cirrus-send var(--dur-send) var(--ease-spring) both, cirrus-fade var(--dur-enter) var(--ease) both;
+  animation: cirrus-send var(--dur-send) var(--ease-spring) both, var(--cirrus-arrival-fade);
 }
 .message--self[data-entering='true'] .cirrus-bubble { animation: cirrus-frost-in var(--dur-send) var(--ease) both; }
 .message--peer[data-entering='true'] .cirrus-bubble {
   transform-origin: bottom left;
-  animation: cirrus-frost-in var(--dur-enter) var(--ease) both, cirrus-rise var(--dur-panel) var(--ease) both, cirrus-fade var(--dur-enter) var(--ease) both;
+  animation: cirrus-frost-in var(--dur-enter) var(--ease) both, cirrus-rise var(--dur-panel) var(--ease) both, var(--cirrus-arrival-fade);
 }
-.message[data-entering='true'][data-long-reply='true'] .cirrus-bubble {
-  animation: cirrus-frost-in var(--dur-enter) var(--ease) both, cirrus-open var(--dur-send) var(--ease) both, cirrus-fade var(--dur-exit) var(--ease) both;
+html:not([data-new-text='instant']):not([data-bubble-motion='grow']) .message--peer[data-entering='true'][data-long-reply='true'] .cirrus-bubble {
+  animation: cirrus-frost-in var(--dur-enter) var(--ease) both, cirrus-rise var(--dur-panel) var(--ease) both, cirrus-open var(--dur-send) var(--ease) both, var(--cirrus-arrival-fade);
 }
 
 .cirrus-leaving .cirrus-bubble {
@@ -449,9 +483,10 @@ html.theme-transition:not([data-effects='off']) *::after {
   outline-offset: 2px;
 }
 
-/* ── 动效偏好（设置 → 外观 → 动效）────────────────────────────────
-   与 dsh-claude-style 面板同义：新文字淡入 / 消息气泡（原地长出 vs 从输入框飞上来）
-   / 聊天区滚动（跟随滑动 vs 直接跳到）。默认值保持现有观感。 */
+/* 动效偏好（设置 → 外观 → 动效） */
+html[data-new-text='instant'] .message[data-entering='true'] {
+  --cirrus-arrival-fade: none;
+}
 html[data-new-text='instant'] .message[data-entering='true'] .cirrus-word,
 html[data-new-text='instant'] .message[data-entering='true'] .message-content {
   animation: none !important;
@@ -467,16 +502,17 @@ html[data-new-text='instant'] .message[data-entering='true'] .message-content {
 }
 
 html[data-bubble-motion='grow'] .message--self[data-entering='true'] .cirrus-bubble-column {
-  animation: cirrus-grow var(--dur-enter) var(--ease) both, cirrus-fade var(--dur-exit) var(--ease) both;
+  transform-origin: bottom right;
+  animation: cirrus-grow var(--dur-enter) var(--ease) both, var(--cirrus-arrival-fade);
 }
 
 html[data-bubble-motion='grow'] .message--peer[data-entering='true'] .cirrus-bubble {
-  animation: cirrus-grow var(--dur-enter) var(--ease) both, cirrus-fade var(--dur-exit) var(--ease) both;
+  animation: cirrus-grow var(--dur-enter) var(--ease) both, var(--cirrus-arrival-fade);
 }
 
 @keyframes cirrus-grow {
-  from { opacity: 0; transform: scale(.94) translateY(4px); }
-  to { opacity: 1; transform: none; }
+  from { transform: scale(.94) translateY(4px); }
+  to { transform: none; }
 }
 
-html[data-scroll-motion='jump'] .scroll-thin { scroll-behavior: auto; }
+html[data-scroll-motion='jump'] .cirrus-history { scroll-behavior: auto; }

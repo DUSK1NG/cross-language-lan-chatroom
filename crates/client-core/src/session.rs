@@ -19,6 +19,7 @@ use lan_chat_protocol::{
     ONLINE_SOCIAL, ROOM_PASSWORD, read_message, write_message,
 };
 use ring::rand::{SecureRandom, SystemRandom};
+use serde_json::json;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
@@ -437,13 +438,15 @@ impl Client {
             .any(|capability| capability == HEARTBEAT);
         let reconnecting = *previously_connected;
         *previously_connected = true;
+        let save_error;
         {
             let mut state = self.state.lock().expect("client state");
             ensure!(state.generation == Some(network.generation), TransportLost);
-            self.save_connection(form)?;
+            // A reachable server must not be dropped just because the address could not be saved.
+            save_error = self.save_connection(form).err();
             state.identity = response.clone();
             state.phase = "connected";
-            state.status = "已连接";
+            state.status = if save_error.is_some() { "已连接 · 地址未保存" } else { "已连接" };
             state.reconnect = 0;
             state.saved = form.clone();
             if reconnecting && self.edition == Edition::Online {
@@ -463,6 +466,10 @@ impl Client {
                 }
             }
             state.session.as_mut().expect("active session").capabilities = response.capabilities;
+        }
+        if let Some(error) = save_error {
+            eprintln!("保存连接设置失败: {error}");
+            self.ui.emit("chat:presence", json!("本次已连接，但连接地址保存失败，下次启动需要重新填写。"));
         }
 
         if let Some(crypto) = &network.crypto {

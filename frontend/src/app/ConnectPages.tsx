@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type InputHTMLAttributes, type ReactNode }
 import { ArrowLeft, ArrowRight, Cable, House, KeyRound, Loader2, Lock, RefreshCw, Server, ShieldCheck, Users, Wifi } from 'lucide-react';
 
 import { createCommand } from '../bridge/chatBridge';
-import type { BridgeState, ChatBridgeClient } from '../bridge/types';
+import type { BridgeState, ChatBridgeClient, LanDiscoveredHost } from '../bridge/types';
 import catBrandMark from '../assets/lan-chat-cat.png';
 import { Button } from '../components/ui/button';
 import { IconButton } from '../components/ui/icon-button';
@@ -10,6 +10,8 @@ import { cn } from '../lib/cn';
 
 export type ConnectionMode = 'remote' | 'guest' | 'tunnel';
 const discoveryRefreshIntervalMs = 3000;
+/** How long a selected host may stay missing from the scan list before the selection is dropped. */
+const selectedHostGraceMs = 10_000;
 
 const inputClass = 'h-10 w-full min-w-0 rounded-[8px] border-[0.5px] border-divider bg-input px-3 text-body text-ink outline-none transition-ui transition-colors placeholder:text-ink-3 focus:border-accent';
 
@@ -107,6 +109,7 @@ export function OnlineAccountPage({ bridge, state }: { bridge: ChatBridgeClient;
   const [userCode, setUserCode] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [serverOpen, setServerOpen] = useState(() => !state.savedConnection.serverIp.trim());
   const request = useRef('');
   const busy = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
   const validPort = /^\d+$/.test(serverPort) && Number(serverPort) >= 1 && Number(serverPort) <= 65535;
@@ -137,11 +140,25 @@ export function OnlineAccountPage({ bridge, state }: { bridge: ChatBridgeClient;
         request.current = command.id;
         bridge.dispatch(command);
       }}>
-        <div className="grid grid-cols-[1fr_100px] gap-3">
-          <Field id="online-server" label="服务器地址" value={serverIp} autoComplete="off" required disabled={busy}
-            placeholder="chat.example.com" onChange={(event) => setServerIp(event.target.value)} />
-          <Field id="online-port" label="端口" value={serverPort} inputMode="numeric" autoComplete="off" required disabled={busy}
-            onChange={(event) => setServerPort(event.target.value)} />
+        <div className="rounded-[8px] border-[0.5px] border-divider bg-sidebar">
+          <button type="button" aria-expanded={serverOpen} aria-label="更改服务器" disabled={busy}
+            onClick={() => setServerOpen((open) => !open)}
+            className="press flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2.5 text-left">
+            <Server size={16} aria-hidden="true" className="shrink-0 text-ink-3" />
+            <span className="min-w-0 flex-1 truncate text-small text-ink-2">服务器
+              <span className="num ml-1 text-ink">{serverIp.trim() || '未填写'}{serverPort ? `:${serverPort}` : ''}</span>
+            </span>
+            <span className="shrink-0 text-small text-accent-text">{serverOpen ? '收起' : '更改'}</span>
+          </button>
+          {serverOpen && <div className="grid grid-cols-[1fr_100px] gap-3 px-3 pb-3">
+            <Field id="online-server" label="服务器地址" value={serverIp} autoComplete="off" disabled={busy}
+              placeholder="chat.example.com" onChange={(event) => setServerIp(event.target.value)} />
+            <Field id="online-port" label="端口" value={serverPort} inputMode="numeric" autoComplete="off" disabled={busy}
+              onChange={(event) => setServerPort(event.target.value)} />
+          </div>}
+          {serverOpen && serverPort && !validPort && (
+            <p role="status" className="px-3 pb-3 text-small text-warning">端口需为 1–65535 之间的数字。</p>
+          )}
         </div>
         <Field id="online-username" label="用户名" name="username" autoComplete="username" spellCheck={false}
           required value={username} disabled={busy} onChange={(event) => setUsername(event.target.value)} />
@@ -149,6 +166,12 @@ export function OnlineAccountPage({ bridge, state }: { bridge: ChatBridgeClient;
           placeholder="3–16 位字母或数字" onChange={(event) => setUserCode(event.target.value)} />}
         <Field id="online-password" label="密码" name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'}
           required value={password} disabled={busy} onChange={(event) => setPassword(event.target.value)} />
+        {passwordLength > 0 && (passwordLength < 8 || passwordLength > 72) && (
+          <p role="status" className="text-small text-warning">密码需 8–72 个 UTF-8 字节，当前为 {passwordLength} 字节。</p>
+        )}
+        {register && userCode.trim() !== '' && !/^[A-Za-z0-9]{3,16}$/.test(userCode) && (
+          <p role="status" className="text-small text-warning">用户代码需为 3–16 位字母或数字。</p>
+        )}
         {register && <p className="text-small text-ink-2">密码为 8–72 个 UTF-8 字节。其他人可通过用户代码发起私信。</p>}
         {error ? <p role="alert" className="text-small text-danger-text">{error}</p> : state.connection.phase !== 'idle' && <ConnectionStatus state={state} />}
         <div className="flex flex-col gap-2 pt-1">
@@ -185,7 +208,13 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
   const busy = state.connection.phase === 'connecting' || state.connection.phase === 'reconnecting';
   const validPort = Number.isInteger(Number(serverPort)) && Number(serverPort) >= 1 && Number(serverPort) <= 65535;
   const discovery = state.lanDiscovery ?? { scanning: false, hosts: [] };
-  const selectedHost = discovery.hosts.find((host) => host.id === selectedHostId);
+  // Each scan republishes the host list; remember the last snapshot of the selected host so a
+  // round that starts before the owner broadcasts cannot cancel the selection mid-check.
+  const liveHost = discovery.hosts.find((host) => host.id === selectedHostId);
+  const lastHost = useRef<LanDiscoveredHost | null>(null);
+  if (liveHost) lastHost.current = liveHost;
+  const selectedHost = liveHost ?? (selectedHostId ? lastHost.current : null);
+  const selectedHostMissing = Boolean(selectedHost) && !liveHost;
   const showManualFields = !guest || manualEntry || !selectedHost;
   const joiningHost = guest && selectedHost && !manualEntry;
 
@@ -212,13 +241,14 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
     return () => window.clearInterval(interval);
   }, [bridge, guest]);
 
-  // A host that stopped advertising cannot stay selected; a new selection needs a fresh fingerprint check.
+  // A host that really stopped advertising cannot stay selected, but a single scan round is not
+  // proof: only drop it after the grace window, and let a fresh selection redo the fingerprint check.
   const hostIds = discovery.hosts.map((host) => host.id).join(',');
-  const [trackedHostIds, setTrackedHostIds] = useState(hostIds);
-  if (trackedHostIds !== hostIds) {
-    setTrackedHostIds(hostIds);
-    if (selectedHostId && !discovery.hosts.some((host) => host.id === selectedHostId)) setSelectedHostId('');
-  }
+  useEffect(() => {
+    if (!selectedHostId || discovery.hosts.some((host) => host.id === selectedHostId)) return undefined;
+    const timer = window.setTimeout(() => setSelectedHostId((current) => (current === selectedHostId ? '' : current)), selectedHostGraceMs);
+    return () => window.clearTimeout(timer);
+  }, [selectedHostId, hostIds, discovery.hosts]);
 
   function connect() {
     if (busy || !username.trim() || !userCode.trim()) return;
@@ -295,6 +325,9 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
           {joiningHost && (
             <div className="flex flex-col gap-2 border-t border-divider pt-3 text-small text-ink-2">
               <p className="flex items-start gap-2"><KeyRound size={16} aria-hidden="true" className="mt-0.5 shrink-0" /><span>房主证书指纹<span className="num block break-all">{selectedHost.fingerprintSha256}</span></span></p>
+              {selectedHostMissing && (
+                <p role="status" className="flex items-start gap-2 text-warning"><RefreshCw size={14} aria-hidden="true" className="mt-0.5 shrink-0 animate-[spin_2s_linear_infinite]" /><span>暂时没有收到房主广播，正在重新搜索；核对中的选择会保留片刻。</span></p>
+              )}
               {!selectedHost.known && <label className="flex cursor-pointer items-start gap-2 text-ink">
                 <input type="checkbox" className="mt-0.5 size-4 accent-[var(--accent)]" checked={fingerprintConfirmed}
                   onChange={(event) => setFingerprintConfirmed(event.target.checked)} disabled={busy} />

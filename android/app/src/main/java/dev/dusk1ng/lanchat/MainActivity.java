@@ -8,7 +8,6 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
-import android.app.ProgressDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -79,6 +78,7 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -283,7 +283,10 @@ public final class MainActivity extends Activity {
     private boolean pendingFileGroup;
     private Uri pendingFileUri;
     private SavedDocument pendingSave;
-    private ProgressDialog transferDialog;
+    private LinearLayout transferChip;
+    private ProgressBar transferBar;
+    private TextView transferChipText;
+    private String transferTitle = "";
     private boolean transferringFile;
     private ImageDownload download;
     private boolean imagesAvailable;
@@ -507,7 +510,6 @@ public final class MainActivity extends Activity {
         code.setSingleLine(true);
         if (registering) addSpaced(form, code, 8);
         EditText password = field("密码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        password.setSingleLine(true);
         password.setAutofillHints(registering ? "newPassword" : View.AUTOFILL_HINT_PASSWORD);
         addSpaced(form, password, 8);
         if (!error.isEmpty()) {
@@ -2826,16 +2828,54 @@ public final class MainActivity extends Activity {
         sendImage(selected);
     }
 
-    private ProgressDialog beginFileTransfer(String title) {
-        ProgressDialog progress = new ProgressDialog(this);
-        progress.setTitle(title);
-        progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
-        progress.setMax(100);
-        progress.setCancelable(false);
-        progress.show();
-        transferDialog = progress;
+    /**
+     * Transfers run in the background behind a small chip above the composer instead of a modal
+     * dialog, so the conversation stays usable while a file is uploading or downloading.
+     */
+    private void beginFileTransfer(String title) {
+        hideTransferChip();
         transferringFile = true;
-        return progress;
+        transferTitle = title;
+        if (screen == null) return;
+        LinearLayout chip = new LinearLayout(this);
+        chip.setOrientation(LinearLayout.VERTICAL);
+        chip.setPadding(dp(14), dp(10), dp(14), dp(10));
+        chip.setBackground(card(PAPER, 14));
+        chip.setElevation(dp(6));
+        transferChipText = label(title + " · 0%", 13, INK);
+        chip.addView(transferChipText, new LinearLayout.LayoutParams(-1, -2));
+        transferBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        transferBar.setMax(100);
+        transferBar.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        LinearLayout.LayoutParams bar = new LinearLayout.LayoutParams(-1, dp(4));
+        bar.topMargin = dp(8);
+        chip.addView(transferBar, bar);
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-1, -2);
+        params.gravity = Gravity.BOTTOM;
+        params.setMargins(dp(16), 0, dp(16), dp(86));
+        screen.addView(chip, params);
+        transferChip = chip;
+    }
+
+    private void updateTransfer(long bytes, long size) {
+        int percentage = size <= 0 ? 100 : (int) Math.min(100, bytes * 100 / size);
+        main.post(() -> {
+            if (isDestroyed() || transferBar == null) return;
+            transferBar.setProgress(percentage);
+            if (transferChipText != null) transferChipText.setText(transferTitle + " · " + percentage + "%");
+        });
+    }
+
+    private void endFileTransfer() {
+        transferringFile = false;
+        hideTransferChip();
+    }
+
+    private void hideTransferChip() {
+        if (transferChip != null && transferChip.getParent() == screen) screen.removeView(transferChip);
+        transferChip = null;
+        transferBar = null;
+        transferChipText = null;
     }
 
     private void sendFile(Uri selected) {
@@ -2850,7 +2890,7 @@ public final class MainActivity extends Activity {
         }
         String peer = pendingFilePeer;
         ChatConnection session = connection;
-        ProgressDialog progress = beginFileTransfer("正在发送文件");
+        beginFileTransfer("正在发送文件");
         fileTransfers.execute(() -> {
             File staging = null;
             String detail = null;
@@ -2874,7 +2914,7 @@ public final class MainActivity extends Activity {
                     }
                 }
                 long size = staging.length();
-                session.uploadAttachment(staging, name, peer, group, count -> updateTransfer(progress, count, size));
+                session.uploadAttachment(staging, name, peer, group, count -> updateTransfer(count, size));
             } catch (IOException | JSONException | SecurityException error) {
                 detail = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
             } finally {
@@ -2882,9 +2922,8 @@ public final class MainActivity extends Activity {
             }
             String result = detail;
             main.post(() -> {
-                transferringFile = false;
                 if (isDestroyed()) return;
-                progress.dismiss();
+                endFileTransfer();
                 if (result != null) toast("文件发送失败 · " + result);
             });
         });
@@ -2897,48 +2936,37 @@ public final class MainActivity extends Activity {
             return;
         }
         Group membership = groupDirectory.get(key(conversation.code()));
-        ProgressDialog progress = beginFileTransfer("正在下载文件");
+        beginFileTransfer("正在下载文件");
         fileTransfers.execute(() -> {
             File staging = null;
             try {
                 staging = File.createTempFile("download-", ".part", getCacheDir());
-                session.downloadAttachment(file, staging, count -> updateTransfer(progress, count, file.size()));
+                session.downloadAttachment(file, staging, count -> updateTransfer(count, file.size()));
                 SavedDocument document = new SavedDocument(staging, file.name(), "application/octet-stream", true);
                 main.post(() -> {
-                    transferringFile = false;
+                    endFileTransfer();
                     Group current = groupDirectory.get(key(conversation.code()));
                     if (conversation.group() && (membership == null || current == null
                             || membership.joinedAfter() != current.joinedAfter())) {
                         document.source().delete();
-                        if (!isDestroyed()) {
-                            progress.dismiss();
-                            toast("该群聊的成员资格已变更");
-                        }
+                        if (!isDestroyed()) toast("该群聊的成员资格已变更");
                         return;
                     }
                     if (isDestroyed() || ownCode == null || !foreground) {
                         document.source().delete();
-                        if (!isDestroyed()) progress.dismiss();
                         return;
                     }
-                    progress.dismiss();
                     chooseSaveLocation(document);
                 });
             } catch (IOException | JSONException error) {
                 if (staging != null) staging.delete();
                 main.post(() -> {
-                    transferringFile = false;
                     if (isDestroyed()) return;
-                    progress.dismiss();
+                    endFileTransfer();
                     toast("文件下载失败 · " + error.getMessage());
                 });
             }
         });
-    }
-
-    private void updateTransfer(ProgressDialog progress, long bytes, long size) {
-        int percentage = size == 0 ? 100 : (int) (bytes * 100 / size);
-        main.post(() -> { if (!isDestroyed()) progress.setProgress(percentage); });
     }
 
     private void chooseSaveLocation(SavedDocument document) {
@@ -2973,7 +3001,7 @@ public final class MainActivity extends Activity {
             toast("请等待当前文件传输完成");
             return;
         }
-        ProgressDialog progress = beginFileTransfer("正在发送图片");
+        beginFileTransfer("正在发送图片");
         writers.execute(() -> {
             try {
                 Bitmap picture = ImageDecoder.decodeBitmap(ImageDecoder.createSource(getContentResolver(), uri), (decoder, info, source) -> {
@@ -2995,14 +3023,13 @@ public final class MainActivity extends Activity {
                             "image_size", bytes.length, "chunk_index", index,
                             "image_data", Base64.encodeToString(bytes, offset, length, Base64.NO_WRAP)));
                     offset += length;
-                    updateTransfer(progress, offset, bytes.length);
+                    updateTransfer(offset, bytes.length);
                 }
             } catch (IOException | JSONException error) {
                 main.post(() -> toast("图片发送失败 · " + error.getMessage()));
             } finally {
                 main.post(() -> {
-                    transferringFile = false;
-                    if (!isDestroyed()) progress.dismiss();
+                    if (!isDestroyed()) endFileTransfer();
                 });
             }
         });
@@ -3338,6 +3365,13 @@ public final class MainActivity extends Activity {
         addSpaced(options, labeledSlider("聊天区滚动动画",
                 motionSlider(PREF_SCROLL, "smooth", new String[]{"smooth", "jump"},
                         new String[]{"跟随滑动", "直接跳到"})), 16);
+        Switch caretMotion = new Switch(this);
+        caretMotion.setText("输入光标跟随");
+        caretMotion.setTextSize(16);
+        caretMotion.setTextColor(INK);
+        caretMotion.setChecked(preferences().getBoolean(PREF_CARET, true));
+        caretMotion.setOnCheckedChangeListener((button, checked) -> preferences().edit().putBoolean(PREF_CARET, checked).apply());
+        addSpaced(options, caretMotion, 16);
 
         TextView notificationTitle = label("通知", 13, MUTED);
         notificationTitle.setPadding(dp(4), 0, 0, 0);
@@ -3626,10 +3660,11 @@ public final class MainActivity extends Activity {
 
     /** App 内主题偏好：system / light / dark。视图全在 onCreate 里建，所以在 attachBaseContext 就定好 uiMode。 */
     private static final String PREF_THEME = "appearance_theme";
-    /** 动效偏好，与桌面设置页「动效」三行一一对应。 */
+    /** 动效偏好，与桌面设置页「动效」对应。 */
     private static final String PREF_NEW_TEXT = "motion_new_text";
     private static final String PREF_BUBBLE = "motion_bubble";
     private static final String PREF_SCROLL = "motion_scroll";
+    private static final String PREF_CARET = "motion_caret";
     /** 主题切换重建 Activity 后，下一次进入主页时改回设置页。 */
     private static boolean reopenSettingsAfterRecreate;
 
@@ -3902,7 +3937,7 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         clearSession();
         updateSystemBack();
-        if (transferDialog != null) transferDialog.dismiss();
+        hideTransferChip();
         writers.shutdownNow();
         fileTransfers.shutdownNow();
         imageLoads.shutdownNow();
@@ -4092,7 +4127,8 @@ public final class MainActivity extends Activity {
     }
 
     private EditText field(String placeholder, int inputType) {
-        EditText text = new EditText(this);
+        EditText text = new MotionEditText(this, this::fadeInNewText,
+                () -> preferences().getBoolean(PREF_CARET, true), MOTION_FEEDBACK);
         text.setHint(placeholder);
         text.setInputType(inputType);
         text.setTypeface(regularFont);

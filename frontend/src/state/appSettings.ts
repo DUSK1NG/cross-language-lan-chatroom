@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type AccentPreset = 'blue' | 'green' | 'violet' | 'orange' | 'rose';
@@ -16,13 +16,14 @@ export type AppSettings = {
   newText: NewTextMotion;
   bubbleMotion: BubbleMotion;
   scrollMotion: ScrollMotion;
+  caretMotion: boolean;
 };
 
 const STORAGE_KEY = 'lan-chat.settings';
 const SETTINGS_EVENT = 'lan-chat-settings-changed';
 const defaults: AppSettings = {
   showSendTime: true, theme: 'system', accent: 'orange', messageSize: 'medium', bubbleRadius: 'medium',
-  newText: 'fade', bubbleMotion: 'fly', scrollMotion: 'smooth'
+  newText: 'fade', bubbleMotion: 'fly', scrollMotion: 'smooth', caretMotion: true
 };
 const themes: ThemePreference[] = ['system', 'light', 'dark'];
 export const accentPresets: AccentPreset[] = ['blue', 'green', 'violet', 'orange', 'rose'];
@@ -41,7 +42,8 @@ function sanitize(settings: AppSettings): AppSettings {
     bubbleRadius: sizes.includes(settings.bubbleRadius) ? settings.bubbleRadius : defaults.bubbleRadius,
     newText: newTextMotions.includes(settings.newText) ? settings.newText : defaults.newText,
     bubbleMotion: bubbleMotions.includes(settings.bubbleMotion) ? settings.bubbleMotion : defaults.bubbleMotion,
-    scrollMotion: scrollMotions.includes(settings.scrollMotion) ? settings.scrollMotion : defaults.scrollMotion
+    scrollMotion: scrollMotions.includes(settings.scrollMotion) ? settings.scrollMotion : defaults.scrollMotion,
+    caretMotion: settings.caretMotion !== false
   };
 }
 
@@ -82,7 +84,7 @@ export function useAppSettings() {
 
 /** Mirrors the appearance settings onto `<html>` so tokens.css can switch presets. */
 export function useAppearanceAttributes(settings: AppSettings) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     root.dataset.accent = settings.accent;
     root.dataset.messageSize = settings.messageSize;

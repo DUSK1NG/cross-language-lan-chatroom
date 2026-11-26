@@ -9,6 +9,7 @@ import { LocalHostPage, ModeSelectionPage, OnlineAccountPage, RemoteConnectionPa
 import { useFrameTelemetry } from '../performance/useFrameTelemetry';
 import { useAppearanceAttributes, useAppSettings, useResolvedTheme } from '../state/appSettings';
 import { setMotionScale } from '../lib/motion';
+import { useInputMotion } from '../lib/inputMotion';
 import { TooltipProvider } from '../components/ui/tooltip';
 import { Toaster, toast } from '../components/ui/toast';
 import { ReleaseNotesCard } from '../changelog/ReleaseNotesCard';
@@ -25,10 +26,21 @@ export function App({ bridge }: AppProps) {
   useAppearanceAttributes(settings);
   const [page, setPage] = useState(state.navigation.page);
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('remote');
+  // Drafts live above the workspace so opening settings (or any other page) keeps the text.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const changeDraft = useCallback((key: string, value: string) => {
+    setDrafts((current) => {
+      if (value.trim()) return { ...current, [key]: value };
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
   const hostAvailable = state.hostDefaults?.available !== false;
   const hostUnavailableReason = state.hostDefaults?.unavailableReason || '此安装包不包含本地服务端';
 
   const effectsEnabled = state.performance?.effectsEnabled !== false;
+  useInputMotion(effectsEnabled && settings.newText === 'fade', effectsEnabled && settings.caretMotion);
   const [releaseOpen, setReleaseOpen] = useState(false);
   const closeRelease = useCallback(() => setReleaseOpen(false), []);
 
@@ -71,7 +83,8 @@ export function App({ bridge }: AppProps) {
   } else if (page === 'settings') {
     content = <SettingsPage bridge={bridge} state={state} onBack={() => setPage('workspace')} onShowReleaseNotes={() => setReleaseOpen(true)} />;
   } else if (page === 'workspace' && (state.connection.phase === 'connected' || state.connection.phase === 'reconnecting')) {
-    content = <WorkspacePage bridge={bridge} state={state} theme={theme} onSettings={() => setPage('settings')} onReconnect={() => setPage('mode')} />;
+    content = <WorkspacePage bridge={bridge} state={state} theme={theme} drafts={drafts} onDraftChange={changeDraft}
+      onSettings={() => setPage('settings')} onReconnect={() => setPage('mode')} />;
   } else {
     view = 'mode';
     content = state.edition === 'online' ? <OnlineAccountPage bridge={bridge} state={state} /> : (

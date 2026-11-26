@@ -1,10 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, useIsPresent } from 'framer-motion';
 
-import { duration, ease, easeExit, effectsDisabled, scaled } from '../../lib/motion';
+import { duration, ease, easeExit, scaled } from '../../lib/motion';
 import { Skeleton } from '../ui/states';
 
 type EmojiPopoverProps = { onSelect: (emoji: string) => void; onClose: (restoreFocus: boolean) => void; theme: 'dark' | 'light' };
+
+type PickerRows = Record<number, boolean>;
+// emoji-mart 5.6 exposes its mounted Preact component on the custom element.
+type EmojiMartElement = HTMLElement & {
+  component: {
+    props: { emojiButtonSize: number };
+    state: { searchResults: unknown[] | null; visibleRows: PickerRows };
+    refs: {
+      categories: Map<string, { root: { current: HTMLElement }; rows: { index: number; current?: Element | null }[] }>;
+      scroll: { current: HTMLElement };
+      navigation: { current: { categories: { id: string }[]; setState: (state: { categoryId: string }) => void } };
+    };
+    setState: (update: (state: { visibleRows: PickerRows }) => { visibleRows: PickerRows }, onCommit: () => void) => void;
+    ignoreMouse: () => void;
+  };
+};
 
 /**
  * emoji-mart picker above the emoji button (spec §8). emoji-mart's React wrapper only
@@ -20,12 +36,11 @@ export function EmojiPopover({ onSelect, onClose, theme }: EmojiPopoverProps) {
 
   useEffect(() => {
     let cancelled = false;
-    let picker: HTMLElement | null = null;
-    let categoryMotion: Animation | undefined;
-    const categoryEvents = new AbortController();
+    let picker: EmojiMartElement | null = null;
+    let categoryRequest = 0;
     void Promise.all([import('emoji-mart'), import('@emoji-mart/data'), import('@emoji-mart/data/i18n/zh.json')]).then(([{ Picker }, data, zh]) => {
       if (cancelled || !hostRef.current) return;
-      picker = new Picker({
+      const element = new Picker({
         data: data.default ?? data,
         i18n: zh.default ?? zh,
         theme,
@@ -37,7 +52,8 @@ export function EmojiPopover({ onSelect, onClose, theme }: EmojiPopoverProps) {
         maxFrequentRows: 2,
         autoFocus: true,
         onEmojiSelect: (emoji: { native: string }) => selectRef.current(emoji.native)
-      }) as unknown as HTMLElement;
+      }) as unknown as EmojiMartElement;
+      picker = element;
       const pickerStyles = document.createElement('style');
       pickerStyles.textContent = `
         button:not(:disabled), #nav button:not(:disabled) {
@@ -50,8 +66,29 @@ export function EmojiPopover({ onSelect, onClose, theme }: EmojiPopoverProps) {
           --press-ease: ease-out;
         }
         #nav .bar {
-          transition: transform var(--emoji-category-duration) var(--ease),
-            opacity var(--emoji-category-duration) var(--ease);
+          display: none;
+        }
+        #nav button:not(:disabled) {
+          position: relative;
+          transition-property: scale;
+        }
+        #nav button[aria-selected='true']::after {
+          content: '';
+          position: absolute;
+          inset-inline: 0;
+          bottom: -12px;
+          height: 3px;
+          border-radius: 3px 3px 0 0;
+          background-color: currentColor;
+          pointer-events: none;
+          animation: emoji-category-activate var(--emoji-category-duration) var(--ease);
+        }
+        @keyframes emoji-category-activate {
+          from { opacity: 0.65; transform: scaleX(0.75); }
+          to { opacity: 1; transform: scaleX(1); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          #nav button[aria-selected='true']::after { animation: none; }
         }
       `;
       const shadow = picker.shadowRoot;
@@ -59,20 +96,45 @@ export function EmojiPopover({ onSelect, onClose, theme }: EmojiPopoverProps) {
       shadow.append(pickerStyles);
       shadow.addEventListener('click', (event) => {
         const tab = event.target instanceof Element ? event.target.closest('#nav button') : null;
-        if (!tab || tab.getAttribute('aria-selected') === 'true' || effectsDisabled()) return;
-        const grid = shadow.querySelector('.scroll');
-        if (!grid) throw new Error('Emoji picker category grid is unavailable');
-        categoryMotion?.cancel();
-        categoryMotion = grid.animate([{ opacity: 0.55, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
-          { duration: scaled(duration.surface) * 1000, easing: `cubic-bezier(${ease.join(',')})` });
-      }, { capture: true, signal: categoryEvents.signal });
+        if (!tab) return;
+        const component = element.component;
+        if (component.state.searchResults) return;
+
+        const { categories, navigation: { current: navigation }, scroll: { current: scroll } } = component.refs;
+        const index = Array.from(shadow.querySelectorAll('#nav button')).indexOf(tab);
+        const category = navigation.categories[index];
+        const section = categories.get(category.id);
+        if (!section) throw new Error(`Missing emoji picker section: ${category.id}`);
+
+        // The picker observes the first row of each virtual group. Mount the groups
+        // covering the destination viewport before its native scroll jumps there.
+        const firstRow = section.rows[0].index;
+        const lastRow = firstRow + Math.ceil(scroll.clientHeight / component.props.emojiButtonSize) - 1;
+        const anchors = [...categories.values()].flatMap(({ rows }) => rows.filter((row) => 'current' in row).map((row) => row.index));
+        const groups = anchors.filter((row, i) => row <= lastRow && (anchors[i + 1] ?? Infinity) > firstRow);
+        event.stopPropagation();
+        const request = ++categoryRequest;
+        const navigate = () => {
+          if (cancelled || request !== categoryRequest) return;
+          navigation.setState({ categoryId: category.id });
+          component.ignoreMouse();
+          // Both offsets use the same layout origin and are independent of the popover's entry scale.
+          scroll.scrollTop = index === 0 ? 0 : section.root.current.offsetTop - scroll.offsetTop + 1;
+        };
+        const missingGroups = groups.filter((row) => !component.state.visibleRows[row]);
+        if (missingGroups.length === 0) {
+          navigate();
+          return;
+        }
+        component.setState(({ visibleRows }) => ({
+          visibleRows: { ...visibleRows, ...Object.fromEntries(missingGroups.map((row) => [row, true])) }
+        }), navigate);
+      }, { capture: true });
       hostRef.current.appendChild(picker);
       setLoaded(true);
     });
     return () => {
       cancelled = true;
-      categoryEvents.abort();
-      categoryMotion?.cancel();
       picker?.remove();
     };
   }, [theme]);
