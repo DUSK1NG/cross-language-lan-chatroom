@@ -368,7 +368,7 @@ impl Store {
             .ok_or_else(|| Rejected("你无权访问该群聊").into())
     }
 
-    fn group_codes(&self, group: &str) -> Result<Vec<String>> {
+    pub(super) fn group_codes(&self, group: &str) -> Result<Vec<String>> {
         let mut query = self.0.prepare(
             "SELECT user_code FROM online_group_members WHERE group_id=? ORDER BY user_code",
         )?;

@@ -115,6 +115,27 @@ describe('WorkspacePage', () => {
     expect(screen.getByTestId('message-content-m-2')).toHaveClass('message-content--wrap');
   });
 
+  it('lets an online member recall their own message but not someone else\'s', async () => {
+    const state: BridgeState = {
+      ...workspaceState,
+      edition: 'online',
+      navigation: { page: 'workspace', activeConversation: { kind: 'group', id: 'g1', title: '撤回群' } },
+      groups: [{ id: 'g1', name: '撤回群', role: 'member', memberCount: 2, unreadCount: 0, announcement: '', ownerUserCode: 'A001', invitedByUserCode: '' }],
+      rooms: [],
+      directMessages: [],
+      activeMessages: [
+        { messageId: 'm-1', displayName: 'Alice', userCode: 'A001', time: '10:01', content: '自己的消息', selfMessage: true, systemMessage: false },
+        { messageId: 'm-2', displayName: 'Bob', userCode: 'B002', time: '10:02', content: '别人的消息', selfMessage: false, systemMessage: false }
+      ]
+    };
+    const bridge = createFakeBridge(state);
+    render(<WorkspacePage bridge={bridge} state={state} />);
+    fireEvent.keyDown(within(screen.getByLabelText('actions-m-1')).getByRole('button', { name: '更多操作' }), { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: '撤回' }));
+    expect(bridge.commands).toContainEqual(expect.objectContaining({ type: 'message.recall', payload: { messageId: 'm-1' } }));
+    expect(within(screen.getByLabelText('actions-m-2')).queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+  });
+
   it('shows member and online counts in the header subtitle', () => {
     render(<WorkspacePage bridge={createFakeBridge(workspaceState)} state={{
       ...workspaceState,

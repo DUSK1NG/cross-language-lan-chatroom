@@ -617,6 +617,14 @@ impl Client {
                             delayed = true;
                         }
                     }
+                    "admin.action" | "message.recall"
+                        if kind == "message.recall" && self.edition == Edition::Online =>
+                    {
+                        message.kind = "message_recall".into();
+                        message.message_id = payload.message_id;
+                        message.command_id = id.clone();
+                        delayed = true;
+                    }
                     "admin.action" | "message.recall" => {
                         message.kind = "admin_action".into();
                         message.content = if kind == "message.recall" {

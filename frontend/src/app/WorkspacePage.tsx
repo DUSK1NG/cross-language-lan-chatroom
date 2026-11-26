@@ -153,8 +153,10 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
     setQuote({ displayName: message.displayName, content: parseQuote(message.content).body });
     setFocusToken((token) => token + 1);
   }, []);
-  const canRecall = useCallback((message: MessageItem) => !online && (state.identity.admin || canModerateRoom
-    || message.userCode === state.identity.userCode), [online, state.identity.admin, state.identity.userCode, canModerateRoom]);
+  // 在线版：普通成员也能撤回自己的消息，管理权则来自群角色；局域网版沿用房间管理员/作者规则。
+  const canRecall = useCallback((message: MessageItem) => state.identity.admin && !online
+    || message.selfMessage
+    || (!online && canModerateRoom), [online, state.identity.admin, canModerateRoom]);
 
   const updateHistoryQuery = (query: string) => {
     setHistoryQuery(query);

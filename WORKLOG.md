@@ -55,6 +55,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-26 20:38 · 普通成员权限对齐（在线群撤回）与双版重装
+
+- **执行者**：lead（DeepSeek Harness）
+- **口径**（用户 m00553）：普通成员可以聊天、发文件、撤回自己的消息；不能改群名，不能对其他群员做操作，成员列表只读。
+- **审计结论**：在线群 `server-rust/src/online/social.rs`、`frontend/src/components/dialogs/OnlineGroups.tsx`、`frontend/src/app/WorkspacePage.tsx` 原本已满足上述口径（`manage_group` 的 `ensure!(matches!(group.role.as_str(), "owner" | "admin"))`、`group_update` 仅 owner、`group_kick` 仅 admin 对 member、改群名表单仅 owner 渲染），唯一缺口是在线版**完全没有撤回**（`online.rs` 分发无 recall 分支）。
+- **改动**：
+  - `server-rust/src/online.rs`：`handle_command` 新增 `"message_recall"` 分支与 `fn recall(...)`，按 `message_id + sender_code + recalled=0 + kind IN ('private','online_group')` 校验，仅作者本人可撤回；命中后 `UPDATE recalled=1`，向群成员（`store.group_codes`）或私聊双方广播 `message_recalled`，并带 `command_id` 回执请求方。
+  - `server-rust/src/online/social.rs:371`：`group_codes` 提升为 `pub(super)`。
+  - `crates/client-core/src/lib.rs:620`：`message.recall` 在 `Edition::Online` 下改为发 `kind="message_recall"` 并携带 `message_id`；局域网仍走原 `admin.action` 撤回路径。
+  - `frontend/src/app/WorkspacePage.tsx:156`：`canRecall` 在线版按 `selfMessage` 放行（在线消息 `user_code` 是 display code），局域网保持管理员/房管/作者口径。
+  - 发行说明：`frontend/src/changelog/releaseNotes.ts` 与 `docs/release-notes/v1.4.1.md` 各加一条「在线群成员能撤回自己的消息」。
+- **测试**：新增 `server-rust/src/online.rs` 的 `online_recall_allows_only_the_author`（bobby 撤回 alice 消息被拒、alice 成功、`recalled=1`）；`frontend/src/app/WorkspacePage.test.tsx` 新增在线撤回用例（自己消息有「撤回」、别人消息无「更多操作」）。vitest 21 文件 / 196 用例全绿（原 195），`tsc -b` 干净；`cargo test --workspace --locked` 通过；`cargo clippy --workspace --all-targets -- -D warnings` 干净。
+- **产物与安装**：`out/desktop`（LANChat.exe 21,803,008 B、lan-chat-server.exe 8,164,352 B）、`out/desktop-online`（LANChat.exe 22,574,592 B）；覆盖安装到 `%LocalAppData%\Programs\LAN Chat` 与 `LAN Chat Online`，VersionInfo 均 1.4.1。冒烟启动两版，窗口标题分别为 `LAN Chat` / `LAN Chat Online`，随后关闭。
+- **未改**：版本号仍 1.4.1；Android APK 无需重装（局域网撤回逻辑未动）。
+- **阻塞**：无。
+
 ## 2026-11-26 20:20 · 1.4.1 更新说明与三端重装
 
 - **执行者**：lead（DeepSeek Harness）

@@ -197,6 +197,7 @@ impl Online {
                 self.transfer_file(id, identity, request)?;
             }
             "dm_edit" => self.edit(identity, request)?,
+            "message_recall" => self.recall(id, identity, request)?,
             "dm_received" => self.receipt(identity, request)?,
             "dm_push_register" => {
                 ensure!(self.push.is_some(), Rejected("服务器尚未配置系统推送"));
@@ -349,6 +350,63 @@ impl Online {
         self.deliver_account(&identity.code, &edited);
         edited.command_id.clear();
         self.deliver_account(&target, &edited);
+        Ok(())
+    }
+
+    /// 撤回自己发出的私信或群消息：只允许作者本人，且只允许撤回一次。
+    fn recall(&mut self, id: Uuid, identity: &Identity, request: &Message) -> Result<()> {
+        ensure!(!request.message_id.is_empty(), Rejected("撤回请求缺少消息编号"));
+        let rejected = || Rejected("只能撤回自己发送且尚未撤回的消息");
+        let (kind, key, target) = self
+            .store
+            .0
+            .query_row(
+                "SELECT kind,conversation_key,COALESCE(target_code,'') FROM chat_messages
+                 WHERE message_id=? AND sender_code=? AND recalled=0
+                   AND kind IN ('private','online_group')",
+                params![request.message_id, identity.code],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or_else(rejected)?;
+        let changed = self.store.0.execute(
+            "UPDATE chat_messages SET recalled=1
+             WHERE kind=? AND conversation_key=? AND message_id=? AND sender_code=? AND recalled=0",
+            params![kind, key, request.message_id, identity.code],
+        )?;
+        ensure!(changed != 0, rejected());
+        let audience = if kind == "online_group" {
+            self.store.group_codes(&key)?
+        } else {
+            vec![identity.code.clone(), target.clone()]
+        };
+        let event = Message {
+            kind: "message_recalled".into(),
+            message_id: request.message_id.clone(),
+            group_id: if kind == "online_group" {
+                key.clone()
+            } else {
+                String::new()
+            },
+            target_user_code: target.clone(),
+            ..Message::default()
+        };
+        for code in audience {
+            self.deliver_account(&code, &event);
+        }
+        self.deliver(
+            id,
+            Message {
+                command_id: request.command_id.clone(),
+                ..event
+            },
+        );
         Ok(())
     }
 
@@ -858,6 +916,123 @@ mod tests {
         );
         drop(reopened);
         fs::remove_file(database)?;
+        Ok(())
+    }
+
+    #[test]
+    fn online_recall_allows_only_the_author() -> Result<()> {
+        let database = std::env::temp_dir().join(format!("lan-chat-recall-{}.db", Uuid::new_v4()));
+        let store = Store::open(&database)?;
+        for code in ["alice", "bobby"] {
+            store.0.execute(
+                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                [code],
+            )?;
+        }
+        store.0.execute(
+            "INSERT INTO online_friendships VALUES ('alice','bobby','alice',1)",
+            [],
+        )?;
+        drop(store);
+        let mut online = Online::new(Store::open(&database)?, None, None);
+        let connect =
+            |online: &mut Online, code: &str| -> Result<(Uuid, mpsc::Receiver<Message>)> {
+                let id = Uuid::new_v4();
+                let (sender, receiver) = mpsc::channel(16);
+                online.register(
+                    id,
+                    Identity {
+                        code: code.into(),
+                        username: code.into(),
+                        display_code: code.into(),
+                    },
+                    sender,
+                    true,
+                    true,
+                )?;
+                Ok((id, receiver))
+            };
+        let (alice_id, mut alice) = connect(&mut online, "alice")?;
+        let (bobby_id, mut bobby) = connect(&mut online, "bobby")?;
+        while alice.try_recv().is_ok() {}
+        while bobby.try_recv().is_ok() {}
+
+        online.command(
+            alice_id,
+            Message {
+                kind: "group_create".into(),
+                room: "撤回测试群".into(),
+                users: vec!["bobby".into()],
+                command_id: "create".into(),
+                ..Message::default()
+            },
+        );
+        let group = loop {
+            let mut reply = alice.try_recv()?;
+            if reply.kind == "group_create" {
+                break reply.groups.remove(0).id;
+            }
+        };
+        while bobby.try_recv().is_ok() {}
+
+        let message_id = Uuid::new_v4().to_string();
+        online.command(
+            alice_id,
+            Message {
+                kind: "group_send".into(),
+                group_id: group,
+                message_id: message_id.clone(),
+                content: "这条会被撤回".into(),
+                ..Message::default()
+            },
+        );
+        let delivered = loop {
+            let reply = bobby.try_recv()?;
+            if reply.kind == "group_message" {
+                break reply;
+            }
+        };
+        assert_eq!(delivered.message_id, message_id);
+
+        online.command(
+            bobby_id,
+            Message {
+                kind: "message_recall".into(),
+                message_id: message_id.clone(),
+                command_id: "recall-other".into(),
+                ..Message::default()
+            },
+        );
+        let denied = loop {
+            let reply = bobby.try_recv()?;
+            if reply.command_id == "recall-other" {
+                break reply;
+            }
+        };
+        assert_eq!(denied.kind, "error");
+
+        online.command(
+            alice_id,
+            Message {
+                kind: "message_recall".into(),
+                message_id: message_id.clone(),
+                command_id: "recall-own".into(),
+                ..Message::default()
+            },
+        );
+        let recalled = loop {
+            let reply = bobby.try_recv()?;
+            if reply.kind == "message_recalled" {
+                break reply;
+            }
+        };
+        assert_eq!(recalled.message_id, message_id);
+        let recalled: i64 = online.store.0.query_row(
+            "SELECT recalled FROM chat_messages WHERE message_id=?",
+            [message_id.as_str()],
+            |row| row.get(0),
+        )?;
+        assert_eq!(recalled, 1);
         Ok(())
     }
 
