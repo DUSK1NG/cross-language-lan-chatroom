@@ -55,6 +55,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-26 21:09 · 撤回消息改为灰色居中小字
+
+- **执行者**：lead（DeepSeek Harness）
+- **改动**：android/app/src/main/java/dev/dusk1ng/lanchat/MainActivity.java 新增 appendRecalledNotice()/recalledNotice()；appendMessage() 在 recalled 时直接渲染居中灰色小字（12sp、MUTED），不再画气泡，也不再显示时间与「已送达」。
+- **文案**：私聊与自己的消息显示「消息已撤回」；群里别人的消息显示「<昵称> 撤回了一条消息」。
+- **验证**：bash .tools/build-android.sh → BUILD SUCCESSFUL；adb install -r 到 e7125192 后重开会话，撤回占位显示为居中灰字「消息已撤回」（截图 .tools/tmp/notice1.png）。
+- **未验证**：群聊里别人撤回时的昵称文案未真机跑。
+- **阻塞**：无。
+
 ## 2026-11-26 21:07 · Android 补撤回入口（在线版）
 
 - **执行者**：lead（DeepSeek Harness）

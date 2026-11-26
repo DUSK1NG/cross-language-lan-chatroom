@@ -2408,6 +2408,23 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void appendRecalledNotice(ChatMessage row, boolean self) {
+        TextView notice = label(recalledNotice(row, self), 12, MUTED);
+        notice.setGravity(Gravity.CENTER);
+        LinearLayout line = new LinearLayout(this);
+        line.setTag(messageKey(row));
+        line.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams position = new LinearLayout.LayoutParams(-1, -2);
+        position.topMargin = dp(9);
+        messages.addView(line, position);
+        line.addView(notice, new LinearLayout.LayoutParams(-2, -2));
+    }
+
+    private String recalledNotice(ChatMessage row, boolean self) {
+        if (self || active == null || !active.group()) return RECALLED_TEXT;
+        return row.authorName() + " 撤回了一条消息";
+    }
+
     private void appendMessage(ChatMessage row, boolean animate) {
         if (row.time() != null) {
             LocalDate date = row.time().atZone(ZoneId.systemDefault()).toLocalDate();
@@ -2419,6 +2436,10 @@ public final class MainActivity extends Activity {
             }
         }
         boolean self = ownCode.equalsIgnoreCase(row.author());
+        if (row.recalled()) {
+            appendRecalledNotice(row, self);
+            return;
+        }
         LinearLayout line = animate ? new MessageArrival(this, self) : new LinearLayout(this);
         line.setTag(messageKey(row));
         line.setGravity(self ? Gravity.END : Gravity.START);
