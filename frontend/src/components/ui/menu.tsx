@@ -4,8 +4,8 @@ import type { ReactNode } from 'react';
 
 import { cn } from '../../lib/cn';
 
-const contentClass = 'menu-surface surface-glass z-50 min-w-[200px] overflow-hidden rounded-card p-1.5 text-ink shadow-dialog';
-const itemClass = 'flex h-9 cursor-pointer select-none items-center gap-3 rounded-sm px-3 text-body outline-none data-[highlighted]:bg-hover data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 [&_svg]:size-[18px] [&_svg]:text-ink-2';
+const contentClass = 'menu-surface surface-glass z-50 min-w-[200px] overflow-hidden rounded-[10px] border border-divider bg-sidebar p-1 text-ink shadow-dialog';
+const itemClass = 'flex h-8 cursor-pointer select-none items-center gap-3 rounded-[6px] px-2.5 text-body outline-none data-[highlighted]:bg-hover data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 [&_svg]:size-[18px] [&_svg]:text-ink-2';
 
 export type MenuItem = {
   label: string;
@@ -22,12 +22,16 @@ function itemClasses(item: MenuItem) {
 }
 
 /** Dropdown menu (hamburger, header "more"). */
-export function DropdownMenu({ trigger, items, align = 'start' }: { trigger: ReactNode; items: MenuItem[]; align?: 'start' | 'end' }) {
+export function DropdownMenu({ trigger, items, align = 'start', side, onOpenChange, contentClassName }: {
+  trigger: ReactNode; items: MenuItem[]; align?: 'start' | 'end';
+  side?: 'top' | 'bottom';
+  onOpenChange?: (open: boolean) => void; contentClassName?: string;
+}) {
   return (
-    <DropdownMenuPrimitive.Root modal={false}>
+    <DropdownMenuPrimitive.Root modal={false} onOpenChange={onOpenChange}>
       <DropdownMenuPrimitive.Trigger asChild>{trigger}</DropdownMenuPrimitive.Trigger>
       <DropdownMenuPrimitive.Portal>
-        <DropdownMenuPrimitive.Content align={align} sideOffset={8} className={contentClass}>
+        <DropdownMenuPrimitive.Content align={align} side={side} sideOffset={8} className={cn(contentClass, contentClassName)}>
           {items.map((item) => (
             <DropdownMenuPrimitive.Item key={item.label} disabled={item.disabled} onSelect={item.onSelect} className={itemClasses(item)}>
               {item.icon}<span className="flex-1">{item.label}</span>{item.trailing}

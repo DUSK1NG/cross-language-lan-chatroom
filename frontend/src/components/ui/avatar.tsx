@@ -7,7 +7,7 @@ type AvatarProps = {
   name: string;
   /** Hash seed for the colour; defaults to the name (userCode or room name keep it stable across renames). */
   seed?: string;
-  size?: 22 | 32 | 36 | 40 | 48 | 80;
+  size?: 22 | 28 | 32 | 36 | 40 | 44 | 48 | 80;
   /** Shows a 12px presence dot with a 2px ring in the given surface colour token. */
   online?: boolean;
   ringClass?: string;
@@ -20,11 +20,11 @@ type AvatarProps = {
  */
 export const Avatar = memo(function Avatar({ name, seed, size = 48, online, ringClass = 'ring-sidebar', className }: AvatarProps) {
   const tone = avatarTone(seed || name);
-  const fontSize = size >= 80 ? 32 : size >= 48 ? 19 : size >= 36 ? 15 : size >= 32 ? 13 : 10;
+  const fontSize = size >= 80 ? 32 : size >= 48 ? 19 : size >= 36 ? 15 : size >= 32 ? 13 : size >= 28 ? 12 : 10;
   return (
     <span aria-hidden="true" className={cn('relative inline-flex shrink-0', className)} style={{ width: size, height: size }}>
-      <span className="inline-flex size-full items-center justify-center rounded-full font-medium text-on-accent select-none"
-        style={{ fontSize, background: `linear-gradient(180deg, var(--avatar-${tone}-from), var(--avatar-${tone}-to))` }}>
+      <span className="inline-flex size-full items-center justify-center rounded-full font-medium text-ink-2 select-none"
+        style={{ fontSize, background: `color-mix(in srgb, var(--avatar-${tone}-from) 18%, transparent)` }}>
         {initialOf(name)}
       </span>
       {online !== undefined && (

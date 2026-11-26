@@ -1,79 +1,79 @@
 /* LAN Chat 设计令牌 — 唯一颜色/尺寸来源。组件只引用这些变量（通过 Tailwind 主题或 var()），禁止硬编码颜色。
-   默认深色；html[data-theme='light'] 覆盖浅色。
-   对比度（WCAG AA，正文 ≥ 4.5:1）已按规范调整四处，见 docs/ui-design-spec.md §1.3。 */
+   配色来源：dsh-claude-style 的 claude 色卡（种子 accent #d97757 / canvas #ffffff·#191919 / ink #161616·#fdfdfd）。
+   默认深色；html[data-theme='light'] 覆盖浅色。对比度（WCAG AA，正文 ≥ 4.5:1）见 docs/ui-design-spec.md §1.3。 */
 :root {
   color-scheme: dark;
 
   /* 背景 */
-  --bg: #0E1621;
-  --bg-chat-to: #101C2A;          /* 聊天区背景渐变终点 */
-  --bg-sidebar: #17212B;
-  --bg-hover: #202B36;
-  --bg-active: #2B5278;
-  --bg-elevated: #17212B;         /* 弹窗、菜单 */
-  --bg-input: #242F3D;
-  --bg-code: rgba(255, 255, 255, 0.08);
-  --surface-chrome: color-mix(in srgb, var(--bg-sidebar) 78%, transparent);
-  --surface-glass: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
-  --surface-edge: color-mix(in srgb, var(--text) 13%, transparent);
+  --bg: #191919;
+  --bg-chat-to: #191919;          /* 聊天区背景（Claude 为纯色画布，不再渐变） */
+  --bg-sidebar: #1f1f1f;
+  --bg-hover: #242424;
+  --bg-active: #2b2b2b;
+  --bg-elevated: #1f1f1f;         /* 弹窗、菜单 */
+  --bg-input: #232323;
+  --bg-code: rgba(255, 255, 255, 0.06);
+  --surface-chrome: var(--bg);
+  --surface-glass: var(--bg-elevated);
+  --surface-edge: color-mix(in srgb, var(--text) 11%, transparent);
 
   /* 气泡 */
-  --bubble-out: #2B5278;
-  --bubble-in: #182533;
-  --bubble-out-meta: rgba(255, 255, 255, 0.70);  /* 在 #2B5278 上 4.94:1（原次要色 #8B9BAB 仅 2.86:1） */
-  --bubble-in-meta: #8B9BAB;
+  --bubble-out: #262626;
+  --bubble-in: #1f1f1f;
+  --bubble-out-meta: rgba(255, 255, 255, 0.62);  /* 在 #262626 上 5.02:1 */
+  --bubble-in-meta: #b8b5ad;
   /* 气泡内引用块（全部预设已核算 ≥ 4.5:1）：作者名 / 原文 / 底色 */
-  --quote-out-name: #FFFFFF;
-  --quote-out-text: rgba(255, 255, 255, 0.85);
-  --quote-out-bg: rgba(255, 255, 255, 0.10);
+  --quote-out-name: #fdfdfd;
+  --quote-out-text: rgba(255, 255, 255, 0.80);
+  --quote-out-bg: rgba(255, 255, 255, 0.08);
   --quote-in-bg: rgba(255, 255, 255, 0.04);
-  --read-tick-out: #8CC8FF;       /* 自己气泡上的已读双勾 4.58:1（原强调色 2.19:1） */
+  --read-tick-out: #d97757;       /* 自己气泡上的已读双勾 5.07:1 */
 
   /* 文字 */
-  --text: #F5F5F5;
-  --text-2: #8B9BAB;
-  --text-3: #7D8B99;              /* bg 5.21:1 · 侧栏 4.67:1（原 #6C7883 在 bg 仅 4.03:1） */
-  --text-on-active-2: rgba(255, 255, 255, 0.72); /* 选中行第二行文字 5.12:1（text-2 在选中行仅 2.86:1） */
-  --text-on-accent: #FFFFFF;
+  --text: #fdfdfd;
+  --text-2: #b8b5ad;
+  --text-3: #8f8c85;              /* bg 5.24:1 · 侧栏 4.91:1 */
+  --text-on-active-2: rgba(255, 255, 255, 0.72);
+  --text-on-accent: #ffffff;
 
   /* 设置页强调色预设色块（仅装饰） */
   --swatch-blue: #5288C1;
-  --swatch-green: #4FAE4E;
+  --swatch-green: #6C9E6C;
   --swatch-violet: #8F7AE5;
-  --swatch-orange: #E08A3C;
-  --swatch-rose: #D9637E;
+  --swatch-orange: #D97757;
+  --swatch-rose: #C97A86;
 
   /* 强调与状态 */
-  --accent: #5288C1;
-  --accent-strong: #3D72AE;       /* 白字角标/主按钮底 4.98:1（白字在 #5288C1 上仅 3.72:1） */
-  --accent-text: #6399D0;         /* 强调色文字（链接、正在输入）：侧栏 5.43 · bg 6.06 · 对方气泡 5.18（#5288C1 在侧栏仅 4.38:1） */
-  --accent-soft: rgba(82, 136, 193, 0.16);
-  --online: #4FAE4E;
-  --danger: #E53935;
-  --danger-strong: #D32F2F;       /* 白字底色 4.98:1（白字在 #E53935 上仅 4.23:1） */
-  --danger-text: #FF6B66;         /* 危险色文字：侧栏 5.86 · 对方气泡 5.59（#E53935 在侧栏仅 3.85:1） */
-  --danger-icon-out: #FF7A75;     /* 自己气泡上的失败图标（非文字 ≥ 3:1）：3.21:1 */
-  --warning: #F5A623;
-  --muted-badge: #3E4C5A;
+  --accent: #d97757;
+  --accent-strong: #b34d2a;       /* 白字按钮底 5.23:1 */
+  --accent-text: #e08a6d;         /* 强调色文字：bg 5.63 · 侧栏 5.19 */
+  --accent-soft: rgba(217, 119, 87, 0.16);
+  --online: #6C9E6C;
+  --danger: #C4453A;
+  --danger-strong: #A83A31;       /* 白字底色 6.29:1 */
+  --danger-text: #E8735F;         /* 危险色文字：bg 5.30 · 侧栏 4.90 */
+  --danger-icon-out: #E8735F;
+  --warning: #D9A441;
+  --muted-badge: #3a3a3a;
 
   /* 线 */
-  --divider: rgba(255, 255, 255, 0.06);
-  --border-control: rgba(255, 255, 255, 0.12);
+  --divider: rgba(255, 255, 255, 0.09);
+  --border-control: rgba(255, 255, 255, 0.14);
 
   /* 遮罩与阴影 */
-  --overlay: rgba(0, 0, 0, 0.5);
-  --shadow-dialog: 0 8px 24px rgba(0, 0, 0, 0.35);
-  --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow-dialog: 0 12px 32px rgba(0, 0, 0, 0.44);
+  --shadow-float: 0 2px 10px rgba(0, 0, 0, 0.32);
 
   /* 背景图案不透明度（≤ 4%） */
-  --pattern-opacity: 0.035;
+  --pattern-opacity: 0;
 
-  /* 圆角 */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-bubble: 14px;
+  /* 圆角（Claude 阶梯：4 / 8 / 16，弹层 12，行 6） */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-bubble: 12px;
   --radius-bubble-tail: 4px;
-  --radius-card: 16px;
+  --radius-card: 12px;
   --radius-full: 9999px;
 
   /* 间距（4 的倍数；2px 仅用于消息组内间距） */
@@ -95,17 +95,19 @@
   --leading-body: 1.5;
   --message-font-size: 14px;     /* 设置：小 13 / 中 14 / 大 16 */
 
-  /* 动效 */
+  /* 动效（Claude 节奏：反馈 120 · 浮层 150 · 展开 250 · 入场 320 · 发送 400） */
   --motion-scale: 1;
-  --dur-hover: calc(150ms * var(--motion-scale));
-  --dur-exit: calc(130ms * var(--motion-scale));
-  --dur-enter: calc(200ms * var(--motion-scale));
-  --dur-panel: calc(300ms * var(--motion-scale));
-  --dur-press: calc(65ms * var(--motion-scale));
-  --dur-press-release: calc(280ms * var(--motion-scale));
-  --dur-send: calc(420ms * var(--motion-scale));
-  --press-scale: .95;
-  --press-icon-scale: .91;
+  --dur-hover: calc(120ms * var(--motion-scale));
+  --dur-reveal: calc(120ms * var(--motion-scale));
+  --dur-surface: calc(150ms * var(--motion-scale));
+  --dur-exit: calc(120ms * var(--motion-scale));
+  --dur-enter: calc(320ms * var(--motion-scale));
+  --dur-panel: calc(250ms * var(--motion-scale));
+  --dur-press: calc(80ms * var(--motion-scale));
+  --dur-press-release: calc(250ms * var(--motion-scale));
+  --dur-send: calc(400ms * var(--motion-scale));
+  --press-scale: .97;
+  --press-icon-scale: .93;
   --ease: cubic-bezier(.22, 1, .36, 1);
   --ease-exit: cubic-bezier(.45, 0, .8, .55);
   --ease-move: cubic-bezier(.4, 0, .2, 1);
@@ -124,15 +126,16 @@
   --name-4: #B8A8F5; --name-5: #F58DBE; --name-6: #7DD9DB; --name-7: #FFB585;
 
   /* emoji-mart 使用逗号分隔的 RGB 三元组，与上面的 --bg-elevated / --text / --accent 对应 */
-  --rgb-elevated: 23, 33, 43;
-  --rgb-text: 245, 245, 245;
-  --rgb-accent: 82, 136, 193;
+  --rgb-elevated: 31, 31, 31;
+  --rgb-text: 253, 253, 253;
+  --rgb-accent: 217, 119, 87;
 
-  /* 布局 */
-  --sidebar-width: 320px;
+  /* 布局（Claude 侧栏 240–260，无独立底色） */
+  --sidebar-width: 260px;
   --info-width: 340px;
-  --header-height: 56px;
-  --row-height: 64px;
+  --header-height: 52px;
+  --chat-column-width: 768px;
+  --chat-column-gutter: 16px;
 }
 
 @supports (transition-timing-function: linear(0, 1)) {
@@ -141,16 +144,16 @@
   }
 }
 
-/* 主题色预设（外观设置，5 种）。每种的白字/主色、正文/气泡、时间/气泡、双勾/气泡均已计算 ≥ 4.5:1 */
-html:not([data-theme='light'])[data-accent='blue'] { --accent: #5288C1; --accent-strong: #3D72AE; --accent-soft: rgba(82, 136, 193, 0.16); --bg-active: #2B5278; --bubble-out: #2B5278; }
-html:not([data-theme='light'])[data-accent='green'] { --accent: #4FAE4E; --accent-strong: #2F7D32; --accent-soft: rgba(79, 174, 78, 0.16); --bg-active: #2E5A3A; --bubble-out: #2E5A3A; --read-tick-out: #9FE0A0; }
-html:not([data-theme='light'])[data-accent='violet'] { --accent: #8F7AE5; --accent-strong: #6A55C7; --accent-soft: rgba(143, 122, 229, 0.16); --bg-active: #45387A; --bubble-out: #45387A; }
-html:not([data-theme='light'])[data-accent='orange'] { --accent: #E08A3C; --accent-strong: #A85C1A; --accent-soft: rgba(224, 138, 60, 0.16); --bg-active: #6A4320; --bubble-out: #6A4320; }
-html:not([data-theme='light'])[data-accent='rose'] { --accent: #D9637E; --accent-strong: #B23F5B; --accent-soft: rgba(217, 99, 126, 0.16); --bg-active: #6A2E3D; --bubble-out: #6A2E3D; }
+/* 主题色预设（外观设置，5 种）。强调色仍按各自色相取值，中性面统一走 claude 色卡。 */
+html:not([data-theme='light'])[data-accent='blue'] { --accent: #6f9fd8; --accent-strong: #3D72AE; --accent-text: #8ab4f8; --accent-soft: rgba(111, 159, 216, 0.16); --bg-active: #23303d; --bubble-out: #23303d; }
+html:not([data-theme='light'])[data-accent='green'] { --accent: #6C9E6C; --accent-strong: #3f7a3f; --accent-text: #8fbf8f; --accent-soft: rgba(108, 158, 108, 0.16); --bg-active: #22301f; --bubble-out: #22301f; --read-tick-out: #9FE0A0; }
+html:not([data-theme='light'])[data-accent='violet'] { --accent: #a394e6; --accent-strong: #6A55C7; --accent-text: #b8a8f5; --accent-soft: rgba(163, 148, 230, 0.16); --bg-active: #2c2740; --bubble-out: #2c2740; }
+html:not([data-theme='light'])[data-accent='orange'] { --accent: #d97757; --accent-strong: #b34d2a; --accent-text: #e08a6d; --accent-soft: rgba(217, 119, 87, 0.16); --bg-active: #2b2b2b; --bubble-out: #262626; }
+html:not([data-theme='light'])[data-accent='rose'] { --accent: #c97a86; --accent-strong: #a34f5e; --accent-text: #e39aa4; --accent-soft: rgba(201, 122, 134, 0.16); --bg-active: #33262a; --bubble-out: #33262a; }
 
 /* 气泡圆角三档 */
 html[data-bubble-radius='small'] { --radius-bubble: 8px; --radius-bubble-tail: 2px; }
-html[data-bubble-radius='large'] { --radius-bubble: 18px; --radius-bubble-tail: 6px; }
+html[data-bubble-radius='large'] { --radius-bubble: 16px; --radius-bubble-tail: 6px; }
 /* 消息字号三档 */
 html[data-message-size='small'] { --message-font-size: 13px; }
 html[data-message-size='large'] { --message-font-size: 16px; }
@@ -158,49 +161,55 @@ html[data-message-size='large'] { --message-font-size: 16px; }
 /* 浅色主题覆盖 */
 html[data-theme='light'] {
   color-scheme: light;
-  --bg: #FFFFFF;
-  --bg-chat-to: #EEF3F8;
-  --bg-sidebar: #FFFFFF;
-  --bg-hover: #F1F3F5;
-  --bg-active: #3D72AE;
-  --bg-elevated: #FFFFFF;
-  --bg-input: #F1F3F5;
-  --bg-code: rgba(0, 0, 0, 0.06);
-  --bubble-out: #E1F0FF;
-  --bubble-in: #FFFFFF;
-  --bubble-out-meta: #4D6A88;
-  --bubble-in-meta: #5F6B76;
-  --read-tick-out: #2F6BB0;
+  --bg: #ffffff;
+  --bg-chat-to: #ffffff;
+  --bg-sidebar: #fafafa;
+  --bg-hover: #f2f0ec;
+  --bg-active: #e9e6df;
+  --bg-elevated: #ffffff;
+  --bg-input: #f4f2ef;
+  --bg-code: rgba(0, 0, 0, 0.05);
+  --surface-chrome: var(--bg);
+  --surface-edge: color-mix(in srgb, var(--text) 10%, transparent);
+  --bubble-out: #f0eee9;
+  --bubble-in: #ffffff;
+  --bubble-out-meta: #6b6659;
+  --bubble-in-meta: #6b6b66;
+  --read-tick-out: #b4562f;
   --quote-out-name: var(--accent-text); /* 各浅色预设的 accent-text 在对应浅色气泡上均 ≥ 4.5:1 */
   --quote-out-text: var(--bubble-out-meta);
-  --quote-out-bg: rgba(255, 255, 255, 0.50);
+  --quote-out-bg: rgba(0, 0, 0, 0.04);
   --quote-in-bg: rgba(0, 0, 0, 0.04);
-  --text-on-active-2: rgba(255, 255, 255, 0.82);
-  --accent-text: #2F6BB0;
-  --text: #0F1419;
-  --text-2: #5F6B76;
-  --text-3: #66727D;
-  --divider: rgba(0, 0, 0, 0.08);
-  --border-control: rgba(0, 0, 0, 0.14);
+  --text-on-active-2: rgba(22, 22, 22, 0.72);
+  --accent: #d97757;
+  --accent-strong: #b4562f;
+  --accent-text: #b4562f;
+  --accent-soft: rgba(217, 119, 87, 0.12);
+  --text: #161616;
+  --text-2: #3d3d3a;
+  --text-3: #6b6b66;
+  --divider: rgba(0, 0, 0, 0.10);
+  --border-control: rgba(0, 0, 0, 0.16);
   --overlay: rgba(0, 0, 0, 0.4);
-  --shadow-dialog: 0 8px 24px rgba(0, 0, 0, 0.16);
-  --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.12);
-  --muted-badge: #A3AEB8;
-  --danger-strong: #C62828;
-  --danger-text: #C62828;
-  --danger-icon-out: #C62828;
-  --pattern-opacity: 0.03;
+  --shadow-dialog: 0 12px 32px rgba(22, 22, 22, 0.14);
+  --shadow-float: 0 2px 10px rgba(22, 22, 22, 0.10);
+  --muted-badge: #c9c4b9;
+  --danger: #C4453A;
+  --danger-strong: #A83A31;
+  --danger-text: #B03B31;
+  --danger-icon-out: #B03B31;
+  --pattern-opacity: 0;
   --rgb-elevated: 255, 255, 255;
-  --rgb-text: 15, 20, 25;
-  --rgb-accent: 61, 114, 174;
-  /* 发送者名称在白色气泡上 ≥ 4.8:1 */
+  --rgb-text: 22, 22, 22;
+  --rgb-accent: 217, 119, 87;
+  /* 发送者名称在浅色画布上 ≥ 4.8:1 */
   --name-0: #A35B56; --name-1: #517845; --name-2: #8E6C3B; --name-3: #4D7493;
   --name-4: #756B9C; --name-5: #9C5A79; --name-6: #477B7C; --name-7: #90664B;
 }
 
-/* 浅色主题下的主题色：只换强调色；自己气泡用该色的浅色调，深色文字（均 ≥ 4.5:1） */
-html[data-theme='light'][data-accent='blue'] { --accent: #3D72AE; --accent-strong: #2F64A0; --accent-text: #2F6BB0; --bg-active: #2F64A0; --bubble-out: #E1F0FF; }
-html[data-theme='light'][data-accent='green'] { --accent: #2F7D32; --accent-strong: #2A6F2D; --accent-text: #2A6F2D; --bg-active: #2A6F2D; --bubble-out: #E3F4E1; }
-html[data-theme='light'][data-accent='violet'] { --accent: #6A55C7; --accent-strong: #5A46B0; --accent-text: #5A46B0; --bg-active: #5A46B0; --bubble-out: #ECE8FB; }
-html[data-theme='light'][data-accent='orange'] { --accent: #A85C1A; --accent-strong: #934F15; --accent-text: #934F15; --bg-active: #934F15; --bubble-out: #FBEBDD; }
-html[data-theme='light'][data-accent='rose'] { --accent: #B23F5B; --accent-strong: #9C344D; --accent-text: #9C344D; --bg-active: #9C344D; --bubble-out: #FBE4EA; }
+/* 浅色主题下的主题色：只换强调色；自己消息用中性面，文字走 ink */
+html[data-theme='light'][data-accent='blue'] { --accent: #3D72AE; --accent-strong: #2F64A0; --accent-text: #2F6BB0; --bg-active: #e3e9f0; }
+html[data-theme='light'][data-accent='green'] { --accent: #3f7a3f; --accent-strong: #356835; --accent-text: #356835; --bg-active: #e4ece2; --bubble-out: #eef3ec; }
+html[data-theme='light'][data-accent='violet'] { --accent: #6A55C7; --accent-strong: #5A46B0; --accent-text: #5A46B0; --bg-active: #eae6f5; --bubble-out: #f1eef8; }
+html[data-theme='light'][data-accent='orange'] { --accent: #b4562f; --accent-strong: #9c4527; --accent-text: #9c4527; --bg-active: #e9e6df; --bubble-out: #f0eee9; }
+html[data-theme='light'][data-accent='rose'] { --accent: #B23F5B; --accent-strong: #9C344D; --accent-text: #9C344D; --bg-active: #f0e4e7; --bubble-out: #f6eef0; }

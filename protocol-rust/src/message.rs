@@ -31,6 +31,22 @@ pub struct OnlineProfile {
     pub joined_at: String,
 }
 
+#[derive(Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OnlineBotSettings {
+    pub endpoint: String,
+    pub source_id: String,
+    pub provider_id: String,
+    pub persona_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OnlineBotSettingsWithKey {
+    pub settings: OnlineBotSettings,
+    pub openapi_key: String,
+}
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct OnlineGroup {

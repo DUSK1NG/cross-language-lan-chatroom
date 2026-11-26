@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 
-export const sidebarMin = 260;
-export const sidebarMax = 420;
-export const sidebarDefault = 320;
+export const sidebarMin = 240;
+export const sidebarMax = 380;
+export const sidebarDefault = 260;
 const storageKey = 'lan-chat.sidebarWidth';
 
 const clamp = (value: number) => Math.min(sidebarMax, Math.max(sidebarMin, Math.round(value)));

@@ -5,7 +5,7 @@ import type { ConversationRef } from '../../bridge/types';
 import { ConversationRow } from './ConversationRow';
 import { isActive, type ConversationEntry } from './conversations';
 
-const rowHeight = 64;
+const rowHeight = 48;
 
 type ConversationListProps = {
   entries: ConversationEntry[];
@@ -15,7 +15,7 @@ type ConversationListProps = {
 };
 
 /**
- * Virtualised list (spec §3, §13). Rows are a fixed 64px so no measuring is needed.
+ * Virtualised list (spec §3, §13). Rows have a fixed height so no measuring is needed.
  * jsdom has no layout: when the scroller reports 0 height the virtualiser renders
  * nothing, so we fall back to rendering every row (lists stay small in tests).
  */
@@ -46,7 +46,9 @@ export function ConversationList({ entries, active, onSelect, label }: Conversat
           })}
         </div>
       ) : entries.map((entry) => (
-        <div key={entry.key} role="listitem"><ConversationRow entry={entry} active={isActive(entry, active)} onSelect={select} /></div>
+        <div key={entry.key} role="listitem" style={{ height: rowHeight }}>
+          <ConversationRow entry={entry} active={isActive(entry, active)} onSelect={select} />
+        </div>
       ))}
     </div>
   );

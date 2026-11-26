@@ -14,9 +14,10 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use chrono::{SecondsFormat, Utc};
 use lan_chat_protocol::{
-    LAN_HISTORY_PAGES, LAN_ROOM_ROLES, MAX_FRAME_BYTES, Message, ONLINE_FILES,
-    ONLINE_GROUP_ATTACHMENTS, ONLINE_GROUP_MANAGEMENT, ONLINE_GROUPS, ONLINE_HISTORY_PAGES,
-    ONLINE_IMAGES, ONLINE_SOCIAL, ROOM_PASSWORD,
+    LAN_HISTORY_PAGES, LAN_ROOM_ROLES, MAX_FRAME_BYTES, Message, ONLINE_BOT_KEY_SYNC,
+    ONLINE_BOT_SETTINGS, ONLINE_FILES, ONLINE_GROUP_ATTACHMENTS, ONLINE_GROUP_MANAGEMENT,
+    ONLINE_GROUPS, ONLINE_HISTORY_PAGES, ONLINE_IMAGES, ONLINE_SOCIAL, OnlineBotSettings,
+    OnlineBotSettingsWithKey, ROOM_PASSWORD,
 };
 use ring::digest::{SHA256, digest};
 use serde::Deserialize;
@@ -93,11 +94,13 @@ struct Payload {
     image_size: i64,
     paths: Vec<PathBuf>,
     content: String,
+    openapi_key: Option<String>,
     query: String,
     action: String,
     text: String,
     mode: String,
     enabled: bool,
+    revision: i64,
 }
 
 impl Client {
@@ -487,6 +490,36 @@ impl Client {
                         message.command_id = id.clone();
                         delayed = true;
                     }
+                    "botSettings.get" | "botSettings.save" => {
+                        ensure!(
+                            session.has(ONLINE_BOT_SETTINGS),
+                            "服务器不支持机器人设置同步"
+                        );
+                        let save = kind == "botSettings.save";
+                        let with_key = session.has(ONLINE_BOT_KEY_SYNC)
+                            && (!save || payload.openapi_key.is_some());
+                        message.kind = match (save, with_key) {
+                            (false, false) => "bot_settings_get",
+                            (true, false) => "bot_settings_save",
+                            (false, true) => "bot_settings_get_with_key",
+                            (true, true) => "bot_settings_save_with_key",
+                        }
+                        .into();
+                        message.command_id = id.clone();
+                        message.content = if save && with_key {
+                            serde_json::to_string(&OnlineBotSettingsWithKey {
+                                settings: serde_json::from_str(&payload.content)
+                                    .context("机器人设置格式无效")?,
+                                openapi_key: payload
+                                    .openapi_key
+                                    .context("缺少 OpenAPI Key 字段")?,
+                            })?
+                        } else {
+                            payload.content
+                        };
+                        message.revision = payload.revision;
+                        delayed = true;
+                    }
                     "history.groupMore" => {
                         let group = state
                             .active
@@ -772,6 +805,34 @@ impl Client {
             | "group_update" | "group_announce" => {
                 if state.room_commands.remove(&message.command_id) {
                     self.result(&message.command_id, Ok(()));
+                }
+            }
+            "bot_settings_get"
+            | "bot_settings_save"
+            | "bot_settings_get_with_key"
+            | "bot_settings_save_with_key" => {
+                if state.room_commands.remove(&message.command_id) {
+                    let account = if message.kind.ends_with("_with_key") {
+                        serde_json::from_str::<OnlineBotSettingsWithKey>(&message.content).map(|data| {
+                            json!({ "revision": message.revision, "settings": data.settings, "openapiKey": data.openapi_key })
+                        })
+                    } else {
+                        serde_json::from_str::<OnlineBotSettings>(&message.content).map(|settings| {
+                            json!({ "revision": message.revision, "settings": settings })
+                        })
+                    };
+                    match account {
+                        Ok(bot_settings) => self.ui.emit(
+                            "chat:result",
+                            json!({
+                                "id": message.command_id, "ok": true, "botSettings": bot_settings
+                            }),
+                        ),
+                        Err(_) => self.result(
+                            &message.command_id,
+                            Err(anyhow::anyhow!("账号设置响应格式无效")),
+                        ),
+                    };
                 }
             }
             "history_response" => {

@@ -34,6 +34,18 @@ pub(crate) fn migrate_schema(db: &Connection) -> Result<()> {
         )?;
         db.pragma_update(None, "user_version", 3)?;
     }
+    if version < 4 {
+        db.execute_batch(
+            "CREATE TABLE online_bot_settings (
+                 user_code TEXT PRIMARY KEY, revision INTEGER NOT NULL, settings TEXT NOT NULL
+             );",
+        )?;
+        db.pragma_update(None, "user_version", 4)?;
+    }
+    if version < 5 {
+        db.execute_batch("ALTER TABLE online_bot_settings ADD COLUMN openapi_key BLOB")?;
+        db.pragma_update(None, "user_version", 5)?;
+    }
     Ok(())
 }
 

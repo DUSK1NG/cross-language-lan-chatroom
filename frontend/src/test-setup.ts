@@ -44,6 +44,7 @@ vi.mock('emoji-mart', () => ({
     constructor(options: { onEmojiSelect: (emoji: { native: string }) => void }) {
       const element = document.createElement('div');
       element.setAttribute('data-testid', 'emoji-mart');
+      element.attachShadow({ mode: 'open' }).append(document.createElement('slot'));
       for (const native of ['😀', '👍']) {
         const button = document.createElement('button');
         button.type = 'button';

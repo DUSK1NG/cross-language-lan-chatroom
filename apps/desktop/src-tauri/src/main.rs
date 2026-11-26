@@ -13,6 +13,8 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
+#[cfg(feature = "online")]
+mod astrbot;
 #[cfg(all(windows, feature = "desktop-updater"))]
 mod updates;
 
@@ -120,6 +122,8 @@ fn main() {
             chat_state,
             chat_dispatch,
             chat_open_url,
+            #[cfg(feature = "online")]
+            astrbot::astrbot_settings,
             #[cfg(all(windows, feature = "desktop-updater"))]
             updates::check_desktop_update,
             #[cfg(all(windows, feature = "desktop-updater"))]

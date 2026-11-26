@@ -66,6 +66,26 @@ describe('MessageList', () => {
     expect(screen.getByTestId('message-new-1')).toHaveAttribute('data-entering', 'true');
   });
 
+  it('uses the configured smooth scrolling when following a new message', () => {
+    const matchMedia = window.matchMedia.bind(window);
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      ...matchMedia(query), matches: query === '(prefers-reduced-motion: reduce)'
+    }));
+    try {
+      const first = withMessages([receivedMessage('old')]);
+      const bridge = createFakeBridge(first);
+      const { rerender } = render(<MessageList bridge={bridge} state={first} />);
+      const timeline = screen.getByTestId('message-timeline');
+      setScrollableGeometry(timeline, 800);
+      const scroll = vi.spyOn(timeline, 'scrollTo');
+      rerender(<MessageList bridge={bridge} state={withMessages([...first.activeMessages, receivedMessage('new')])} />);
+      expect(timeline.scrollTop).toBe(1000);
+      expect(scroll).toHaveBeenCalledWith({ top: 1000, behavior: 'smooth' });
+    } finally {
+      media.mockRestore();
+    }
+  });
+
   it('virtualises long histories instead of rendering every message', () => {
     const state = withMessages(Array.from({ length: 600 }, (_, index) => message(`history-${index}`)));
     render(<MessageList bridge={createFakeBridge(state)} state={state} />);

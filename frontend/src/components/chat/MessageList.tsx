@@ -64,6 +64,7 @@ function observeClientRect(instance: Virtualizer<HTMLDivElement, Element>, callb
  */
 export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0, sendAnchor }: MessageListProps) {
   const settings = useAppSettings();
+  const smooth = settings.scrollMotion === 'smooth' && state.performance?.effectsEnabled !== false;
   const key = conversationKey(state);
   const isGroupChat = state.navigation.activeConversation?.kind !== 'dm';
   const rows = useMemo(() => state.activeMessages.filter(isRenderable), [state.activeMessages]);
@@ -118,19 +119,21 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
   const scrollToBottom = useCallback(() => {
     const element = scrollRef.current;
     if (!element) return;
-    element.scrollTop = element.scrollHeight;
+    if (smooth) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
+    else element.scrollTop = element.scrollHeight;
     markBottom(true);
-    // Dynamic row heights settle after paint; pin to the bottom once more.
-    requestAnimationFrame(() => { if (atBottomRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; });
-  }, [markBottom]);
+    // Dynamic row heights settle after paint; pin to the bottom once more (instant mode only).
+    if (!smooth) requestAnimationFrame(() => { if (atBottomRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; });
+  }, [markBottom, smooth]);
 
   const scrollToMessage = useCallback((messageId: string, align: 'start' | 'center' = 'center') => {
     const index = rows.findIndex((message) => message.messageId === messageId);
     if (index < 0) return false;
-    if (hasLayout) virtualizer.scrollToIndex(index, { align });
-    else scrollRef.current?.querySelector(`[data-testid="message-${messageId.replace(/["\\]/g, '\\$&')}"]`)?.scrollIntoView({ block: align });
+    const behavior = smooth ? 'smooth' : 'auto';
+    if (hasLayout) virtualizer.scrollToIndex(index, { align, behavior });
+    else scrollRef.current?.querySelector(`[data-testid="message-${messageId.replace(/["\\]/g, '\\$&')}"]`)?.scrollIntoView({ block: align, behavior });
     return true;
-  }, [rows, hasLayout, virtualizer]);
+  }, [rows, hasLayout, virtualizer, smooth]);
 
   const onScroll = useCallback(() => {
     const element = scrollRef.current;
@@ -291,13 +294,13 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
     const date = dateLabels[index];
     const divider = message.messageId === dividerId
       ? <div key="divider" role="separator" aria-label="以下为新消息" className="unseen-divider my-2 flex items-center justify-center">
-          <span className="rounded-full bg-sidebar/80 px-3 py-1 text-small font-medium text-accent-text">以下为新消息</span>
+          <span className="text-small font-medium text-accent-text">以下为新消息</span>
         </div>
       : null;
     return (
       <>
-        {date && <div data-testid="date-separator" className="pointer-events-none flex justify-center py-1.5">
-          <span className="rounded-full bg-sidebar/90 px-3 py-1 text-small font-medium text-ink shadow-float">{date}</span>
+        {date && <div data-testid="date-separator" className="pointer-events-none flex justify-center pb-1 pt-3">
+          <span className="text-small font-medium text-ink-3">{date}</span>
         </div>}
         {divider}
         <MessageBubble message={message} bridge={bridge} grouped={!position.first && !divider && !date} tail={position.last}
@@ -316,14 +319,14 @@ export function MessageList({ state, bridge, onQuote, canRecall, entryUnread = 0
       <motion.div key={key} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: scaled(0.18), ease }}
         ref={scrollRef} data-testid="message-timeline" role="log" aria-label="消息时间线" aria-live="polite" onScroll={onScroll}
         className="cirrus-history scroll-thin relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="cirrus-thread relative flex min-h-full flex-col justify-end pb-3">
+        <div className="chat-column cirrus-thread relative flex min-h-full flex-col justify-end pb-3">
           {loading ? <LoadingRows /> : rows.length === 0 ? (
             <EmptyState className="my-auto" icon={<MessageCircle />} title="这里还很安静" description="发送第一条消息开始聊天。" />
           ) : hasLayout ? (
             <div ref={listRef} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
               {virtualItems.map((item) => (
                 <div key={item.key} data-index={item.index} data-cirrus-row={rows[item.index].messageId} ref={virtualizer.measureElement}
-                  className={cn('absolute left-0 top-0 w-full', positions[item.index].first ? 'pt-2' : 'pt-1')}
+                  className={cn('absolute left-0 top-0 w-full', positions[item.index].first ? 'pt-4' : 'pt-1')}
                   style={{ transform: `translateY(${item.start - virtualizer.options.scrollMargin}px)` }}>
                   <div className="cirrus-row-content">{renderRow(rows[item.index], item.index)}</div>
                 </div>

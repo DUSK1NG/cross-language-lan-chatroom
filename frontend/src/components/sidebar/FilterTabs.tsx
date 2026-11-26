@@ -12,12 +12,12 @@ const tabs: { value: ConversationFilter; label: string }[] = [
 export function FilterTabs({ value, onValueChange, counts }: { value: ConversationFilter; onValueChange: (value: ConversationFilter) => void; counts?: Partial<Record<ConversationFilter, number>> }) {
   return (
     <TabsPrimitive.Root value={value} onValueChange={(next) => onValueChange(next as ConversationFilter)}>
-      <TabsPrimitive.List aria-label="会话筛选" className="conversation-filter relative isolate mx-3 mb-2 grid grid-cols-3 rounded-md border border-divider bg-bg/65 p-0.5">
+      <TabsPrimitive.List aria-label="会话筛选" className="conversation-filter relative isolate mx-3 mb-2 grid grid-cols-3 gap-1">
         {tabs.map((tab) => {
           const count = counts?.[tab.value];
           return (
             <TabsPrimitive.Trigger key={tab.value} value={tab.value}
-              className="press flex h-8 cursor-pointer items-center justify-center gap-1 rounded-sm text-body font-medium text-ink-2 hover:text-ink aria-selected:text-accent-text">
+              className="press flex h-7 cursor-pointer items-center justify-center gap-1 rounded-md text-small font-medium text-ink-3 hover:bg-hover hover:text-ink aria-selected:font-semibold aria-selected:text-ink">
               {tab.label}
               {count ? <span className="num text-small text-ink-3">{count}</span> : null}
             </TabsPrimitive.Trigger>

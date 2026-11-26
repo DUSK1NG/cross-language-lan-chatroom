@@ -3,6 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type AccentPreset = 'blue' | 'green' | 'violet' | 'orange' | 'rose';
 export type SizePreference = 'small' | 'medium' | 'large';
+export type NewTextMotion = 'fade' | 'instant';
+export type BubbleMotion = 'grow' | 'fly';
+export type ScrollMotion = 'smooth' | 'jump';
 
 export type AppSettings = {
   showSendTime: boolean;
@@ -10,14 +13,23 @@ export type AppSettings = {
   accent: AccentPreset;
   messageSize: SizePreference;
   bubbleRadius: SizePreference;
+  newText: NewTextMotion;
+  bubbleMotion: BubbleMotion;
+  scrollMotion: ScrollMotion;
 };
 
 const STORAGE_KEY = 'lan-chat.settings';
 const SETTINGS_EVENT = 'lan-chat-settings-changed';
-const defaults: AppSettings = { showSendTime: true, theme: 'system', accent: 'blue', messageSize: 'medium', bubbleRadius: 'medium' };
+const defaults: AppSettings = {
+  showSendTime: true, theme: 'system', accent: 'orange', messageSize: 'medium', bubbleRadius: 'medium',
+  newText: 'fade', bubbleMotion: 'fly', scrollMotion: 'smooth'
+};
 const themes: ThemePreference[] = ['system', 'light', 'dark'];
 export const accentPresets: AccentPreset[] = ['blue', 'green', 'violet', 'orange', 'rose'];
 const sizes: SizePreference[] = ['small', 'medium', 'large'];
+const newTextMotions: NewTextMotion[] = ['fade', 'instant'];
+const bubbleMotions: BubbleMotion[] = ['grow', 'fly'];
+const scrollMotions: ScrollMotion[] = ['smooth', 'jump'];
 
 /** Drops unknown values from storage so a hand-edited or older entry cannot break the UI. */
 function sanitize(settings: AppSettings): AppSettings {
@@ -26,7 +38,10 @@ function sanitize(settings: AppSettings): AppSettings {
     theme: themes.includes(settings.theme) ? settings.theme : defaults.theme,
     accent: accentPresets.includes(settings.accent) ? settings.accent : defaults.accent,
     messageSize: sizes.includes(settings.messageSize) ? settings.messageSize : defaults.messageSize,
-    bubbleRadius: sizes.includes(settings.bubbleRadius) ? settings.bubbleRadius : defaults.bubbleRadius
+    bubbleRadius: sizes.includes(settings.bubbleRadius) ? settings.bubbleRadius : defaults.bubbleRadius,
+    newText: newTextMotions.includes(settings.newText) ? settings.newText : defaults.newText,
+    bubbleMotion: bubbleMotions.includes(settings.bubbleMotion) ? settings.bubbleMotion : defaults.bubbleMotion,
+    scrollMotion: scrollMotions.includes(settings.scrollMotion) ? settings.scrollMotion : defaults.scrollMotion
   };
 }
 
@@ -72,7 +87,10 @@ export function useAppearanceAttributes(settings: AppSettings) {
     root.dataset.accent = settings.accent;
     root.dataset.messageSize = settings.messageSize;
     root.dataset.bubbleRadius = settings.bubbleRadius;
-  }, [settings.accent, settings.messageSize, settings.bubbleRadius]);
+    root.dataset.newText = settings.newText;
+    root.dataset.bubbleMotion = settings.bubbleMotion;
+    root.dataset.scrollMotion = settings.scrollMotion;
+  }, [settings.accent, settings.messageSize, settings.bubbleRadius, settings.newText, settings.bubbleMotion, settings.scrollMotion]);
 }
 
 /**

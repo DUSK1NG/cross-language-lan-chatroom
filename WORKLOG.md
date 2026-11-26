@@ -10,6 +10,7 @@
 3. 不写聊天内容、私钥、token、证书私钥内容；只写路径与结论。
 4. 本文件纳入 Git（不要加进 .gitignore）。收工前跑 `git status --short` 并把要点写进条目。
 5. 超过约 300 行时，把最早的条目移到 `docs/archive/worklog-YYYY.md`，本文件保留链接。
+6. 每次完成一项项目修改后，主代理把改动范围与验证结果交给 gpt-6-luna 子代理，由其在日志顶部记录，主代理核对；工作日志写入本身无需递归触发。
 
 ## 接手摘要（更新：2026-11-23 19:18）
 
@@ -53,6 +54,118 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 - 机器时区 Asia/Taipei，日志时间用本地时间。
 
 ## 日志
+
+### 2026-11-26 11:35 — 桌面动效播放
+
+- 执行者：Codex。
+- 改动：`frontend/src/styles/app.css`、`App.tsx`、`MessageList.tsx` 和 `EmojiPopover.tsx` 按应用内动效与性能设置播放过渡和滚动。
+- 验证：Edge 实测搜索、菜单、表情和消息的动画时长。Lint、191 项测试、前端构建和 Windows Release 隔离启动与退出通过。
+- 后续：本地工作区 `stage/1.4-candidate` 保留此次改动。本轮无待拍板事项。
+
+### 2026-11-26 11:29 — 聊天搜索、气泡与表情分类交互
+
+- 执行者：Codex。
+- 改动：`frontend/src/components/chat/ChatHeader.tsx` 为搜索框和按钮添加过渡。窄窗展开搜索时让出标题区域。`MessageBubble.tsx` 将悬停和文字选择起点收进气泡。`frontend/src/components/composer/EmojiPopover.tsx` 为分类指示条和网格切换应用动效。
+- 验证：Lint、191 项测试、前端构建与 Windows Release 隔离启动退出通过。Edge 在宽窗和 375 px 窄窗验证搜索与焦点，检查气泡拖选、操作栏、右键选中、表情的鼠标与键盘切换以及减少动态效果。
+- 后续：本地工作区 `stage/1.4-candidate` 保留此次改动。本轮无待拍板事项。
+
+### 2026-11-26 10:51 — 桌面聊天界面排版与动效
+
+- 执行者：Codex。
+- 改动：`frontend/src/app/WorkspacePage.tsx` 与 `frontend/src/styles/` 对齐聊天内容列和输入框，调整字体与过渡。会话行采用 48 px 高度，输入框随窗口宽度重新计算草稿行数。
+- 验证：前端构建、Lint、191 项测试通过。Edge 六档宽度和 Chrome 两档宽度验证内容列对齐。Edge 复核菜单键盘操作、减少动态效果、消息淡入、模拟发送和草稿重排。局域网版离线 Release 构建与隔离 WebView2 启动、退出通过。
+- 后续：本地工作区 `stage/1.4-candidate` 保留此次改动和原有修改。原生聊天交互验收待安装时执行。本轮无待拍板事项。
+
+### 2026-11-26 09:37 — 桌面双版 1.4.0 更新
+
+- 执行者：Codex。
+- 改动：复核桌面主题、动效和 IME；`frontend/src/components/chat/MessageList.tsx` 修正减少动态效果与省电模式下的平滑滚动，补对应测试；`frontend/src/preview.tsx` 修正 lint 误报。
+- 验证：前端 lint、191 项测试、版本一致性与 4 项版本测试通过；Rust server/client-core 回归（含 heartbeat、`lan_desktop`）通过。LAN 与 Online 1.4.0 安装包均通过 WebView2 冒烟和 Inno 原位更新；LAN 从 1.3.0 升级（含房主程序），Online 同版更新。原快捷方式启动确认 LAN 房主入口及 Online 注册账号按钮。
+- 范围与后续：仅本机。安装程序备份 `%LOCALAPPDATA%/Temp/LANChat-desktop-backup-20261126`。真实双机收发未验证；Online 正式自动更新验签公钥未配置。阻塞/拍板：无。
+
+### 2026-11-25 23:28 — Android 会话打开体验
+
+- 执行者：Codex。Android 的推送注册成功回执在后台处理。
+- 验证：离线构建通过，使用原签名覆盖安装。真机冷启动并打开 AstrBot 会话，历史消息和输入框正常显示。
+
+### 2026-11-25 23:20 — 桌面机器人设置候选菜单
+
+- 执行者：Codex。
+- 改动：`frontend/src/app/BotSettingsSection.tsx` 和 `frontend/src/components/ui/menu.tsx` 接入应用内菜单。读取时显示所有候选，并标记当前编号。菜单优先向上展开，长列表使用应用的滚动条样式。
+- 验证：Windows 隔离构建及 189 项前端测试通过。已覆盖更新本机在线版并从原快捷方式启动。实测三个人格全量显示、可切换，窗口底部通过 Esc 和方向键重开也能完整显示。
+
+### 2026-11-25 22:56 — AstrBot OpenAPI Key 同账号同步
+
+- 执行者：Codex。
+- 改动：在线服协商 `online-bot-key-sync-v1`，SQLite 迁移到 5 并用 AES-256-GCM 保存 OpenAPI Key。密文绑定账号和 AstrBot 地址。Windows 在线版及 Android 打开机器人设置时同步密钥。
+- 验证：`cargo test --offline --locked -p lan-chat-server -p lan-chat-client-core` 通过。隔离 Windows 构建及 189 项前端测试通过。Android 使用原签名覆盖成功。Android 和 Windows 同账号自动载入密钥并读取 `deepseek-flash`。生产副本 TLS 联调覆盖旧版兼容、账号隔离、并发冲突和地址变更。生产服务更新后 TLS 与 SQLite 完整性通过。
+- 范围：已更新本机 Windows 在线版、Android 真机和生产在线服。生产回滚备份 `/var/backups/lan-chat-online/bot-key-sync.R3vnfIIr/`。
+
+### 2026-11-25 17:12 — 补充升级清单验收与日志记录规则
+
+- 执行者：记录子代理。
+- 改动：在 `docs/plans/2026-11-23-v1.4-plus-hardening-plan.md` 增加六项后续升级方向及逐项验收条件；在本文件记录规则中明确项目修改完成后由主代理交接改动范围和验证结果、gpt-6-luna 记入日志顶部并由主代理核对，日志写入不递归触发。
+- 验证：核对计划文档差异，六个方向均列出操作和验收条件；`git diff --check` 通过。
+- 下一步：主代理核对本条记录。
+- 阻塞/拍板：无。
+
+### 2026-11-25 17:06 — 本机安装机器人设置候选
+
+- Windows 在线版从 1.3.0 覆盖到 1.4.0。Inno 安装成功，原桌面快捷方式启动新版并显示在线登录页。
+- Android 0.4.0 使用手机上原包的调试签名覆盖。账号登录状态保留，真机已打开「设置 → 机器人设置」并确认 AstrBot 地址和 OpenAPI Key 字段。
+- 原 Windows 程序文件及 Android APK 备份保存在 `%TEMP%\LANChat-local-update-20261125090210`。
+
+### 2026-11-25 — Windows 与 Android 机器人设置
+
+- 执行者：Codex。
+- 改动：Windows 在线版和 Android 增加机器人设置，通过 AstrBot OpenAPI 读取、新建和编辑模型源、模型及人格。在线 SQLite `user_version=4` 保存每个账号的 AstrBot 地址与配置编号，版本检查防止旧设置覆盖更新。模型 API Key 直接提交给 AstrBot，OpenAPI Key 在各端单独填写。使用步骤见 [AstrBot 手动接入](docs/release-runbook.md#astrbot-手动接入)。
+- 验证：Rust 工作区构建和测试、桌面前端构建和回归通过。在线 TLS 回环验证同账号同步、旧版本保存冲突和账号隔离，AstrBot 4.29.4 HTTPS 接口模拟覆盖读写、密钥保留和拒绝重定向。Android 调试 APK 复用现有 JNI、资源和字体压缩产物打包，已核对 APK 中包含新代码和 ARM64 JNI。
+- 范围：`stage/1.4-candidate` 本地工作区。真实 AstrBot 实例、Android 真机和生产环境待联调。
+
+### 2026-11-25 — AstrBot 用户配置模型和内容
+
+- 执行者：Codex。
+- 改动：`integrations/astrbot_plugin_lan_chat/main.py` 负责消息接入。使用者在 AstrBot WebUI 配置模型服务、API 信息、人设、提示词和工具，入口见 [手动接入说明](docs/release-runbook.md#astrbot-手动接入)。
+- 验证：源码语法检查通过。线上 AstrBot 运行环境成功导入新适配器并读取现有接入配置。原适配器备份在 `/var/backups/lan-chat-online/v1.4.0-H8K06wDp/astrbot-before-user-settings.py`。
+
+### 2026-11-25 — 线上服务端 1.4.0 和 AstrBot 手动启用
+
+- 执行者：Codex。
+- 改动：服务端继承工作区发布版本。AstrBot 适配器由用户填写连接信息和账号后手动启用。线上 AstrBot 服务已停止并取消开机启动，原配置保留。
+- 验证：Windows 和 Linux 服务端均显示 `1.4.0`。Linux 单元、心跳和隔离网络 LAN 集成测试通过。生产副本迁移、旧版恢复、候选 TLS 群聊与私信通过。已验证线上服务版本、Windows 到生产的 TLS 登录响应及 SQLite 完整性。已用现有 AstrBot 运行环境导入适配器并验证保存配置可用。
+- 备份保存在服务器 `/var/backups/lan-chat-online/v1.4.0-H8K06wDp/`。Wi-Fi 与移动网络实切结果按用户确认记录，详见 [验收记录](docs/release-acceptance.md#线上服务端-140)。
+
+### 2026-11-25 — Android 真实 FCM 送达
+
+- 执行者：Codex。
+- 验证：小米 14 Pro 的隔离包完成 FCM 设备注册。候选服务端发送的后台私信和锁屏群消息均进入 Android 通知列表。点击两条通知分别打开对应私信和群聊，隔离包的 ADB 崩溃日志为 0 条。
+- 测试服务、USB 转发、手机隔离包和测试设备的推送登记已清理。Wi-Fi 与移动网络实切待验证。详见 [发布前验收](docs/release-acceptance.md#android-真机补充验收)。
+
+### 2026-11-25 — Firebase 隔离测试配置
+
+- 执行者：Codex。
+- 验证：通过 Google Cloud CLI 创建独立 Firebase 测试项目，注册 Android 隔离包并配置测试发信服务账号。隔离包通过构建、包名及签名校验。候选服务端成功读取测试凭据并在本机回环地址启动，FCM HTTP v1 接受仅校验请求。
+- 下一步：手机重新接入 ADB 后，验证后台和锁屏收件。结果记录在 [发布前验收](docs/release-acceptance.md#android-真机补充验收)。
+
+### 2026-11-25 — LAN 更新签名配置
+
+- 执行者：Codex。
+- 验证：使用 Tauri 2.12.6 生成 LAN 更新签名，完成本地试签。GitHub 的 `release` 环境设置仓库所有者审批，已配置 LAN 更新公钥变量和两项签名 Secrets。通过 GitHub API 核对审批人、Secret 名称和公钥。
+- Android：旧 APK 的证书与本机默认 Android 调试 keystore 一致。正式签名方案待定，FCM 继续使用隔离测试项目。
+
+### 2026-11-24 16:26 — Android 真机补充验收
+
+- 执行者：Codex。
+- 验证：小米 14 Pro 的同签名调试版通过 `adb install -r` 从 0.3.3-rust 原位升级至 0.4.0。通过 `dumpsys package` 核对安装版本、通知权限和原用户数据目录。隔离服务下复核私信、群消息、图片和文件双向收发，分块文件与源文件一致。群历史翻页、邀请、管理员任免、群主转让、退群、重连以及通知跳转和权限开关均通过。候选包及隔离包的 ADB 崩溃日志均为 0 条。
+- 结果记录在 [发布前验收](docs/release-acceptance.md#android-真机补充验收)。临时测试包、手机测试文件和 USB 转发已清理。分支仍为 `stage/1.4-candidate` 的 `1c3ca6d`，验收记录保存在本地。
+- 下一步：Wi-Fi 与移动网络实切仍待验证。后台和锁屏实际 FCM 投递需隔离测试项目凭据。
+
+### 2026-11-24 — 1.4 候选验收与 LAN 草稿
+
+- 执行者：Codex。
+- 验证：`stage/1.4-candidate` 的 `1c3ca6d` 通过五项干净 CI。用实际 1.3 在线库验证迁移、旧附件读取和备份恢复。两版隔离 Windows 环境完成 1.4.0 到 1.4.1 签名升级、跨版拒绝及卸载设置保留。Android 0.4.0 ARM64 调试包与旧 0.3.3 调试包签名证书一致。
+- 验收范围：用户批准跳过 LAN 双机，Windows 采用隔离安装验收，Android 采用本机 APK 验收。在线附件上限为图片 4 MiB、文件 32 MiB。
+- 交付：草稿仅含 `LANChat-Desktop-Windows-x64.zip`，实际 ZIP 内为客户端、房主服务端、图标与说明。[候选验收记录](docs/release-acceptance.md#140-候选验收范围)
 
 ### 2026-11-24 — 1.4 完整候选的本机验证
 

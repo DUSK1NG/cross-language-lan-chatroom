@@ -9,8 +9,8 @@ import { cn } from '../../lib/cn';
 export function Switch({ checked, onCheckedChange, label, disabled }: { checked: boolean; onCheckedChange: (checked: boolean) => void; label: string; disabled?: boolean }) {
   return (
     <SwitchPrimitive.Root checked={checked} onCheckedChange={onCheckedChange} aria-label={label} disabled={disabled}
-      className="relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full bg-input transition-ui transition-colors data-[state=checked]:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50">
-      <SwitchPrimitive.Thumb className="block size-4 translate-x-1 rounded-full bg-ink transition-transform transition-ui data-[state=checked]:translate-x-5 data-[state=checked]:bg-on-accent" />
+      className="relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full bg-[var(--text-3)] transition-ui transition-colors data-[state=checked]:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50">
+      <SwitchPrimitive.Thumb className="block size-4 translate-x-1 rounded-full bg-white shadow-sm transition-transform transition-ui data-[state=checked]:translate-x-5" />
     </SwitchPrimitive.Root>
   );
 }
@@ -24,7 +24,7 @@ export function SegmentedRadio<T extends string>({ value, onValueChange, options
       className="inline-flex rounded-md bg-input p-1 gap-1">
       {options.map((option) => (
         <RadioGroupPrimitive.Item key={option.value} value={option.value} aria-label={option.label}
-          className="press inline-flex h-8 cursor-pointer items-center gap-2 rounded-sm px-3 text-small text-ink-2 hover:text-ink data-[state=checked]:bg-active data-[state=checked]:text-on-accent">
+          className="press inline-flex h-8 cursor-pointer items-center gap-2 rounded-sm px-3 text-small text-ink-2 hover:text-ink data-[state=checked]:bg-active data-[state=checked]:font-medium data-[state=checked]:text-ink">
           {option.swatch && <span aria-hidden="true" className="size-3 rounded-full" style={{ background: `var(${option.swatch})` }} />}
           {option.label}
         </RadioGroupPrimitive.Item>
@@ -45,7 +45,7 @@ export function Select({ value, onValueChange, options, label }: { value: string
         <SelectPrimitive.Icon><ChevronDown size={16} className="text-ink-2" aria-hidden="true" /></SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
-        <SelectPrimitive.Content position="popper" sideOffset={4} className="menu-surface surface-glass z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md p-1 shadow-dialog">
+        <SelectPrimitive.Content position="popper" sideOffset={4} className="menu-surface surface-glass z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-[10px] border border-divider bg-sidebar p-1 shadow-dialog">
           <SelectPrimitive.Viewport>
             {options.map((option) => (
               <SelectPrimitive.Item key={option.value} value={option.value}

@@ -59,6 +59,20 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled();
   });
 
+  it('never sends the raw pinyin while the IME is composing', () => {
+    const bridge = new ControllableBridge();
+    render(<MessageComposer state={connectedRoomState} bridge={bridge} draft="ni" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);
+    const textarea = screen.getByLabelText('消息输入框');
+
+    fireEvent.compositionStart(textarea);
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    expect(bridge.commands).toHaveLength(0);
+
+    fireEvent.compositionEnd(textarea, { target: { value: '内容' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    expect(bridge.commands).toHaveLength(1);
+  });
+
   it('keeps a failed send draft and reports the error', () => {
     const bridge = new ControllableBridge();
     render(<MessageComposer state={connectedRoomState} bridge={bridge} draft="retry" onDraftChange={vi.fn()} onCommandResult={vi.fn()} />);

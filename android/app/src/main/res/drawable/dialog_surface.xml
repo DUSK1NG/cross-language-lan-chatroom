@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/dialog_surface" />
+    <corners android:radius="14dp" />
+    <padding android:left="24dp" android:top="20dp" android:right="24dp" android:bottom="16dp" />
+</shape>

@@ -15,7 +15,7 @@ export const currentRelease: ReleaseNotes = {
   codename: '开发版',
   date: '2026-11-23',
   headline: 'LAN Chat 1.4 开发版',
-  summary: '局域网与在线版的开发和兼容性测试版本。',
+  summary: '局域网与远程连接的开发和兼容性测试版本。',
   sections: [
     {
       kind: 'new',

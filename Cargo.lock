@@ -2752,6 +2752,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
+ "ureq",
 ]
 
 [[package]]
@@ -2773,7 +2774,7 @@ dependencies = [
 
 [[package]]
 name = "lan-chat-server"
-version = "0.1.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2795,6 +2796,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "ureq",
+ "url",
  "uuid",
 ]
 

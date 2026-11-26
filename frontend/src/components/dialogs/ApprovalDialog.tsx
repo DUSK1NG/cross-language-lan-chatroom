@@ -73,12 +73,12 @@ export function ApprovalDialog({ open, onOpenChange, requests, onResolve, now = 
               return (
                 <motion.li key={request.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: expired ? 0.5 : 1, y: 0 }} exit={{ opacity: 0 }}
                   transition={{ duration: 0.2, ease }}
-                  className={cn('connection-approval-item rounded-md border border-divider bg-bg p-4', expired && 'grayscale')}>
+                  className={cn('connection-approval-item rounded-[10px] border border-divider bg-sidebar p-3.5', expired && 'grayscale')}>
                   <div className="flex items-center gap-3">
-                    <Avatar name={request.displayName} seed={request.userCode} size={48} ringClass="ring-bg" />
+                    <Avatar name={request.displayName} seed={request.userCode} size={36} ringClass="ring-sidebar" />
                     <div className="flex min-w-0 flex-1 flex-col">
-                      <strong className="truncate text-name font-semibold text-ink">{request.displayName}#{request.userCode}</strong>
-                      <span className="num text-small text-ink-2">
+                      <strong className="truncate text-body font-medium text-ink">{request.displayName}#{request.userCode}</strong>
+                      <span className="num text-small text-ink-3">
                         用户代码 {request.userCode} · {formatRequestTime(request.requestedAt)}
                       </span>
                     </div>

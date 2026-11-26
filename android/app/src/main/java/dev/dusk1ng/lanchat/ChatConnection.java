@@ -103,7 +103,7 @@ final class ChatConnection implements Closeable {
         request.put("account_password", password);
         if (code != null) request.put("user_code", code);
         request.put("capabilities", new JSONArray().put("online-group-management-v1")
-                .put("online-group-attachments-v1"));
+                .put("online-group-attachments-v1").put("online-bot-settings-v1").put("online-bot-key-sync-v1"));
         send(request);
         JSONObject response = receive();
         if (!response.getString("type").equals("login_ok")) {

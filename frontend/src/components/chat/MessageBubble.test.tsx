@@ -89,7 +89,7 @@ describe('MessageBubble', () => {
     expect(quote.nextElementSibling).toBe(body);
     expect(bubble.firstElementChild).toBe(quote);
     const metadata = item.querySelector<HTMLElement>('.message-meta')!;
-    expect(bubble.previousElementSibling).toBe(metadata);
+    expect(metadata.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(bubble).not.toContainElement(metadata);
     expect(within(metadata).getByText('10:01')).toHaveAttribute('datetime', createdAt);
     expect(within(metadata).getByLabelText('投递状态：delivered')).toBeInTheDocument();

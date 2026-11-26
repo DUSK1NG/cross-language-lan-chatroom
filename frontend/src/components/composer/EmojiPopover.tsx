@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, useIsPresent } from 'framer-motion';
 
-import { ease, easeExit, scaled } from '../../lib/motion';
+import { duration, ease, easeExit, effectsDisabled, scaled } from '../../lib/motion';
 import { Skeleton } from '../ui/states';
 
 type EmojiPopoverProps = { onSelect: (emoji: string) => void; onClose: (restoreFocus: boolean) => void; theme: 'dark' | 'light' };
@@ -21,6 +21,8 @@ export function EmojiPopover({ onSelect, onClose, theme }: EmojiPopoverProps) {
   useEffect(() => {
     let cancelled = false;
     let picker: HTMLElement | null = null;
+    let categoryMotion: Animation | undefined;
+    const categoryEvents = new AbortController();
     void Promise.all([import('emoji-mart'), import('@emoji-mart/data'), import('@emoji-mart/data/i18n/zh.json')]).then(([{ Picker }, data, zh]) => {
       if (cancelled || !hostRef.current) return;
       picker = new Picker({
@@ -36,8 +38,8 @@ export function EmojiPopover({ onSelect, onClose, theme }: EmojiPopoverProps) {
         autoFocus: true,
         onEmojiSelect: (emoji: { native: string }) => selectRef.current(emoji.native)
       }) as unknown as HTMLElement;
-      const pressStyles = document.createElement('style');
-      pressStyles.textContent = `
+      const pickerStyles = document.createElement('style');
+      pickerStyles.textContent = `
         button:not(:disabled), #nav button:not(:disabled) {
           transition: scale var(--press-duration, var(--dur-press-release)) var(--press-ease, var(--ease-spring)),
             color var(--dur-hover) var(--ease);
@@ -47,12 +49,32 @@ export function EmojiPopover({ onSelect, onClose, theme }: EmojiPopoverProps) {
           --press-duration: var(--dur-press);
           --press-ease: ease-out;
         }
+        #nav .bar {
+          transition: transform var(--emoji-category-duration) var(--ease),
+            opacity var(--emoji-category-duration) var(--ease);
+        }
       `;
-      picker.shadowRoot?.append(pressStyles);
+      const shadow = picker.shadowRoot;
+      if (!shadow) throw new Error('Emoji picker did not create its shadow root');
+      shadow.append(pickerStyles);
+      shadow.addEventListener('click', (event) => {
+        const tab = event.target instanceof Element ? event.target.closest('#nav button') : null;
+        if (!tab || tab.getAttribute('aria-selected') === 'true' || effectsDisabled()) return;
+        const grid = shadow.querySelector('.scroll');
+        if (!grid) throw new Error('Emoji picker category grid is unavailable');
+        categoryMotion?.cancel();
+        categoryMotion = grid.animate([{ opacity: 0.55, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
+          { duration: scaled(duration.surface) * 1000, easing: `cubic-bezier(${ease.join(',')})` });
+      }, { capture: true, signal: categoryEvents.signal });
       hostRef.current.appendChild(picker);
       setLoaded(true);
     });
-    return () => { cancelled = true; picker?.remove(); };
+    return () => {
+      cancelled = true;
+      categoryEvents.abort();
+      categoryMotion?.cancel();
+      picker?.remove();
+    };
   }, [theme]);
 
   useEffect(() => {
@@ -70,9 +92,9 @@ export function EmojiPopover({ onSelect, onClose, theme }: EmojiPopoverProps) {
   return (
     <motion.div role="dialog" aria-label="表情选择器" inert={!isPresent} aria-hidden={!isPresent || undefined}
       initial={{ opacity: 0, y: 6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 6, scale: 0.97, transition: { duration: scaled(0.13), ease: easeExit } }}
-      transition={{ duration: scaled(0.2), ease }}
-      className="surface-glass absolute bottom-full right-0 z-30 mb-2 origin-bottom-right overflow-hidden rounded-card shadow-dialog">
+      exit={{ opacity: 0, y: 6, scale: 0.97, transition: { duration: scaled(duration.exit), ease: easeExit } }}
+      transition={{ duration: scaled(duration.open), ease, opacity: { duration: scaled(duration.surface), ease } }}
+      className="surface-glass absolute bottom-full right-0 z-30 mb-2 origin-bottom-right overflow-hidden rounded-[12px] border border-divider bg-sidebar shadow-dialog">
       {!loaded && <div className="flex h-[360px] w-[352px] flex-col gap-2 p-4"><Skeleton className="h-9 w-full" /><Skeleton className="h-full w-full" /></div>}
       <div ref={hostRef} className="emoji-host" />
     </motion.div>

@@ -11,13 +11,13 @@ import { cn } from '../lib/cn';
 export type ConnectionMode = 'remote' | 'guest' | 'tunnel';
 const discoveryRefreshIntervalMs = 3000;
 
-const inputClass = 'h-10 w-full min-w-0 rounded-md border border-transparent bg-input px-3 text-body text-ink outline-none transition-ui transition-colors placeholder:text-ink-3 focus:border-accent';
+const inputClass = 'h-10 w-full min-w-0 rounded-[8px] border-[0.5px] border-divider bg-input px-3 text-body text-ink outline-none transition-ui transition-colors placeholder:text-ink-3 focus:border-accent';
 
 /** Centred page used by every pre-workspace screen. */
 function PageFrame({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
     <main className="scroll-thin flex h-full w-full justify-center overflow-y-auto px-4 py-8 text-ink">
-      <section className={cn('surface-glass my-auto flex w-full flex-col gap-4 rounded-[24px] p-6 shadow-dialog', wide ? 'max-w-[760px]' : 'max-w-[520px]')}>
+      <section className={cn('my-auto flex w-full flex-col gap-5 rounded-[14px] border-[0.5px] border-divider bg-sidebar p-6', wide ? 'max-w-[720px]' : 'max-w-[460px]')}>
         {children}
       </section>
     </main>
@@ -64,39 +64,38 @@ export function ModeSelectionPage({ onRemote, onGuest, onTunnel, onLocalHost, ho
     { label: 'tunnel-mode', icon: <Cable size={20} />, title: '通过 TCP 隧道加入', copy: '使用外部隧道提供的地址、端口和公开证书', onClick: onTunnel }
   ];
   return (
-    <PageFrame wide>
-      <div className="grid gap-6 min-[760px]:grid-cols-[1fr_1.2fr]">
-        <section aria-label="LAN Chat 简介" className="flex flex-col justify-center gap-5 rounded-card bg-bg/70 p-6">
-          <img src={catBrandMark} alt="" className="size-16 rounded-[20px] shadow-float" />
-          <div className="flex flex-col gap-1">
-            <p className="text-[25px] font-semibold tracking-tight">LAN Chat</p>
-          </div>
-          <ul className="flex flex-col gap-3 text-small text-ink-2">
-            <li className="flex items-center gap-2"><ShieldCheck size={16} aria-hidden="true" className="text-accent-text" />TLS 传输 · 证书指纹校验</li>
-            <li className="flex items-center gap-2"><Lock size={16} aria-hidden="true" className="text-accent-text" />MLS 端到端加密频道与附件</li>
-            <li className="flex items-center gap-2"><Users size={16} aria-hidden="true" className="text-accent-text" />房主审批每一次成员连接</li>
-          </ul>
-        </section>
-        <section className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-title font-semibold">选择聊天方式</h1>
-          </div>
-          <div className="flex flex-col gap-2">
+    <main className="scroll-thin flex h-full w-full justify-center overflow-y-auto bg-bg px-6 py-10 text-ink">
+      <section aria-label="LAN Chat" className="my-auto flex w-full max-w-[400px] flex-col gap-7">
+        <header className="flex items-center gap-3">
+          <img src={catBrandMark} alt="" className="size-11 rounded-[12px]" />
+          <span className="flex min-w-0 flex-col">
+            <span className="text-[20px] font-semibold leading-tight tracking-tight">LAN Chat</span>
+            <span className="text-small text-ink-2">本地网络聊天 · 端到端加密</span>
+          </span>
+        </header>
+        <ul className="flex flex-col gap-2 text-small text-ink-2">
+          <li className="flex items-center gap-2"><ShieldCheck size={14} aria-hidden="true" className="shrink-0 text-ink-3" />TLS 传输 · 证书指纹校验</li>
+          <li className="flex items-center gap-2"><Lock size={14} aria-hidden="true" className="shrink-0 text-ink-3" />MLS 端到端加密频道与附件</li>
+          <li className="flex items-center gap-2"><Users size={14} aria-hidden="true" className="shrink-0 text-ink-3" />房主审批每一次成员连接</li>
+        </ul>
+        <div className="flex flex-col gap-2">
+          <h1 className="px-1 text-small font-medium text-ink-3">选择聊天方式</h1>
+          <div className="overflow-hidden rounded-[12px] border-[0.5px] border-divider bg-sidebar">
             {(lanOnly ? cards.slice(0, 2) : cards).map((card) => (
               <button key={card.label} type="button" aria-label={card.label} onClick={card.onClick} disabled={card.disabled}
-                className="press group flex min-h-16 cursor-pointer items-center gap-3 rounded-md border border-divider bg-bg/70 px-4 py-3 text-left hover:border-control hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50">
-                <span aria-hidden="true" className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-text">{card.icon}</span>
+                className="press group flex min-h-[58px] w-full cursor-pointer items-center gap-3 border-t border-divider px-3.5 py-2.5 text-left transition-colors first:border-t-0 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50">
+                <span aria-hidden="true" className="shrink-0 text-ink-3">{card.icon}</span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <strong className="text-body font-medium text-ink">{card.title}</strong>
-                  <span className="text-small text-ink-2">{card.copy}</span>
+                  <span className="text-small leading-snug text-ink-3">{card.copy}</span>
                 </span>
-                <ArrowRight size={16} aria-hidden="true" className="shrink-0 text-ink-3 transition-transform transition-ui group-hover:translate-x-1" />
+                <ArrowRight size={15} aria-hidden="true" className="shrink-0 text-ink-3 transition-transform transition-ui group-hover:translate-x-0.5" />
               </button>
             ))}
           </div>
-        </section>
-      </div>
-    </PageFrame>
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -121,10 +120,11 @@ export function OnlineAccountPage({ bridge, state }: { bridge: ChatBridgeClient;
   }), [bridge]);
 
   return (
-    <PageFrame>
+    <main className="scroll-thin flex h-full w-full justify-center overflow-y-auto bg-bg px-6 py-10 text-ink">
+      <section aria-label={register ? '创建账号' : '登录'} className="my-auto flex w-full max-w-[380px] flex-col gap-6">
       <header className="flex items-center gap-3">
-        <img src={catBrandMark} alt="" className="size-10 rounded-md" />
-        <h1 className="text-title font-semibold">{register ? '注册在线账号' : '登录 LAN Chat 在线版'}</h1>
+        <img src={catBrandMark} alt="" className="size-10 rounded-[10px]" />
+        <h1 className="text-[20px] font-semibold tracking-tight">{register ? '创建账号' : '登录'}</h1>
       </header>
       <form className="flex flex-col gap-4" onSubmit={(event) => {
         event.preventDefault();
@@ -151,14 +151,15 @@ export function OnlineAccountPage({ bridge, state }: { bridge: ChatBridgeClient;
           required value={password} disabled={busy} onChange={(event) => setPassword(event.target.value)} />
         {register && <p className="text-small text-ink-2">密码为 8–72 个 UTF-8 字节。其他人可通过用户代码发起私信。</p>}
         {error ? <p role="alert" className="text-small text-danger-text">{error}</p> : state.connection.phase !== 'idle' && <ConnectionStatus state={state} />}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" disabled={busy} onClick={() => {
+        <div className="flex flex-col gap-2 pt-1">
+          <Button variant="primary" type="submit" className="w-full" disabled={!valid || busy}>{register ? '注册并登录' : '登录'}</Button>
+          <Button variant="ghost" className="w-full" disabled={busy} onClick={() => {
             setError(''); setPassword(''); setRegister(!register);
           }}>{register ? '返回登录' : '注册账号'}</Button>
-          <Button variant="primary" type="submit" disabled={!valid || busy}>{register ? '注册并登录' : '登录'}</Button>
         </div>
       </form>
-    </PageFrame>
+      </section>
+    </main>
   );
 }
 
@@ -279,8 +280,8 @@ export function RemoteConnectionPage({ bridge, state, mode, onBack }: {
                 return (
                   <button key={host.id} type="button" aria-label={`select-lan-host-${host.hostName}`} aria-pressed={selected}
                     onClick={() => selectHost(host.id)} disabled={busy}
-                    className={cn('press flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left', selected ? 'bg-active text-on-accent' : 'hover:bg-hover')}>
-                    <Server size={20} aria-hidden="true" className={selected ? 'text-on-accent' : 'text-accent-text'} />
+                    className={cn('press flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left', selected ? 'bg-active font-medium text-ink' : 'hover:bg-hover')}>
+                    <Server size={20} aria-hidden="true" className={selected ? 'text-ink' : 'text-accent-text'} />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <strong className="truncate text-body font-medium">{host.hostName}</strong>
                       <small className={cn('num text-small', selected ? 'text-on-active-2' : 'text-ink-2')}>{host.serverIp}:{host.serverPort}</small>

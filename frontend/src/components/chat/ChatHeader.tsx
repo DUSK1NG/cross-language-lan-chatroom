@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { motion, useAnimationControls } from 'framer-motion';
 import { ArrowLeft, Lock, MoreVertical, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Users, X } from 'lucide-react';
 
@@ -24,7 +24,7 @@ type ChatHeaderProps = {
   onBack?: () => void;
 };
 
-/** 56px header (spec §4): avatar · name · subtitle, then search / approvals / more. */
+/** Chat header (spec §4): avatar · name · subtitle, then search / approvals / more. */
 export function ChatHeader({ state, infoOpen, onToggleInfo, canManage = false, onManageRoom, onConnectionApprovals, onRefresh, historyQuery = '', onHistoryQueryChange, searchOpen, onSearchOpenChange, onBack }: ChatHeaderProps) {
   const conversation = state.navigation.activeConversation;
   const onlineEdition = state.edition === 'online';
@@ -37,9 +37,21 @@ export function ChatHeader({ state, infoOpen, onToggleInfo, canManage = false, o
     : group ? `${group.memberCount} 名成员`
     : onlineEdition && conversation?.kind === 'dm' ? `#${conversation.userCode}` : peer?.online ? '在线' : '离线';
   const approvals = state.connectionApprovals?.length ?? 0;
+  const searchId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const wasSearchOpen = useRef(searchOpen);
 
-  useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+    else if (wasSearchOpen.current) searchButtonRef.current?.focus();
+    wasSearchOpen.current = searchOpen;
+  }, [searchOpen]);
+
+  const closeSearch = () => {
+    onHistoryQueryChange?.('');
+    onSearchOpenChange(false);
+  };
 
   const more: MenuItem[] = [
     { label: group ? '群聊信息' : onlineEdition ? '用户信息' : infoOpen ? '隐藏成员列表' : '成员列表', icon: <Users />, onSelect: onToggleInfo },
@@ -48,11 +60,11 @@ export function ChatHeader({ state, infoOpen, onToggleInfo, canManage = false, o
   ];
 
   return (
-    <header className="surface-chrome flex h-14 shrink-0 items-center gap-2 border-b border-divider px-3">
+    <header className="chat-header surface-chrome flex h-[52px] shrink-0 items-center gap-2 border-b border-divider px-3">
       {onBack && <IconButton label="返回会话列表" onClick={onBack}><ArrowLeft size={20} aria-hidden="true" /></IconButton>}
       {conversation && (
         <button type="button" aria-label="会话信息" aria-expanded={infoOpen} onClick={onToggleInfo}
-          className="press flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md px-2 py-1 text-left hover:bg-hover">
+          className="chat-header-conversation press flex min-w-0 flex-1 cursor-pointer items-center gap-3 overflow-hidden rounded-md px-2 py-1 text-left hover:bg-hover">
           <Avatar name={conversation.title} seed={conversation.kind === 'dm' ? conversation.userCode : conversation.id} size={40}
             online={conversation.kind === 'dm' && !onlineEdition ? peer?.online === true : undefined} />
           <span className="flex min-w-0 flex-col">
@@ -69,24 +81,28 @@ export function ChatHeader({ state, infoOpen, onToggleInfo, canManage = false, o
         </button>
       )}
       {!conversation && <span className="flex-1" />}
-      {searchOpen && onHistoryQueryChange && (
-        <label className="view-enter flex h-9 w-[240px] min-w-0 items-center gap-2 rounded-full border border-accent bg-input px-3">
+      {onHistoryQueryChange && (
+        <div id={searchId} data-state={searchOpen ? 'open' : 'closed'} inert={!searchOpen} aria-hidden={!searchOpen || undefined}
+          className="chat-search-field h-9 w-[240px] min-w-0 shrink items-center gap-2 rounded-full border border-accent bg-input px-3">
           <Search size={16} aria-hidden="true" className="shrink-0 text-ink-3" />
           <input ref={searchRef} aria-label="搜索当前会话" placeholder="搜索消息" value={historyQuery}
             onChange={(event) => onHistoryQueryChange(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onHistoryQueryChange(''); onSearchOpenChange(false); } }}
+            onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); closeSearch(); } }}
             className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none" />
           {historyQuery && (
-            <button type="button" aria-label="清除消息搜索" onClick={() => onHistoryQueryChange('')} className="press inline-flex cursor-pointer text-ink-3 hover:text-ink">
+            <button type="button" aria-label="清除消息搜索" onClick={() => { onHistoryQueryChange(''); searchRef.current?.focus(); }}
+              className="press inline-flex cursor-pointer text-ink-3 hover:text-ink">
               <X size={16} aria-hidden="true" />
             </button>
           )}
-        </label>
+        </div>
       )}
       {onHistoryQueryChange && (
-        <IconButton label={searchOpen ? '关闭消息搜索' : '搜索消息'} tooltip={searchOpen ? '关闭搜索' : '搜索消息（Ctrl+F）'}
-          onClick={() => { if (searchOpen) onHistoryQueryChange(''); onSearchOpenChange(!searchOpen); }}>
-          {searchOpen ? <X size={20} aria-hidden="true" /> : <Search size={20} aria-hidden="true" />}
+        <IconButton ref={searchButtonRef} aria-expanded={searchOpen} aria-controls={searchId} className="chat-search-toggle"
+          label={searchOpen ? '关闭消息搜索' : '搜索消息'} tooltip={searchOpen ? '关闭搜索' : '搜索消息（Ctrl+F）'}
+          onClick={() => { if (searchOpen) closeSearch(); else onSearchOpenChange(true); }}>
+          <Search size={20} aria-hidden="true" className="chat-search-open-icon" />
+          <X size={20} aria-hidden="true" className="chat-search-close-icon" />
         </IconButton>
       )}
       {state.identity.admin && onConnectionApprovals && (

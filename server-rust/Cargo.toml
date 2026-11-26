@@ -1,6 +1,6 @@
 [package]
 name = "lan-chat-server"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
@@ -27,6 +27,7 @@ tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "syn
 tokio-rustls.workspace = true
 time = "=0.3.45"
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

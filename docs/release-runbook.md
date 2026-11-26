@@ -104,3 +104,15 @@ git push origin vX.Y.Z
 
 - 未公开前发现问题：`gh release delete vX.Y.Z --yes` 并 `git push origin :refs/tags/vX.Y.Z`，修复后重新打包。
 - 已公开：不要改动已发布的文件；发布补丁版本 `X.Y.(Z+1)`，并在发行说明中说明。
+
+## AstrBot 手动接入
+
+在 AstrBot WebUI 的「设置 → OpenAPI」创建拥有 `provider` 和 `persona` 权限的密钥。Windows 在线版和 Android 登录 LAN Chat 后，打开「设置 → 机器人」，填写 AstrBot 的 HTTPS 根地址和此密钥，即可读取、新建和编辑模型源、模型、人格。新建模型使用当前选择的模型源。模型 API Key、提示词和自定义出错回复保存到 AstrBot。
+
+点击「保存到账号」同步地址及配置编号。启用密钥同步时，OpenAPI Key 也会按账号加密保存，另一台设备登录同一账号后打开机器人设置即可使用。清空密钥后保存可以移除账号上的密钥。新建的模型和人格可在 AstrBot 的配置中选用。
+
+在线服通过 `--bot-key-file` 或 `CHAT_BOT_KEY_FILE` 指定一个包含 32 字节随机数据的文件以启用密钥同步。文件仅允许服务账号读取，独立于 SQLite 和应用发行包保管。恢复备份时使用原加密密钥文件。
+
+在 AstrBot 管理面板新增 LAN Chat 消息平台，填写服务器地址 `host`、端口 `port`、证书对应的主机名 `tls_name`、账号名 `username` 和用户代码 `user_code`。使用私有 CA 或局域网自签证书时，在 `certificate` 填写 AstrBot 所在机器可读的证书路径。在线模式需开启 `online`，填写已注册账号的密码和 `allowed_user_codes` 白名单。
+
+保存后在管理面板手动启用适配器。线上服务器已有配置时，运行 `sudo systemctl start lan-chat-astrbot.service` 手动启动，使用 `systemctl is-active lan-chat-astrbot.service` 检查状态。

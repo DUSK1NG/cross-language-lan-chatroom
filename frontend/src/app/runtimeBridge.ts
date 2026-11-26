@@ -65,6 +65,14 @@ export function desktopUpdateRuntime() {
   };
 }
 
+export function astrbotSettings<T>(
+  endpoint: string, token: string, resource: string, operation: string, id: string, fields: Record<string, string>
+): Promise<T> {
+  const tauri = window.__TAURI__;
+  if (!tauri) return Promise.reject(new Error('桌面服务未连接'));
+  return tauri.core.invoke<T>('astrbot_settings', { endpoint, token, resource, operation, id, fields });
+}
+
 export type RuntimeBridgeResolution = {
   bridge?: ChatBridgeClient;
   error?: string;

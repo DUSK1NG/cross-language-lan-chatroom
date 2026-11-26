@@ -38,6 +38,7 @@ frontend/dist/
 /build-*.log
 /tmp/
 /target/
+/.cargo-target/
 /apps/desktop/src-tauri/gen/
 
 # Local implementation worktrees

@@ -7,7 +7,7 @@ rust-version = "1.91"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-online = []
+online = ["dep:ureq"]
 desktop-updater = ["dep:reqwest", "dep:tauri-plugin-updater"]
 
 [dependencies]
@@ -20,6 +20,7 @@ tauri-plugin-clipboard-manager = "=2.5.0"
 tauri-plugin-dialog = "=2.8.4"
 tauri-plugin-opener = "=2.7.3"
 tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls"], optional = true }
+ureq = { version = "3", default-features = false, features = ["rustls", "json"], optional = true }
 
 [build-dependencies]
 tauri-build = "=2.7.6"

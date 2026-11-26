@@ -1,7 +1,14 @@
 <resources>
     <style name="LanChatTheme" parent="android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:colorAccent">#654832</item>
-        <item name="android:colorBackgroundFloating">#FFFCF4</item>
-        <item name="android:windowBackground">#F5EFE4</item>
+        <item name="android:colorAccent">#B4562F</item>
+        <item name="android:colorBackgroundFloating">#FFFFFF</item>
+        <item name="android:windowBackground">#FFFFFF</item>
+        <item name="android:alertDialogTheme">@style/LanChatDialog</item>
+    </style>
+
+    <style name="LanChatDialog" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/dialog_surface</item>
+        <item name="android:colorAccent">@color/dialog_accent</item>
+        <item name="android:colorBackgroundFloating">@color/dialog_surface</item>
     </style>
 </resources>

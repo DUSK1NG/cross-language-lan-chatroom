@@ -30,7 +30,7 @@ export type ComposerProps = {
 };
 
 type Feedback = { status: 'idle' | 'pending' | 'success' | 'error'; message: string };
-const lineHeightPx = 21;   // 14px × 1.5
+const lineHeightPx = 24;
 const maxLines = 6;
 
 /**
@@ -48,6 +48,8 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
   const pendingIdRef = useRef<string | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // IME 组字期间（拼音未上屏）不发送：否则会把 "nei'r" 这样的原始拼音当成消息。
+  const composingRef = useRef(false);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const active = state.navigation.activeConversation;
   const groupId = active?.kind === 'group' && state.groupAttachments ? active.id : undefined;
@@ -80,16 +82,40 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
   }, [focusAtEndToken]);
 
   // Auto-grow between one and six lines; beyond that the textarea scrolls internally.
-  useLayoutEffect(() => {
+  const resizeInput = useCallback(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = 'auto';
-    const next = Math.min(textarea.scrollHeight, lineHeightPx * maxLines + 16);
+    const contentHeight = textarea.scrollHeight;
+    const maxHeight = lineHeightPx * maxLines + 16;
+    const next = Math.min(contentHeight, maxHeight);
     textarea.style.height = next > 0 ? `${next}px` : '';
-    textarea.style.overflowY = textarea.scrollHeight > lineHeightPx * maxLines + 16 ? 'auto' : 'hidden';
-  }, [draft]);
+    textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
+  }, []);
+
+  useLayoutEffect(resizeInput, [draft, resizeInput]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    let previousWidth = textarea.getBoundingClientRect().width;
+    let frame = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.borderBoxSize[0].inlineSize;
+      if (width === previousWidth) return;
+      previousWidth = width;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(resizeInput);
+    });
+    observer.observe(textarea, { box: 'border-box' });
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [resizeInput]);
 
   function submit() {
+    if (composingRef.current) return;
     const submittedDraft = draft;
     const trimmed = submittedDraft.trim();
     if (!trimmed || !active || pendingIdRef.current) return;
@@ -211,8 +237,8 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
   const visibleUploads = Object.entries(uploads).filter(([, upload]) => upload.phase !== 'completed' && upload.room === uploadConversation);
 
   return (
-    <div className="shrink-0 bg-transparent px-4 pb-4 pt-2">
-      <div className="mx-auto flex w-full max-w-[880px] flex-col gap-2">
+    <div className="shrink-0 bg-transparent pb-4 pt-2">
+      <div className="chat-column flex flex-col gap-2">
         {feedback.status === 'error' && <CommandFeedback {...feedback} />}
         <div data-testid="upload-cards" className="flex flex-col gap-2 empty:hidden">
           {visibleUploads.map(([commandId, upload]) => (
@@ -245,8 +271,11 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
             </IconButton>}
             <textarea ref={textareaRef} aria-label="消息输入框" rows={1} value={draft} data-hotkey="composer"
               onChange={(event) => onDraftChange(event.target.value)} onKeyDown={onKeyDown}
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={(event) => { composingRef.current = false; onDraftChange(event.currentTarget.value); }}
               placeholder={active ? (active.kind === 'room' ? `发送到 #${active.title}` : `发消息给 ${active.title}`) : '输入消息…'}
-              className="min-h-9 flex-1 resize-none bg-transparent px-2 py-2 text-message leading-[1.5] text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none" />
+              style={{ lineHeight: lineHeightPx + 'px' }}
+              className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-message text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none" />
             <span className="relative">
               <span data-emoji-trigger="">
                 <IconButton ref={emojiButtonRef} label="表情" tooltip="表情" aria-expanded={emojiOpen} onClick={() => setEmojiOpen((open) => !open)}>
@@ -263,7 +292,7 @@ export function Composer({ state, bridge, quote = null, onClearQuote, draft, onD
                   exit={{ opacity: 0, scale: 0.85, transition: { duration: scaled(0.13), ease: easeExit } }}
                   transition={{ duration: scaled(0.2), ease }}>
                   <button type="submit" aria-label="发送消息" title="发送（Enter）" disabled={pending}
-                    className={cn('press inline-flex size-9 cursor-pointer items-center justify-center rounded-full bg-accent-strong text-on-accent disabled:cursor-not-allowed disabled:opacity-50')}>
+                    className={cn('press inline-flex size-8 cursor-pointer items-center justify-center rounded-md bg-accent-strong text-on-accent disabled:cursor-not-allowed disabled:opacity-50')}>
                     <SendHorizontal size={18} aria-hidden="true" />
                   </button>
                 </motion.span>

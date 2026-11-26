@@ -81,7 +81,7 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <article data-testid={`message-${message.messageId}`} className="message message--system flex justify-center py-1">
         <p data-testid={`message-content-${message.messageId}`}
-          className="message-system-text rounded-full bg-sidebar/80 px-3 py-1 text-center text-small text-ink-2">{message.content}</p>
+          className="message-system-text px-3 py-1 text-center text-small text-ink-3">{message.content}</p>
       </article>
     );
   }
@@ -104,7 +104,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   const showSender = isGroupChat && !self && !grouped;
   const showAvatar = isGroupChat && !self;
-  const visibleTime = showTime && message.time;
+  const visibleTime = showTime && message.time && !grouped;
   const delivery = self ? message.deliveryState : undefined;
   const group = grouped ? (tail ? 'last' : 'middle') : (tail ? 'single' : 'first');
   const longReply = !self && body.length >= 72 && !quote && !message.attachment;
@@ -112,44 +112,44 @@ export const MessageBubble = memo(function MessageBubble({
   return (
     <article data-testid={`message-${message.messageId}`} data-entering={animateEntry ? 'true' : undefined}
       data-group={group} data-long-reply={longReply || undefined}
-      className={cn('message group/message relative flex w-full items-end gap-2',
+      className={cn('message relative flex w-full select-none items-end gap-2',
         self ? 'message--self justify-end' : 'message--peer justify-start',
         grouped && 'message--grouped', tail && 'message--tail')}>
       {showAvatar && (
         <span className="w-9 shrink-0 self-end">{tail ? <Avatar name={message.displayName} seed={message.userCode} size={36} /> : null}</span>
       )}
       <div className={cn('cirrus-bubble-column relative flex min-w-0 flex-col', self ? 'items-end' : 'items-start')}>
-        {(visibleTime || delivery) && (
-          <div className="message-meta num mb-1 flex items-center gap-1 whitespace-nowrap px-1 text-small leading-none text-ink-2">
+        {(showSender || visibleTime || delivery) && (
+          <div className="message-meta num mb-1 flex items-baseline gap-1.5 whitespace-nowrap px-1 text-small leading-none text-ink-3">
+            {showSender && <span className="message-sender truncate text-small font-medium text-ink-2">{message.displayName}<span className="visually-hidden"> #{message.userCode}</span></span>}
             {visibleTime && <time dateTime={message.createdAt || message.time}>{message.time}</time>}
             {delivery && <DeliveryMark state={delivery} onRetry={retry} />}
           </div>
         )}
-        <ContextMenu items={menu}>
-          <div className={cn('message-bubble cirrus-bubble relative flow-root min-w-0 max-w-full',
-            highlighted && 'ring-2 ring-accent')}>
-            {showSender && (
-              <p className="message-sender mb-1 truncate text-small font-semibold">{message.displayName}</p>
-            )}
-            {message.attachment && <div className="mb-1"><FileCard attachment={message.attachment} bridge={bridge} self={self} /></div>}
-            {message.imageSize && <OnlineImage message={message} bridge={bridge} />}
-            {quote && (
-              <blockquote data-testid={`message-quote-${message.messageId}`}
-                className={cn('message-quote mb-1 cursor-pointer rounded-sm border-l-[3px] py-1 pl-2 pr-2 text-small', self ? 'border-read-tick bg-quote-out-bg' : 'border-accent bg-quote-in-bg')}
-                onClick={() => onJumpToQuote?.(quote.author, quote.text)}>
-                {quote.author
-                  ? <><span className="visually-hidden">&gt; </span><strong className={cn('block truncate font-semibold', self ? 'text-quote-out-name' : 'text-accent-text')}>{quote.author}</strong><span className="visually-hidden">: </span><span className={cn('block truncate', self ? 'text-quote-out-text' : 'text-bubble-in-meta')}>{quote.text}</span></>
-                  : <span className={cn('block truncate', self ? 'text-quote-out-text' : 'text-bubble-in-meta')}>{quote.raw}</span>}
-              </blockquote>
-            )}
-            {!message.imageSize && message.attachment?.transport !== 'tls' && (!quote || body) && (
-              <p data-testid={`message-content-${message.messageId}`} className="message-content message-content--wrap inline whitespace-pre-wrap break-words [overflow-wrap:anywhere] select-text">
-                <RichText text={body} self={self} onCopyPath={(path) => { bridge.dispatch(createCommand('message.copy', { text: path })); toast.success('路径已复制'); }} />
-              </p>
-            )}
-          </div>
-        </ContextMenu>
-        <MessageActions id={message.messageId} self={self} onReply={reply} onCopy={copy} menu={menu.slice(2)} />
+        <div className="group/bubble relative min-w-0 max-w-full">
+          <ContextMenu items={menu}>
+            <div className={cn('message-bubble cirrus-bubble relative flow-root min-w-0 max-w-full select-text',
+              highlighted && 'ring-2 ring-inset ring-accent')}>
+              {message.attachment && <div className="mb-1"><FileCard attachment={message.attachment} bridge={bridge} self={self} /></div>}
+              {message.imageSize && <OnlineImage message={message} bridge={bridge} />}
+              {quote && (
+                <blockquote data-testid={`message-quote-${message.messageId}`}
+                  className={cn('message-quote mb-1 cursor-pointer rounded-sm border-l-[3px] py-1 pl-2 pr-2 text-small', self ? 'border-read-tick bg-quote-out-bg' : 'border-accent bg-quote-in-bg')}
+                  onClick={() => onJumpToQuote?.(quote.author, quote.text)}>
+                  {quote.author
+                    ? <><span className="visually-hidden">&gt; </span><strong className={cn('block truncate font-semibold', self ? 'text-quote-out-name' : 'text-accent-text')}>{quote.author}</strong><span className="visually-hidden">: </span><span className={cn('block truncate', self ? 'text-quote-out-text' : 'text-bubble-in-meta')}>{quote.text}</span></>
+                    : <span className={cn('block truncate', self ? 'text-quote-out-text' : 'text-bubble-in-meta')}>{quote.raw}</span>}
+                </blockquote>
+              )}
+              {!message.imageSize && message.attachment?.transport !== 'tls' && (!quote || body) && (
+                <p data-testid={`message-content-${message.messageId}`} className="message-content message-content--wrap inline whitespace-pre-wrap break-words [overflow-wrap:anywhere] select-text">
+                  <RichText text={body} self={self} onCopyPath={(path) => { bridge.dispatch(createCommand('message.copy', { text: path })); toast.success('路径已复制'); }} />
+                </p>
+              )}
+            </div>
+          </ContextMenu>
+          <MessageActions id={message.messageId} self={self} onReply={reply} onCopy={copy} menu={menu.slice(2)} />
+        </div>
         <CommandFeedback {...feedback} />
       </div>
     </article>
@@ -228,16 +228,18 @@ function MessageActions({ id, self, onReply, onCopy, menu }: { id: string; self:
   const button = 'press inline-flex size-8 cursor-pointer items-center justify-center rounded-full text-ink-2 hover:bg-hover hover:text-ink';
   return (
     <div aria-label={`actions-${id}`}
-      className={cn('message-actions absolute top-0 z-10 flex items-center gap-1 rounded-full bg-elevated p-1 shadow-float',
-        'opacity-0 pointer-events-none transition-opacity duration-[var(--dur-hover)] group-hover/message:opacity-100 group-hover/message:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
+      className={cn('message-actions absolute top-0 z-10',
+        'opacity-0 pointer-events-none transition-opacity duration-[var(--dur-hover)] group-hover/bubble:opacity-100 group-hover/bubble:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
         '[@media(hover:none)]:hidden',
-        self ? 'right-full mr-2' : 'left-full ml-2')}>
-      <button type="button" aria-label="回复" title="回复" onClick={onReply} className={button}><CornerUpLeft size={16} aria-hidden="true" /></button>
-      <button type="button" aria-label="复制" title="复制" onClick={onCopy} className={button}><Copy size={16} aria-hidden="true" /></button>
-      {menu.length > 0 && (
-        <DropdownMenu align="end" items={menu}
-          trigger={<button type="button" aria-label="更多操作" title="更多" className={button}><MoreHorizontal size={16} aria-hidden="true" /></button>} />
-      )}
+        self ? 'right-full pr-2' : 'left-full pl-2')}>
+      <div className="flex items-center gap-1 rounded-full bg-elevated p-1 shadow-float">
+        <button type="button" aria-label="回复" title="回复" onClick={onReply} className={button}><CornerUpLeft size={16} aria-hidden="true" /></button>
+        <button type="button" aria-label="复制" title="复制" onClick={onCopy} className={button}><Copy size={16} aria-hidden="true" /></button>
+        {menu.length > 0 && (
+          <DropdownMenu align="end" items={menu}
+            trigger={<button type="button" aria-label="更多操作" title="更多" className={button}><MoreHorizontal size={16} aria-hidden="true" /></button>} />
+        )}
+      </div>
     </div>
   );
 }

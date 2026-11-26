@@ -72,7 +72,7 @@ export function ConversationSidebar({ state, bridge, filter, onFilterChange, onC
 
   return (
     <aside data-testid="conversation-sidebar" aria-label="会话列表" className="flex h-full min-w-0 flex-col">
-      <div className="flex h-14 shrink-0 items-center gap-2 px-3">
+      <div className="flex h-[52px] shrink-0 items-center gap-2 px-3">
         <DropdownMenu trigger={<IconButton label="打开菜单"><Menu size={20} aria-hidden="true" /></IconButton>} items={menu} />
         <img src={catBrandMark} alt="LAN Chat 猫咪标识" className="size-8 shrink-0 rounded-full" />
         {showSearch ? (
@@ -83,7 +83,7 @@ export function ConversationSidebar({ state, bridge, filter, onFilterChange, onC
               className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-3 [&::-webkit-search-cancel-button]:hidden focus-visible:outline-none" />
             {query && <button type="button" aria-label="清除搜索" onClick={() => setQuery('')} className="press inline-flex cursor-pointer text-ink-3 hover:text-ink"><X size={16} aria-hidden="true" /></button>}
           </label>
-        ) : <span className="flex-1 truncate text-title font-semibold text-ink">{online ? 'LAN Chat Online' : 'LAN Chat'}</span>}
+        ) : <span className="flex-1 truncate text-body font-medium text-ink">{online ? 'LAN Chat Online' : 'LAN Chat'}</span>}
         <IconButton label={newLabel} onClick={onNew}><Plus size={20} aria-hidden="true" /></IconButton>
       </div>
       {!online && <FilterTabs value={filter} onValueChange={onFilterChange} />}

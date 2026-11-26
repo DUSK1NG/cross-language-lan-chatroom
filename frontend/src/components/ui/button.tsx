@@ -5,16 +5,16 @@ import { cn } from '../../lib/cn';
 
 /** shadcn/ui-style button. Variants and sizes reference design tokens only. */
 export const buttonVariants = cva(
-  'press inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium select-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:shrink-0',
+  'press inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium select-none cursor-pointer disabled:cursor-not-allowed [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        primary: 'bg-accent-strong text-on-accent hover:brightness-110',
-        secondary: 'bg-input text-ink hover:bg-hover',
-        ghost: 'bg-transparent text-ink-2 hover:bg-hover hover:text-ink',
-        outline: 'border border-control bg-transparent text-ink hover:bg-hover',
-        'danger-outline': 'border border-danger-text bg-transparent text-danger-text hover:bg-hover',
-        danger: 'bg-danger-strong text-on-accent hover:brightness-110'
+        primary: 'bg-accent-strong text-on-accent hover:brightness-110 disabled:bg-input disabled:text-ink-3',
+        secondary: 'bg-input text-ink hover:bg-hover disabled:opacity-50',
+        ghost: 'bg-transparent text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50',
+        outline: 'border border-control bg-transparent text-ink hover:bg-hover disabled:opacity-50',
+        'danger-outline': 'border border-danger-text bg-transparent text-danger-text hover:bg-hover disabled:opacity-50',
+        danger: 'bg-danger-strong text-on-accent hover:brightness-110 disabled:opacity-50'
       },
       size: {
         sm: 'h-8 px-3 text-small rounded-sm',

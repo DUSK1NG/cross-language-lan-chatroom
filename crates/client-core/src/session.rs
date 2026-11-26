@@ -14,9 +14,9 @@ use base64::{
 };
 use lan_chat_protocol::{
     HEARTBEAT, HEARTBEAT_INTERVAL_SECS, HEARTBEAT_TIMEOUT_SECS, LAN_HISTORY_PAGES, LAN_ROOM_ROLES,
-    LocalHostCredentials, MAX_FRAME_BYTES, Message, ONLINE_ACCOUNTS, ONLINE_GROUP_ATTACHMENTS,
-    ONLINE_GROUP_MANAGEMENT, ONLINE_GROUPS, ONLINE_SOCIAL, ROOM_PASSWORD, read_message,
-    write_message,
+    LocalHostCredentials, MAX_FRAME_BYTES, Message, ONLINE_ACCOUNTS, ONLINE_BOT_KEY_SYNC,
+    ONLINE_BOT_SETTINGS, ONLINE_GROUP_ATTACHMENTS, ONLINE_GROUP_MANAGEMENT, ONLINE_GROUPS,
+    ONLINE_SOCIAL, ROOM_PASSWORD, read_message, write_message,
 };
 use ring::rand::{SecureRandom, SystemRandom};
 use tokio::{
@@ -378,6 +378,8 @@ impl Client {
                     HEARTBEAT.into(),
                     ONLINE_GROUP_MANAGEMENT.into(),
                     ONLINE_GROUP_ATTACHMENTS.into(),
+                    ONLINE_BOT_SETTINGS.into(),
+                    ONLINE_BOT_KEY_SYNC.into(),
                 ],
                 ..Message::default()
             }

@@ -15,6 +15,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.Context;
 import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -47,6 +48,7 @@ import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Layout;
+import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -67,6 +69,7 @@ import android.view.WindowInsetsController;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
 import android.view.animation.PathInterpolator;
+import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -108,6 +111,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -131,14 +135,67 @@ public final class MainActivity extends Activity {
     private static final int MAX_IMAGE = 4 * 1024 * 1024;
     private static final int HISTORY_PAGE = 30;
     private static final int INITIAL_HISTORY = 16;
-    private static final int INK = 0xff30261f;
-    private static final int MUTED = 0xff6c5b49;
-    private static final int ACCENT = 0xff654832;
-    private static final int TINT = 0xffeee3d3;
-    private static final int PAPER = 0xfff5efe4;
-    private static final int WHITE = 0xfffffcf4;
-    private static final int OUTLINE = 0xffded1bc;
-    private static final int DANGER = 0xff963e43;
+    // Claude 中性色卡（与桌面 tokens.css 同源）：浅色纸白底 / 深色炭黑底，强调色 terracotta。
+    // 全部视图在 onCreate 里构建，所以 applyPalette() 必须在建视图之前按 uiMode 定好这些值。
+    private static boolean DARK;
+    private static int INK;
+    private static int MUTED;
+    /** 文本/图标用的强调色：深色下要提亮才能在 #191919 上达到 4.5:1。 */
+    private static int ACCENT;
+    /** 填充用强调色（主按钮、自己的气泡、未读角标）：白字对比 4.87:1，深浅两套共用。 */
+    private static int ACCENT_FILL;
+    private static int TINT;
+    private static int PAPER;
+    private static int WHITE;
+    private static int OUTLINE;
+    private static int DANGER;
+    private static int SOFT_CARD;
+    private static int GRAIN_PEER;
+    private static int DISABLED_INK;
+    private static int RIPPLE_ACCENT;
+    private static int RIPPLE_PRIMARY;
+    /** 自己的气泡：浅色依旧 terracotta（品牌色块），深色改 Claude 式中性灰块 + 亮字。 */
+    private static int BUBBLE_SELF;
+    private static int BUBBLE_SELF_INK;
+
+    private static void applyPalette(boolean dark) {
+        DARK = dark;
+        if (dark) {
+            INK = 0xfff5f4ef;
+            MUTED = 0xffa3a099;
+            ACCENT = 0xffe08a6d;
+            ACCENT_FILL = 0xffb4552f;
+            TINT = 0xff242422;
+            PAPER = 0xff191919;
+            WHITE = 0xff1f1f1f;
+            OUTLINE = 0xff3a3936;
+            DANGER = 0xffe0655a;
+            SOFT_CARD = 0xff232322;
+            GRAIN_PEER = 0xff3b2b23;
+            DISABLED_INK = 0xff6f6b64;
+            RIPPLE_ACCENT = 0x33e08a6d;
+            RIPPLE_PRIMARY = 0x40ffffff;
+            BUBBLE_SELF = 0xff2b2b2a;
+            BUBBLE_SELF_INK = 0xfff5f4ef;
+        } else {
+            INK = 0xff161616;
+            MUTED = 0xff6b6b66;
+            ACCENT = 0xffb4562f;
+            ACCENT_FILL = 0xffb4562f;
+            TINT = 0xfff2f0ec;
+            PAPER = 0xffffffff;
+            WHITE = 0xfffafafa;
+            OUTLINE = 0xffe6e4dd;
+            DANGER = 0xffc4453a;
+            SOFT_CARD = 0xfff7f6f3;
+            GRAIN_PEER = 0xffefe6df;
+            DISABLED_INK = 0xff3d3d3a;
+            RIPPLE_ACCENT = 0x20b4562f;
+            RIPPLE_PRIMARY = 0x33ffffff;
+            BUBBLE_SELF = 0xffb4562f;
+            BUBBLE_SELF_INK = 0xffffffff;
+        }
+    }
     private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy年M月d日");
     private static final Pattern BOT_BOLD = Pattern.compile("\\*\\*([^*\\n]+)\\*\\*");
@@ -147,6 +204,13 @@ public final class MainActivity extends Activity {
     private static final String[] EMOJI = {"😀", "😂", "🥹", "😊", "😉", "😍", "🤔", "😅", "😢", "😴", "😎", "🙃",
             "👍", "👏", "🙌", "🙏", "❤️", "🎉", "✨", "🔥", "👀", "💬", "🤝", "✅"};
     private static final DecelerateInterpolator ARRIVE = new DecelerateInterpolator(1.6f);
+    // 动效令牌，与桌面 frontend/src/styles/tokens.css 的 Claude motion 对齐：
+    // feedback 120 / surface 150 / open 250 / enter 320 / flight 400。
+    private static final long MOTION_FEEDBACK = 120L;
+    private static final long MOTION_SURFACE = 150L;
+    private static final long MOTION_OPEN = 250L;
+    private static final long MOTION_ENTER = 320L;
+    private static final long MOTION_FLIGHT = 400L;
 
     private final ExecutorService writers = Executors.newSingleThreadExecutor();
     private final ExecutorService fileTransfers = Executors.newSingleThreadExecutor();
@@ -187,6 +251,8 @@ public final class MainActivity extends Activity {
     private boolean groupsAvailable;
     private boolean groupManagementAvailable;
     private boolean groupAttachmentsAvailable;
+    private boolean botSettingsAvailable;
+    private boolean botKeySyncAvailable;
     private Contact groupDetails;
     private boolean directorySelected;
     private LinearLayout messages;
@@ -268,7 +334,7 @@ public final class MainActivity extends Activity {
     private record ImageTile(Contact peer, ChatMessage message, ImageView thumbnail, TextView status) {}
     private record SavedDocument(File source, String name, String mime, boolean temporary) {}
 
-    private static final class MessageArrival extends LinearLayout {
+    private final class MessageArrival extends LinearLayout {
         private final Paint grain = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final float density;
         private final boolean outgoing;
@@ -288,11 +354,26 @@ public final class MainActivity extends Activity {
         }
 
         void play(View bubbleGroup) {
-            bubbleGroup.setAlpha(0.4f);
-            bubbleGroup.setTranslationX((outgoing ? 1f : -1f) * 8f * density);
-            bubbleGroup.setTranslationY(8f * density);
-            bubbleGroup.animate().alpha(1f).translationX(0).translationY(0)
-                    .setDuration(460).setInterpolator(ARRIVE).start();
+            boolean fadeIn = fadeInNewText();
+            bubbleGroup.setScaleX(1f);
+            bubbleGroup.setScaleY(1f);
+            bubbleGroup.setTranslationX(0f);
+            bubbleGroup.setTranslationY(0f);
+            if (growBubble()) {
+                // 原地长出：0.94 → 1，同时上浮 4dp，与桌面 cirrus-grow 同参数。
+                bubbleGroup.setAlpha(fadeIn ? 0.4f : 1f);
+                bubbleGroup.setScaleX(0.94f);
+                bubbleGroup.setScaleY(0.94f);
+                bubbleGroup.setTranslationY(4f * density);
+                bubbleGroup.animate().alpha(1f).scaleX(1f).scaleY(1f).translationY(0f)
+                        .setDuration(MOTION_ENTER).setInterpolator(ARRIVE).start();
+            } else {
+                // 从输入框飞上来：下方 28dp 起、淡入，与桌面 --dur-flight 同参数。
+                bubbleGroup.setAlpha(fadeIn ? 0.4f : 1f);
+                bubbleGroup.setTranslationY(28f * density);
+                bubbleGroup.animate().alpha(1f).translationY(0f)
+                        .setDuration(MOTION_FLIGHT).setInterpolator(ARRIVE).start();
+            }
             gather.start();
         }
 
@@ -314,7 +395,7 @@ public final class MainActivity extends Activity {
                 float distance = (14f + i % 9 * 2f) * density * remaining;
                 float x = targetX + (float) Math.cos(angle) * distance;
                 float y = targetY + (float) Math.sin(angle) * distance;
-                grain.setColor(i % 3 == 0 ? 0xffab794d : outgoing ? 0xffead5af : ACCENT);
+                grain.setColor(i % 3 == 0 ? ACCENT : outgoing ? GRAIN_PEER : ACCENT_FILL);
                 grain.setAlpha(Math.round(180f * remaining * (1f - remaining * 0.5f)));
                 canvas.drawCircle(x, y, density * (1f + i % 3 * 0.3f), grain);
             }
@@ -328,6 +409,11 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        applyPalette((getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES);
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(PAPER));
+        getWindow().setStatusBarColor(PAPER);
+        getWindow().setNavigationBarColor(PAPER);
         if (state != null) {
             pendingImagePeer = state.getString("imagePeer");
             pendingImageGroup = state.getBoolean("imageGroup");
@@ -474,6 +560,8 @@ public final class MainActivity extends Activity {
                 boolean supportsGroups = supports(capabilities, "online-groups-v1");
                 boolean supportsGroupManagement = supports(capabilities, "online-group-management-v1");
                 boolean supportsGroupAttachments = supports(capabilities, "online-group-attachments-v1");
+                boolean supportsBotSettings = supports(capabilities, "online-bot-settings-v1");
+                boolean supportsBotKeySync = supports(capabilities, "online-bot-key-sync-v1");
                 main.post(() -> {
                     if (isDestroyed() || generation != attempt) {
                         closeConnection(session);
@@ -505,6 +593,8 @@ public final class MainActivity extends Activity {
                     groupsAvailable = supportsGroups;
                     groupManagementAvailable = supportsGroupManagement;
                     groupAttachmentsAvailable = supportsGroupAttachments;
+                    botSettingsAvailable = supportsBotSettings;
+                    botKeySyncAvailable = supportsBotKeySync;
                     authenticating = false;
                     reconnectDelay = 2000;
                     if (firstLogin) {
@@ -734,7 +824,6 @@ public final class MainActivity extends Activity {
                 }
             }
             case "dm_image_get" -> receiveImage(packet);
-            case "dm_push_registration" -> toast("消息通知已更新");
             case "friends_changed" -> {
                 if (friendRows != null) refreshFriends();
             }
@@ -806,6 +895,12 @@ public final class MainActivity extends Activity {
     }
 
     private void showHome(boolean directory) {
+        // 切换外观主题会重建 Activity；重建后直接回到设置页，避免跳回会话列表。
+        if (reopenSettingsAfterRecreate) {
+            reopenSettingsAfterRecreate = false;
+            showSettings();
+            return;
+        }
         boolean returningFromChat = active != null;
         releaseChatPanels();
         socialBack = null;
@@ -871,7 +966,7 @@ public final class MainActivity extends Activity {
             float target = (selected.getLeft() + selected.getRight() - highlight.getWidth()) / 2f;
             highlight.animate().cancel();
             if (animate) {
-                highlight.animate().translationX(target).setDuration(260).setInterpolator(ARRIVE).start();
+                highlight.animate().translationX(target).setDuration(MOTION_OPEN).setInterpolator(ARRIVE).start();
             } else {
                 highlight.setTranslationX(target);
             }
@@ -1464,7 +1559,7 @@ public final class MainActivity extends Activity {
                 badge.setGravity(Gravity.CENTER);
                 badge.setContentDescription(unread > 99 ? "超过 99 条未读消息" : unread + " 条未读消息");
                 badge.setPadding(dp(6), dp(3), dp(6), dp(3));
-                badge.setBackground(surface(ACCENT, 12));
+                badge.setBackground(surface(ACCENT_FILL, 12));
                 LinearLayout.LayoutParams badgePosition = new LinearLayout.LayoutParams(-2, -2);
                 badgePosition.setMarginStart(dp(8));
                 entry.addView(badge, badgePosition);
@@ -1475,7 +1570,7 @@ public final class MainActivity extends Activity {
                 entry.setAlpha(0f);
                 entry.setTranslationY(-dp(12));
                 entry.animate().alpha(1f).translationY(0f).setStartDelay(index * 40L)
-                        .setDuration(330L).setInterpolator(ARRIVE).start();
+                        .setDuration(MOTION_ENTER).setInterpolator(ARRIVE).start();
             }
             index++;
         }
@@ -1612,6 +1707,13 @@ public final class MainActivity extends Activity {
         });
         composer.addView(draftInput, new LinearLayout.LayoutParams(0, -2, 1));
         ImageButton sendButton = iconButton("发送", R.drawable.ic_send, true, () -> {
+            // 输入法还在组字（拼音没上屏）时不能把原始拼音发出去：先让 IME 提交候选词。
+            if (BaseInputConnection.getComposingSpanStart(draftInput.getText()) >= 0) {
+                draftInput.setError(null);
+                InputMethodManager manager = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                if (manager != null) manager.viewClicked(draftInput);
+                return;
+            }
             String text = draftInput.getText().toString();
             if (text.trim().isEmpty()) return;
             if (selectedQuote != null) text = quoteLine(contact, selectedQuote) + "\n" + text;
@@ -1646,6 +1748,8 @@ public final class MainActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 sendButton.setEnabled(!s.toString().trim().isEmpty());
+                // 组字中的拼音不写进草稿，否则重进会话会看到一串未上屏的拼音。
+                if (s instanceof Spannable && BaseInputConnection.getComposingSpanStart((Spannable) s) >= 0) return;
                 SharedPreferences.Editor drafts = preferences().edit();
                 if (s.length() == 0) drafts.remove(draftKey);
                 else drafts.putString(draftKey, s.toString());
@@ -1688,7 +1792,7 @@ public final class MainActivity extends Activity {
             }
         });
         target.setAlpha(0.55f);
-        target.animate().alpha(1f).setDuration(260L).start();
+        target.animate().alpha(1f).setDuration(MOTION_OPEN).start();
     }
 
     private final class ChatSearch {
@@ -1799,7 +1903,7 @@ public final class MainActivity extends Activity {
 
             layer = new FrameLayout(MainActivity.this);
             shade = new View(MainActivity.this);
-            shade.setBackgroundColor(0xff38281e);
+            shade.setBackgroundColor(0x99000000);
             shade.setContentDescription("关闭搜索");
             shade.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             shade.setOnClickListener(view -> setOpen(false));
@@ -1922,7 +2026,7 @@ public final class MainActivity extends Activity {
             if (panel.getVisibility() != View.VISIBLE) {
                 panel.setVisibility(View.VISIBLE);
                 panelMotion = ValueAnimator.ofFloat(0f, 1f);
-                panelMotion.setDuration(220);
+                panelMotion.setDuration(MOTION_OPEN);
                 panelMotion.setInterpolator(opening);
                 panelMotion.addUpdateListener(animation -> {
                     panelExtent = (float) animation.getAnimatedValue();
@@ -1932,7 +2036,7 @@ public final class MainActivity extends Activity {
             } else {
                 ChangeBounds resize = new ChangeBounds();
                 resize.addTarget(panel);
-                resize.setDuration(200);
+                resize.setDuration(MOTION_SURFACE);
                 resize.setInterpolator(opening);
                 TransitionManager.beginDelayedTransition(layer, resize);
             }
@@ -2128,7 +2232,7 @@ public final class MainActivity extends Activity {
                         + current.getPaddingBottom() - current.getHeight());
                 int offset = previousHeight > 0 ? content.getHeight() - previousHeight : 0;
                 int next = Math.max(0, Math.min(previousY + offset, bottom));
-                if (smooth) current.smoothScrollTo(0, next);
+                if (smooth && smoothScrollEnabled()) current.smoothScrollTo(0, next);
                 else current.scrollTo(0, next);
                 return true;
             }
@@ -2187,7 +2291,7 @@ public final class MainActivity extends Activity {
 
         ConversationScroll() {
             super(MainActivity.this);
-            movement.setDuration(210);
+            movement.setDuration(MOTION_OPEN);
             movement.setInterpolator(ARRIVE);
             movement.addUpdateListener(animator -> scrollTo(0, (Integer) animator.getAnimatedValue()));
         }
@@ -2247,6 +2351,7 @@ public final class MainActivity extends Activity {
 
         void followArrivals(boolean smooth) {
             if (!following) return;
+            if (smooth && !smoothScrollEnabled()) smooth = false;
             animateNext = smooth;
             if (followQueued) return;
             followQueued = true;
@@ -2314,7 +2419,7 @@ public final class MainActivity extends Activity {
             save.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
             cluster.addView(save, new LinearLayout.LayoutParams(-2, -2));
         } else {
-            TextView bubble = label("", 16, self ? WHITE : INK);
+            TextView bubble = label("", 16, self ? BUBBLE_SELF_INK : INK);
             String body = messageText(row);
             int quoteEnd = body.startsWith("> ") ? body.indexOf('\n') : -1;
             if (quoteEnd < 0) {
@@ -2330,7 +2435,7 @@ public final class MainActivity extends Activity {
             bubble.setMaxWidth(bubbleWidth);
             bubble.setLineSpacing(dp(3), 1f);
             bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
-            GradientDrawable shape = self ? surface(ACCENT, 18) : card(WHITE, 18);
+            GradientDrawable shape = self ? surface(BUBBLE_SELF, 18) : card(WHITE, 18);
             float outer = dp(18);
             float start = self ? outer : dp(5);
             float end = self ? dp(5) : outer;
@@ -2532,7 +2637,7 @@ public final class MainActivity extends Activity {
                 if (extent == 1f && isLaidOut()) {
                     ChangeBounds resize = new ChangeBounds();
                     resize.addTarget(panel);
-                    resize.setDuration(180);
+                    resize.setDuration(MOTION_SURFACE);
                     resize.setInterpolator(ARRIVE);
                     TransitionManager.beginDelayedTransition(this, resize);
                 }
@@ -2566,9 +2671,9 @@ public final class MainActivity extends Activity {
             motion = null;
             if (previous != null) previous.cancel();
             attachmentButton.setBackground(selected == ComposerTool.ATTACHMENT
-                    ? ripple(surface(0xffe8d5b9, 14), false) : controlBackground(false));
+                    ? ripple(surface(TINT, 14), false) : controlBackground(false));
             emojiButton.setBackground(selected == ComposerTool.EMOJI
-                    ? ripple(surface(0xffe8d5b9, 14), false) : controlBackground(false));
+                    ? ripple(surface(TINT, 14), false) : controlBackground(false));
             if (extent == target) {
                 if (target == 0f) setVisibility(View.GONE);
                 return;
@@ -2916,7 +3021,7 @@ public final class MainActivity extends Activity {
         ImageView thumbnail = new ImageView(this);
         thumbnail.setContentDescription("打开大图");
         thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        thumbnail.setForeground(new RippleDrawable(ColorStateList.valueOf(0x38654832), null, surface(WHITE, 17)));
+        thumbnail.setForeground(new RippleDrawable(ColorStateList.valueOf(RIPPLE_ACCENT), null, surface(WHITE, 17)));
         thumbnail.setOnClickListener(view -> showImage(file));
         thumbnail.setVisibility(View.INVISIBLE);
         box.addView(thumbnail, new FrameLayout.LayoutParams(-1, -1));
@@ -3053,7 +3158,7 @@ public final class MainActivity extends Activity {
         }
         Dialog dialog = new Dialog(this, android.R.style.Theme_Material_NoActionBar);
         LinearLayout fullScreen = column();
-        fullScreen.setBackgroundColor(0xff2d231d);
+        fullScreen.setBackgroundColor(0xff161616);
         fullScreen.setPadding(dp(16), dp(10), dp(16), dp(12));
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
@@ -3067,7 +3172,7 @@ public final class MainActivity extends Activity {
         header.addView(button("分享", false, () -> shareImage(file, options.outMimeType, extension)));
         Button close = button("关闭", false, () -> {
             viewer.animate().alpha(0f).scaleX(0.97f).scaleY(0.97f)
-                    .setDuration(180L).withEndAction(dialog::dismiss).start();
+                    .setDuration(MOTION_SURFACE).withEndAction(dialog::dismiss).start();
         });
         header.addView(close);
         fullScreen.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -3080,12 +3185,12 @@ public final class MainActivity extends Activity {
         dialog.setContentView(fullScreen);
         dialog.show();
         dialog.getWindow().setLayout(-1, -1);
-        dialog.getWindow().setStatusBarColor(0xff2d231d);
-        dialog.getWindow().setNavigationBarColor(0xff2d231d);
+        dialog.getWindow().setStatusBarColor(0xff161616);
+        dialog.getWindow().setNavigationBarColor(0xff161616);
         viewer.setScaleX(0.92f);
         viewer.setScaleY(0.92f);
         viewer.setAlpha(0.25f);
-        viewer.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(360L).setInterpolator(ARRIVE).start();
+        viewer.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(MOTION_ENTER).setInterpolator(ARRIVE).start();
     }
 
     private void shareImage(File source, String mime, String extension) {
@@ -3216,6 +3321,24 @@ public final class MainActivity extends Activity {
         identity.addView(names, details);
         options.addView(identity);
 
+        TextView appearanceTitle = label("外观", 13, MUTED);
+        appearanceTitle.setPadding(dp(4), 0, 0, 0);
+        addSpaced(options, appearanceTitle, 24);
+        addSpaced(options, themeSlider(), 8);
+
+        TextView motionTitle = label("动效", 13, MUTED);
+        motionTitle.setPadding(dp(4), 0, 0, 0);
+        addSpaced(options, motionTitle, 24);
+        addSpaced(options, labeledSlider("新文字淡入",
+                motionSlider(PREF_NEW_TEXT, "fade", new String[]{"fade", "instant"},
+                        new String[]{"淡入", "直接出现"})), 8);
+        addSpaced(options, labeledSlider("消息气泡动画",
+                motionSlider(PREF_BUBBLE, "fly", new String[]{"grow", "fly"},
+                        new String[]{"原地长出", "从输入框飞上来"})), 16);
+        addSpaced(options, labeledSlider("聊天区滚动动画",
+                motionSlider(PREF_SCROLL, "smooth", new String[]{"smooth", "jump"},
+                        new String[]{"跟随滑动", "直接跳到"})), 16);
+
         TextView notificationTitle = label("通知", 13, MUTED);
         notificationTitle.setPadding(dp(4), 0, 0, 0);
         addSpaced(options, notificationTitle, 24);
@@ -3228,7 +3351,7 @@ public final class MainActivity extends Activity {
         permission.setThumbTintList(ColorStateList.valueOf(WHITE));
         permission.setTrackTintList(new ColorStateList(
                 new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
-                new int[]{ACCENT, 0xffb8a890}));
+                new int[]{ACCENT, OUTLINE}));
         permission.setChecked(preferences().getBoolean(MessagePushService.ENABLED, false));
         permission.setOnCheckedChangeListener((button, enabled) -> {
             preferences().edit().putBoolean(MessagePushService.ENABLED, enabled).apply();
@@ -3236,6 +3359,7 @@ public final class MainActivity extends Activity {
         });
         permission.setBackground(ripple(card(WHITE, 18), false));
         addSpaced(options, permission, 8);
+        addSpaced(options, button("机器人设置", false, this::showBotSettings), 16);
         Button logout = button("退出登录", false, () -> {
             syncNotificationsBeforeLogout();
             forgetAccount();
@@ -3248,8 +3372,370 @@ public final class MainActivity extends Activity {
         enter(options, 12, 0, 260);
     }
 
+    private void showBotSettings() {
+        LinearLayout body = socialPage("机器人设置", this::showSettings, false);
+        new BotSettings(body).account(false);
+    }
+
+    private final class BotSettings {
+        private final LinearLayout screen = page;
+        private final List<View> controls = new ArrayList<>();
+        private final Map<AstrBot.Resource, EditText> ids = new LinkedHashMap<>();
+        private final EditText endpoint;
+        private final EditText token;
+        private final TextView status = label("", 13, MUTED);
+        private final Button saveAccount;
+        private long revision = -1;
+        private boolean busy;
+
+        BotSettings(LinearLayout body) {
+            body.setPadding(0, dp(14), 0, dp(16));
+            endpoint = botField(body, "AstrBot 地址", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+            endpoint.setHint("https://bot.example.com");
+            token = botField(body, "AstrBot OpenAPI Key", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            endpoint.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    token.setText("");
+                }
+                @Override public void afterTextChanged(Editable s) {}
+            });
+            addSpaced(body, label(botKeySyncAvailable
+                    ? "保存到账号后，密钥会加密同步到同账号设备。清空并保存可移除已同步的密钥。"
+                    : "使用拥有 provider 和 persona 权限的 OpenAPI Key。当前服务器同步地址和配置编号。", 13, MUTED), 6);
+            controls.add(endpoint);
+            controls.add(token);
+
+            for (AstrBot.Resource resource : AstrBot.Resource.values()) {
+                String title = title(resource);
+                LinearLayout card = column();
+                card.setPadding(dp(12), dp(4), dp(12), dp(12));
+                card.setBackground(card(WHITE, 18));
+                addSpaced(body, card, 14);
+                EditText id = botField(card, title + "编号", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                ids.put(resource, id);
+                controls.add(id);
+                LinearLayout actions = new LinearLayout(MainActivity.this);
+                Button list = button("读取列表", false, () -> list(resource));
+                Button read = button("读取配置", false, () -> open(resource, false));
+                Button create = button("新建", false, () -> open(resource, true));
+                for (Button action : new Button[]{list, read, create}) {
+                    controls.add(action);
+                    tabAction(actions, action);
+                }
+                addSpaced(card, actions, 8);
+            }
+            LinearLayout accountActions = new LinearLayout(MainActivity.this);
+            Button reload = button("读取账号设置", false, () -> account(false));
+            saveAccount = button("保存到账号", true, () -> account(true));
+            saveAccount.setEnabled(false);
+            controls.add(reload);
+            tabAction(accountActions, reload);
+            tabAction(accountActions, saveAccount);
+            addSpaced(body, accountActions, 16);
+            status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            addSpaced(body, status, 8);
+        }
+
+        private String title(AstrBot.Resource resource) {
+            return switch (resource) {
+                case SOURCE -> "模型源";
+                case PROVIDER -> "模型";
+                case PERSONA -> "人格";
+            };
+        }
+
+        void account(boolean save) {
+            if (busy) return;
+            ChatConnection session = connection;
+            if (session == null || !botSettingsAvailable) {
+                status.setText(session == null ? "连接尚未恢复，请稍后重试" : "服务器不支持机器人设置同步");
+                return;
+            }
+            try {
+                boolean withKey = botKeySyncAvailable;
+                String kind = save ? "bot_settings_save" : "bot_settings_get";
+                JSONObject request = packet(withKey ? kind + "_with_key" : kind);
+                if (save) {
+                    JSONObject content = new JSONObject().put("endpoint", endpoint.getText().toString().trim());
+                    for (var entry : ids.entrySet()) {
+                        content.put(entry.getKey().idField, entry.getValue().getText().toString());
+                    }
+                    if (withKey) {
+                        content = new JSONObject().put("settings", content)
+                                .put("openapi_key", token.getText().toString().trim());
+                    }
+                    request.put("revision", revision).put("content", content.toString());
+                }
+                run(() -> session.request(request), response -> {
+                    JSONObject envelope = new JSONObject(response.getString("content"));
+                    JSONObject content = withKey ? envelope.getJSONObject("settings") : envelope;
+                    String url = content.getString("endpoint");
+                    if (!url.contentEquals(endpoint.getText())) endpoint.setText(url);
+                    if (withKey) token.setText(envelope.getString("openapi_key"));
+                    for (var entry : ids.entrySet()) {
+                        entry.getValue().setText(content.getString(entry.getKey().idField));
+                    }
+                    revision = response.optLong("revision", 0);
+                    status.setText("账号设置已同步");
+                }, status, save ? "正在保存账号设置…" : "正在读取账号设置…");
+            } catch (JSONException error) {
+                status.setText("账号设置格式无效");
+            }
+        }
+
+        private void list(AstrBot.Resource resource) {
+            String url = endpoint.getText().toString().trim();
+            String key = token.getText().toString().trim();
+            run(() -> new JSONObject().put("ids", new JSONArray(Arrays.asList(new AstrBot(url, key).list(resource)))), response -> {
+                JSONArray values = response.getJSONArray("ids");
+                if (values.length() == 0) {
+                    status.setText("请填写编号新建配置");
+                    return;
+                }
+                String[] options = new String[values.length()];
+                for (int i = 0; i < options.length; i++) options[i] = values.getString(i);
+                status.setText("");
+                new AlertDialog.Builder(MainActivity.this).setTitle("选择" + title(resource))
+                        .setItems(options, (dialog, index) -> ids.get(resource).setText(options[index]))
+                        .setNegativeButton("取消", null).show();
+            }, status, "正在联系 AstrBot…");
+        }
+
+        private void open(AstrBot.Resource resource, boolean create) {
+            String id = ids.get(resource).getText().toString();
+            if (id.trim().isEmpty()) {
+                status.setText("请填写配置编号");
+                return;
+            }
+            String url = endpoint.getText().toString().trim();
+            String key = token.getText().toString().trim();
+            String sourceId = ids.get(AstrBot.Resource.SOURCE).getText().toString();
+            if (create) {
+                editor(resource, url, key, id, sourceId, true, new JSONObject());
+            } else {
+                run(() -> new AstrBot(url, key).read(resource, id), fields -> {
+                    status.setText("");
+                    editor(resource, url, key, id, sourceId, false, fields);
+                }, status, "正在联系 AstrBot…");
+            }
+        }
+
+        private void editor(AstrBot.Resource resource, String url, String key, String id,
+                            String sourceId, boolean create, JSONObject data) {
+            ScrollView scroll = new ScrollView(MainActivity.this);
+            LinearLayout form = column();
+            form.setPadding(dp(20), 0, dp(20), dp(12));
+            scroll.addView(form);
+            Map<String, EditText> fields = new LinkedHashMap<>();
+            switch (resource) {
+                case SOURCE -> {
+                    fields.put("api_base", botField(form, "模型 API 地址", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI));
+                    EditText secret = botField(form, "模型 API Key", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                    if (!create) secret.setHint("留空保留现有密钥");
+                    fields.put("api_key", secret);
+                }
+                case PROVIDER -> fields.put("model", botField(form, "模型名称", InputType.TYPE_CLASS_TEXT));
+                case PERSONA -> {
+                    int multiline = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+                    fields.put("system_prompt", botField(form, "系统提示词", multiline));
+                    fields.put("custom_error_message", botField(form, "自定义出错回复", multiline));
+                }
+            }
+            for (var entry : fields.entrySet()) entry.getValue().setText(data.optString(entry.getKey(), ""));
+            TextView outcome = label("", 13, MUTED);
+            outcome.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            addSpaced(form, outcome, 8);
+            String title = create && resource == AstrBot.Resource.SOURCE ? "新建 OpenAI 兼容模型源"
+                    : (create ? "新建" : "编辑") + title(resource);
+            AlertDialog dialog = new AlertDialog.Builder(MainActivity.this).setTitle(title).setView(scroll)
+                    .setNegativeButton("取消", null).setPositiveButton(create ? "创建到 AstrBot" : "保存到 AstrBot", null).create();
+            dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                if (busy) return;
+                try {
+                    JSONObject values = new JSONObject().put("source_id", sourceId);
+                    for (var entry : fields.entrySet()) values.put(entry.getKey(), entry.getValue().getText().toString());
+                    run(() -> {
+                        new AstrBot(url, key).save(resource, id, values, create);
+                        return new JSONObject();
+                    }, result -> {
+                        dialog.dismiss();
+                        status.setText("已保存到 AstrBot");
+                    }, outcome, "正在保存到 AstrBot…");
+                } catch (JSONException error) {
+                    outcome.setText("表单格式无效");
+                }
+            }));
+            dialog.show();
+        }
+
+        private void run(BotRequest task, SocialReply accept, TextView outcome, String pending) {
+            if (busy) return;
+            busy = true;
+            controls.forEach(control -> control.setEnabled(false));
+            saveAccount.setEnabled(false);
+            outcome.setText(pending);
+            socialRequests.execute(() -> {
+                try {
+                    JSONObject result = task.call();
+                    main.post(() -> complete(() -> accept.accept(result), outcome));
+                } catch (IOException | JSONException error) {
+                    String message = error instanceof IOException ? error.getMessage() : "机器人配置响应无效";
+                    main.post(() -> complete(() -> outcome.setText(message), outcome));
+                }
+            });
+        }
+
+        private void complete(SocialReplyCompletion result, TextView outcome) {
+            if (isDestroyed() || page != screen) return;
+            try {
+                result.accept();
+            } catch (JSONException error) {
+                outcome.setText("机器人配置响应无效");
+            } finally {
+                busy = false;
+                controls.forEach(control -> control.setEnabled(true));
+                saveAccount.setEnabled(revision >= 0);
+            }
+        }
+    }
+
+    private interface SocialReplyCompletion {
+        void accept() throws JSONException;
+    }
+
+    private interface BotRequest {
+        JSONObject call() throws IOException, JSONException;
+    }
+
+    private EditText botField(LinearLayout parent, String name, int inputType) {
+        EditText input = field("", inputType);
+        input.setId(View.generateViewId());
+        input.setSaveEnabled(false);
+        input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        TextView caption = label(name, 14, INK);
+        caption.setLabelFor(input.getId());
+        addSpaced(parent, caption, 8);
+        addSpaced(parent, input, 4);
+        return input;
+    }
+
     private SharedPreferences preferences() {
         return getSharedPreferences(MessagePushService.PREFERENCES, MODE_PRIVATE);
+    }
+
+    /** App 内主题偏好：system / light / dark。视图全在 onCreate 里建，所以在 attachBaseContext 就定好 uiMode。 */
+    private static final String PREF_THEME = "appearance_theme";
+    /** 动效偏好，与桌面设置页「动效」三行一一对应。 */
+    private static final String PREF_NEW_TEXT = "motion_new_text";
+    private static final String PREF_BUBBLE = "motion_bubble";
+    private static final String PREF_SCROLL = "motion_scroll";
+    /** 主题切换重建 Activity 后，下一次进入主页时改回设置页。 */
+    private static boolean reopenSettingsAfterRecreate;
+
+    /** 新文字：fade（淡入，默认）/ instant（直接出现）。 */
+    private boolean fadeInNewText() {
+        return !"instant".equals(preferences().getString(PREF_NEW_TEXT, "fade"));
+    }
+
+    /** 气泡：grow（原地长出）/ fly（从输入框飞上来，默认）。 */
+    private boolean growBubble() {
+        return "grow".equals(preferences().getString(PREF_BUBBLE, "fly"));
+    }
+
+    /** 滚动：smooth（跟随滑动，默认）/ jump（直接跳到底部）。 */
+    private boolean smoothScrollEnabled() {
+        return !"jump".equals(preferences().getString(PREF_SCROLL, "smooth"));
+    }
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        String theme = base.getSharedPreferences(MessagePushService.PREFERENCES, MODE_PRIVATE)
+                .getString(PREF_THEME, "system");
+        int night = "dark".equals(theme) ? Configuration.UI_MODE_NIGHT_YES
+                : "light".equals(theme) ? Configuration.UI_MODE_NIGHT_NO
+                : Configuration.UI_MODE_NIGHT_UNDEFINED;
+        if (night == Configuration.UI_MODE_NIGHT_UNDEFINED) {
+            super.attachBaseContext(base);
+            return;
+        }
+        Configuration configuration = new Configuration(base.getResources().getConfiguration());
+        configuration.uiMode = (configuration.uiMode & ~Configuration.UI_MODE_NIGHT_MASK) | night;
+        super.attachBaseContext(base.createConfigurationContext(configuration));
+    }
+
+    /** 外观主题：三档滑块（跟随系统 / 浅色 / 深色），与桌面设置页的 SegmentedRadio 同形制。 */
+    private View themeSlider() {
+        return segmentedSlider(PREF_THEME, "system", new String[]{"system", "light", "dark"},
+                new String[]{"跟随系统", "浅色", "深色"}, () -> {
+                    // 主题在 attachBaseContext 定稿，重建 Activity 让资源与对话框配色一起切过去。
+                    reopenSettingsAfterRecreate = true;
+                    recreate();
+                });
+    }
+
+    /** 带小标题的滑块行：标题 14px，滑块距标题 6px。 */
+    private View labeledSlider(String text, View slider) {
+        LinearLayout row = column();
+        row.addView(label(text, 14, INK));
+        addSpaced(row, slider, 6);
+        return row;
+    }
+
+    /** 动效偏好滑块：写入即生效，下一条消息 / 下一次滚动就按新值执行。 */
+    private View motionSlider(String key, String fallback, String[] values, String[] texts) {
+        return segmentedSlider(key, fallback, values, texts, null);
+    }
+
+    /** 三档滑块本体：TINT 轨道 + PAPER 胶囊，点击后胶囊滑到选中项（160ms，与桌面 surface 档一致）。 */
+    private View segmentedSlider(String key, String fallback, String[] values, String[] texts, Runnable afterChange) {
+        final String current = preferences().getString(key, fallback);
+        FrameLayout holder = new FrameLayout(this);
+        holder.setBackground(card(TINT, 18));
+        holder.setPadding(dp(4), dp(4), dp(4), dp(4));
+        final View pill = new View(this);
+        pill.setBackground(surface(PAPER, 15));
+        holder.addView(pill, new FrameLayout.LayoutParams(0, dp(40)));
+        final TextView[] items = new TextView[texts.length];
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < texts.length; i++) {
+            final String value = values[i];
+            boolean selected = value.equals(current);
+            TextView item = label(texts[i], 14, selected ? INK : MUTED);
+            item.setGravity(Gravity.CENTER);
+            if (selected) item.setTypeface(mediumFont);
+            item.setOnClickListener(view -> {
+                if (value.equals(preferences().getString(key, fallback))) return;
+                preferences().edit().putString(key, value).apply();
+                int index = 0;
+                for (int candidate = 0; candidate < values.length; candidate++) {
+                    boolean activeItem = values[candidate].equals(value);
+                    items[candidate].setTextColor(activeItem ? INK : MUTED);
+                    items[candidate].setTypeface(activeItem ? mediumFont : regularFont);
+                    if (activeItem) index = candidate;
+                }
+                int width = holder.getWidth() - holder.getPaddingLeft() - holder.getPaddingRight();
+                pill.animate().translationX((width / (float) texts.length) * index)
+                        .setDuration(MOTION_SURFACE).setInterpolator(ARRIVE).start();
+                if (afterChange != null) afterChange.run();
+            });
+            item.setBackground(ripple(surface(Color.TRANSPARENT, 15), false));
+            labels.addView(item, new LinearLayout.LayoutParams(0, dp(40), 1));
+            items[i] = item;
+        }
+        holder.addView(labels, new FrameLayout.LayoutParams(-1, dp(40)));
+        holder.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            int width = right - left - holder.getPaddingLeft() - holder.getPaddingRight();
+            FrameLayout.LayoutParams pillParams = (FrameLayout.LayoutParams) pill.getLayoutParams();
+            pillParams.width = width / texts.length;
+            pill.setLayoutParams(pillParams);
+            String saved = preferences().getString(key, fallback);
+            int index = 0;
+            for (int i = 0; i < values.length; i++) if (values[i].equals(saved)) index = i;
+            pill.setTranslationX((width / (float) texts.length) * index);
+        });
+        return holder;
     }
 
     private void syncNotifications(boolean requestPermission) {
@@ -3435,7 +3921,7 @@ public final class MainActivity extends Activity {
     private LinearLayout newPage(int direction, boolean slideFromLeftEdge) {
         LinearLayout result = column();
         result.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xffece1ce, PAPER, PAPER}));
+                new int[]{TINT, PAPER, PAPER}));
         result.setFocusableInTouchMode(true);
         if (ownCode != null) {
             connectionBanner = label(connectionStatus, 12, DANGER);
@@ -3446,10 +3932,11 @@ public final class MainActivity extends Activity {
         }
         result.setOnApplyWindowInsetsListener((view, windowInsets) -> {
             if (Build.VERSION.SDK_INT >= 30) {
-                int barAppearance = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                int lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
                         | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                int barAppearance = DARK ? 0 : lightBars;
                 WindowInsetsController controller = view.getWindowInsetsController();
-                if (controller != null) controller.setSystemBarsAppearance(barAppearance, barAppearance);
+                if (controller != null) controller.setSystemBarsAppearance(barAppearance, lightBars);
                 Insets insets = windowInsets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
                 int bottom = dp(10) + insets.bottom;
                 boolean stickToLatest = result.getPaddingBottom() != bottom
@@ -3479,9 +3966,9 @@ public final class MainActivity extends Activity {
                     result.postOnAnimation(() -> {
                         if (screen.getChildAt(screen.getChildCount() - 1) != result) return;
                         if (!slideFromLeftEdge) {
-                            previous.animate().translationX(-direction * dp(8)).setDuration(260).setInterpolator(ARRIVE).start();
+                            previous.animate().translationX(-direction * dp(8)).setDuration(MOTION_OPEN).setInterpolator(ARRIVE).start();
                         }
-                        result.animate().translationX(0).setDuration(slideFromLeftEdge ? 320 : 260).setInterpolator(ARRIVE)
+                        result.animate().translationX(0).setDuration(slideFromLeftEdge ? MOTION_ENTER : MOTION_OPEN).setInterpolator(ARRIVE)
                                 .withEndAction(() -> screen.removeView(previous)).start();
                     });
                     return true;
@@ -3594,13 +4081,13 @@ public final class MainActivity extends Activity {
 
     private ColorStateList controlInk(boolean primary) {
         return new ColorStateList(new int[][]{new int[]{-android.R.attr.state_enabled}, new int[]{}},
-                new int[]{0xff796953, primary ? Color.WHITE : ACCENT});
+                new int[]{DISABLED_INK, primary ? Color.WHITE : ACCENT});
     }
 
     private RippleDrawable controlBackground(boolean primary) {
         StateListDrawable shape = new StateListDrawable();
-        shape.addState(new int[]{-android.R.attr.state_enabled}, surface(0xffece5d9, 14));
-        shape.addState(new int[]{}, surface(primary ? ACCENT : TINT, 14));
+        shape.addState(new int[]{-android.R.attr.state_enabled}, surface(TINT, 14));
+        shape.addState(new int[]{}, surface(primary ? ACCENT_FILL : TINT, 14));
         return ripple(shape, primary);
     }
 
@@ -3631,11 +4118,11 @@ public final class MainActivity extends Activity {
 
     private LayerDrawable bookCard(int radius) {
         GradientDrawable page = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{0xfffffdf6, 0xfffff7e8});
+                new int[]{PAPER, WHITE});
         page.setCornerRadius(dp(radius));
         page.setStroke(dp(1), OUTLINE);
         LayerDrawable book = new LayerDrawable(new Drawable[]{
-                card(0xffd9c8ac, radius), card(0xfff0e4ce, radius), page
+                card(OUTLINE, radius), card(SOFT_CARD, radius), page
         });
         book.setPaddingMode(LayerDrawable.PADDING_MODE_STACK);
         book.setLayerInset(0, 0, dp(4), 0, 0);
@@ -3645,7 +4132,7 @@ public final class MainActivity extends Activity {
     }
 
     private RippleDrawable ripple(android.graphics.drawable.Drawable content, boolean primary) {
-        return new RippleDrawable(ColorStateList.valueOf(primary ? 0x33ffffff : 0x20654832), content, null);
+        return new RippleDrawable(ColorStateList.valueOf(primary ? RIPPLE_PRIMARY : RIPPLE_ACCENT), content, null);
     }
 
     private GradientDrawable surface(int color, int radius) {

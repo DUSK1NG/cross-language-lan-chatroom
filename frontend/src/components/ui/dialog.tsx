@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '../../lib/cn';
-import { ease, easeExit, scaled } from '../../lib/motion';
+import { duration, ease, easeExit, scaled } from '../../lib/motion';
 
 type DialogProps = {
   open: boolean;
@@ -32,16 +32,16 @@ export function Dialog({ open, onOpenChange, title, hideTitle = false, descripti
             <DialogPrimitive.Overlay asChild forceMount>
               <motion.div className="fixed inset-0 z-40 bg-overlay"
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                exit={{ opacity: 0, transition: { duration: scaled(0.15), ease: easeExit } }}
-                transition={{ duration: scaled(0.2), ease }} />
+                exit={{ opacity: 0, transition: { duration: scaled(duration.exit), ease: easeExit } }}
+                transition={{ duration: scaled(duration.surface), ease }} />
             </DialogPrimitive.Overlay>
             <div className="fixed inset-0 z-50 grid place-items-center p-4 pointer-events-none">
               <DialogPrimitive.Content asChild forceMount onEscapeKeyDown={block} onPointerDownOutside={block} onInteractOutside={block}>
                 <motion.section
-                  className={cn('dialog-surface surface-glass pointer-events-auto relative flex max-h-[calc(100vh-64px)] w-full max-w-[440px] flex-col overflow-hidden rounded-card text-ink shadow-dialog', className)}
+                  className={cn('dialog-surface surface-glass pointer-events-auto relative flex max-h-[calc(100vh-64px)] w-full max-w-[440px] flex-col overflow-hidden rounded-[12px] border border-divider text-ink shadow-dialog', className)}
                   initial={{ opacity: 0, y: 12, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 12, scale: 0.97, transition: { duration: scaled(0.15), ease: easeExit } }}
-                  transition={{ duration: scaled(0.28), ease }}>
+                  exit={{ opacity: 0, y: 12, scale: 0.97, transition: { duration: scaled(duration.exit), ease: easeExit } }}
+                  transition={{ duration: scaled(duration.open), ease, opacity: { duration: scaled(duration.surface), ease } }}>
                   <header className={cn('flex items-center gap-3 px-6 pt-6', hideTitle && 'visually-hidden')}>
                     <DialogPrimitive.Title className="flex-1 text-title font-semibold">{title}</DialogPrimitive.Title>
                     {dismissible && !hideTitle && (

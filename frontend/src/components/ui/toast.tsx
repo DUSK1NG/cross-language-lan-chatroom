@@ -7,7 +7,7 @@ export function Toaster() {
       toastOptions={{
         unstyled: true,
         classNames: {
-          toast: 'flex w-[340px] items-center gap-3 rounded-md bg-elevated px-4 py-3 text-body text-ink shadow-dialog',
+          toast: 'flex w-[340px] items-center gap-3 rounded-[10px] border border-divider bg-sidebar px-4 py-3 text-body text-ink shadow-dialog',
           title: 'text-body text-ink',
           description: 'text-small text-ink-2',
           success: '[&_[data-icon]]:text-online',

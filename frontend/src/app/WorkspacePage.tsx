@@ -292,7 +292,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
   const showChat = !narrow || phoneView === 'chat';
 
   return (
-    <main className="flex h-full w-full overflow-hidden text-ink">
+    <main className="chat-workspace flex h-full w-full overflow-hidden text-ink">
       {showList && (
         <div className={cn('surface-chrome relative flex h-full shrink-0 flex-col border-r border-divider', narrow && 'view-enter')} style={{ width: narrow ? '100%' : sidebarWidth }}>
           <ConversationSidebar state={state} bridge={bridge} filter={filter} onFilterChange={setFilter} onCreateRoom={openCreate} onStartPrivate={online ? openPrivate : undefined} onJoinProtectedRoom={openJoin}
@@ -311,7 +311,7 @@ export function WorkspacePage({ bridge, state, onSettings, onReconnect, theme = 
       )}
       {showChat && (!online || active) && (
         <section className={cn('relative flex h-full min-w-0 flex-1', narrow && 'view-enter')} aria-label="聊天">
-          <div className="relative flex min-w-0 flex-1 flex-col" data-file-drop={canDropOnline || undefined}
+          <div className="chat-pane relative flex min-w-0 flex-1 flex-col" data-file-drop={canDropOnline || undefined}
             onDragOver={onDragOver} onDragLeave={(event) => {
               if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragging(false);
             }} onDrop={onDrop}>
@@ -376,13 +376,16 @@ function IdentityCard({ state, onSettings }: { state: BridgeState; onSettings?: 
   const status = connected ? state.connection.statusText
     : state.connection.phase === 'reconnecting' || state.connection.phase === 'connecting' ? '连接中…' : '未连接';
   return (
-    <div data-testid="identity-card" className="flex h-16 shrink-0 items-center gap-3 border-t border-divider px-4">
-      <Avatar name={state.identity.displayName} seed={state.identity.userCode} size={36} online={connected} />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <strong className="truncate text-body font-semibold text-ink">{state.identity.displayName} #{state.identity.userCode}</strong>
-        <small className={cn('truncate text-small', connected ? 'text-ink-2' : 'text-warning')}>{status}</small>
+    <div data-testid="identity-card" className="flex h-[52px] shrink-0 items-center gap-2.5 border-t border-divider px-3">
+      <Avatar name={state.identity.displayName} seed={state.identity.userCode} size={28} online={connected} />
+      <span className="flex min-w-0 flex-1 flex-col justify-center leading-tight">
+        <strong className="truncate text-body font-medium text-ink">{state.identity.displayName}
+          <span className="num font-normal text-ink-3"> #{state.identity.userCode}</span>
+        </strong>
+        <small className={cn('mt-0.5 truncate text-small', connected ? 'text-ink-3' : 'text-warning')}>
+          {status}{state.identity.admin ? ' · 管理员' : ''}
+        </small>
       </span>
-      {state.identity.admin && <span className="shrink-0 rounded-sm bg-accent-soft px-2 text-small text-accent-text">管理员</span>}
       {onSettings && <IconButton label="设置" size="sm" onClick={onSettings} tooltip="设置" ><Settings size={18} aria-hidden="true" /></IconButton>}
     </div>
   );

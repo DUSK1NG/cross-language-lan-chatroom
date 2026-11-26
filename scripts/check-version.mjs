@@ -1,4 +1,4 @@
-// Cargo.toml is the desktop release version source. Use --sync to update build metadata.
+// Cargo.toml provides the desktop and server release version. Use --sync to update build metadata.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ const workspaceVersion = /\[workspace\.package\][^[]*?^version\s*=\s*"(\d+\.\d+\
 
 const derivedVersions = [
   ['Cargo.lock', /(name = "lan-chat-desktop"\r?\nversion = ")([\d.]+)"/],
+  ['Cargo.lock', /(name = "lan-chat-server"\r?\nversion = ")([\d.]+)"/],
   ['apps/desktop/src-tauri/tauri.conf.json', /("version"\s*:\s*")([\d.]+)"/],
   ['frontend/package.json', /("version"\s*:\s*")([\d.]+)"/],
   ['installer/LANChat.iss', /(#define\s+AppVersion\s+")([\d.]+)"/],
@@ -18,24 +19,25 @@ export function checkVersions(root = repoRoot, sync = false) {
   const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
   const version = workspaceVersion.exec(read('Cargo.toml'))?.[1];
   if (!version) throw new Error('Cargo.toml 缺少 [workspace.package].version');
-  const desktopManifest = 'apps/desktop/src-tauri/Cargo.toml';
-  if (!/^version\.workspace\s*=\s*true\s*$/m.test(read(desktopManifest))) {
-    throw new Error(`${desktopManifest} 须设置 version.workspace = true`);
+  for (const manifest of ['apps/desktop/src-tauri/Cargo.toml', 'server-rust/Cargo.toml']) {
+    if (!/^version\.workspace\s*=\s*true\s*$/m.test(read(manifest))) {
+      throw new Error(`${manifest} 须设置 version.workspace = true`);
+    }
   }
   const notesFile = 'frontend/src/changelog/releaseNotes.ts';
   const notesVersion = /version:\s*'([\d.]+)'/.exec(read(notesFile))?.[1];
   if (notesVersion !== version) throw new Error(`${notesFile} 的当前版本说明应为 ${version}`);
 
-  const pending = [];
+  const pending = new Map();
   for (const [file, pattern] of derivedVersions) {
-    const content = read(file);
+    const content = pending.get(file) ?? read(file);
     const match = pattern.exec(content);
     if (!match) throw new Error(`${file} 缺少版本项 ${pattern.source}`);
     const [, prefix, actual] = match;
     if (actual === version) continue;
     if (!sync) throw new Error(`${file} 的版本应为 ${version}，实际为 ${actual}`);
     const start = match.index + prefix.length;
-    pending.push([file, content.slice(0, start) + version + content.slice(start + actual.length)]);
+    pending.set(file, content.slice(0, start) + version + content.slice(start + actual.length));
   }
   for (const [file, content] of pending) fs.writeFileSync(path.join(root, file), content);
   return version;

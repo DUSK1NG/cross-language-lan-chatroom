@@ -114,8 +114,10 @@
     --rgb-color: var(--rgb-text);
     --rgb-accent: var(--rgb-accent);
     --border-radius: var(--radius-card);
+    --emoji-category-duration: var(--dur-panel);
     height: 360px;
   }
+  html[data-effects='off'] .emoji-host em-emoji-picker { --emoji-category-duration: 0ms; }
 }
 
 @layer utilities {
@@ -156,9 +158,9 @@
   inset-block: var(--space-0-5);
   left: var(--space-0-5);
   width: calc((100% - 2 * var(--space-0-5)) / 3);
-  border: 1px solid var(--divider);
+  border: 0;
   border-radius: var(--radius-sm);
-  background: var(--accent-soft);
+  background: var(--bg-hover);
   transform: translateX(var(--filter-offset, 0%));
   transition: transform var(--dur-panel) var(--ease-move);
 }
@@ -188,8 +190,60 @@
 }
 
 .view-enter { animation: view-enter var(--dur-panel) var(--ease) both; }
+.chat-search-field {
+  display: flex;
+  transform-origin: right center;
+  transition: opacity var(--dur-surface) var(--ease), transform var(--dur-panel) var(--ease);
+}
+
+.chat-search-field[data-state='closed'] {
+  display: none;
+  opacity: 0;
+  transform: translateX(8px) scaleX(.95);
+  transition: display var(--dur-exit), opacity var(--dur-exit) var(--ease-exit), transform var(--dur-exit) var(--ease-exit);
+  transition-behavior: allow-discrete;
+}
+
+.chat-search-toggle > svg {
+  position: absolute;
+  pointer-events: none;
+  transition: opacity var(--dur-hover) var(--ease), transform var(--dur-hover) var(--ease);
+}
+.chat-search-toggle[aria-expanded='true'] .chat-search-open-icon,
+.chat-search-toggle[aria-expanded='false'] .chat-search-close-icon {
+  opacity: 0;
+  transform: scale(.8);
+}
+
+@container (max-width: 480px) {
+  .chat-header:has(.chat-search-field[data-state='open']) {
+    .chat-header-conversation { display: none; }
+    .chat-search-field { flex: 1; }
+  }
+}
+
+@starting-style {
+  .chat-search-field[data-state='open'] {
+    opacity: 0;
+    transform: translateX(8px) scaleX(.95);
+  }
+}
+
 .dialog-surface[data-state='closed'] { pointer-events: none; }
 .composer-surface:focus-within { border-color: var(--accent); }
+.composer-surface { border-radius: 16px; box-shadow: none; }
+
+body:has(.chat-workspace) {
+  --font: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+}
+
+.chat-pane { container-type: inline-size; }
+.chat-column {
+  /* Size both columns from the pane, including when the history reserves scrollbar gutters. */
+  inline-size: min(100%, var(--chat-column-width), calc(100cqi - 2 * var(--chat-column-gutter)));
+  margin-inline: auto;
+}
+
 .menu-surface {
   --menu-offset: -4px;
   transform-origin: var(--radix-dropdown-menu-content-transform-origin,
@@ -203,6 +257,15 @@
   animation: menu-dismiss var(--dur-exit) var(--ease-exit) both;
 }
 
+body:has(.chat-workspace) .menu-surface {
+  border-radius: 12px;
+}
+
+body:has(.chat-workspace) .menu-surface[data-state='open'] {
+  animation: menu-fade-in var(--dur-surface) var(--ease) both,
+    menu-expand var(--dur-panel) var(--ease) both;
+}
+
 @keyframes view-enter { from { opacity: 0; transform: translateY(5px); } }
 @keyframes menu-reveal {
   from { opacity: 0; transform: translateY(var(--menu-offset)) scale(.96); }
@@ -211,6 +274,8 @@
 @keyframes menu-dismiss {
   to { opacity: 0; transform: translateY(var(--menu-offset)) scale(.96); }
 }
+@keyframes menu-fade-in { from { opacity: 0; } }
+@keyframes menu-expand { from { transform: translateY(var(--menu-offset)) scale(.96); } }
 
 .cirrus-timeline {
   isolation: isolate;
@@ -238,10 +303,6 @@
   scrollbar-gutter: stable both-edges;
 }
 
-.cirrus-thread {
-  padding-inline: clamp(12px, 2.5vw, 24px);
-}
-
 .cirrus-bubble-column { max-inline-size: min(560px, 78%); }
 .cirrus-row-content { translate: 0 var(--cirrus-row-offset, 0px); }
 .cirrus-word { display: inline-block; max-inline-size: 100%; }
@@ -253,7 +314,7 @@
   padding: 6px 10px;
   color: var(--text);
   font-size: var(--message-font-size);
-  line-height: 1.45;
+  line-height: calc(var(--message-font-size) + 9px);
   backdrop-filter: blur(calc(14px * var(--cirrus-frost)));
   isolation: isolate;
   transition: border-radius 200ms ease-out, scale 160ms ease-out, opacity 160ms ease-out;
@@ -282,7 +343,6 @@
 
 .cirrus-bubble .message-sender { color: var(--bubble-in-meta); }
 .cirrus-bubble[data-state='open'] { scale: 1.025; }
-.cirrus-thread:has(.cirrus-bubble[data-state='open']) .cirrus-bubble:not([data-state='open']) { opacity: .5; }
 @media (pointer: coarse) {
   .cirrus-bubble:active:not([data-state='open']) { scale: .97; }
 }
@@ -294,20 +354,20 @@
 .message--self[data-entering='true'] .cirrus-bubble { animation: cirrus-frost-in var(--dur-send) var(--ease) both; }
 .message--peer[data-entering='true'] .cirrus-bubble {
   transform-origin: bottom left;
-  animation: cirrus-frost-in 560ms var(--ease) both, cirrus-rise var(--dur-panel) var(--ease) both, cirrus-fade var(--dur-enter) var(--ease) both;
+  animation: cirrus-frost-in var(--dur-enter) var(--ease) both, cirrus-rise var(--dur-panel) var(--ease) both, cirrus-fade var(--dur-enter) var(--ease) both;
 }
 .message[data-entering='true'][data-long-reply='true'] .cirrus-bubble {
-  animation: cirrus-frost-in 560ms ease-out both, cirrus-open 640ms cubic-bezier(.18, .85, .28, 1) both, cirrus-fade 200ms ease-out both;
+  animation: cirrus-frost-in var(--dur-enter) var(--ease) both, cirrus-open var(--dur-send) var(--ease) both, cirrus-fade var(--dur-exit) var(--ease) both;
 }
 
 .cirrus-leaving .cirrus-bubble {
-  animation: cirrus-melt 420ms ease-in both;
+  animation: cirrus-melt var(--dur-enter) var(--ease-exit) both;
 }
 .message--peer[data-entering='true'] .message-meta { animation: cirrus-fade var(--dur-enter) var(--ease) both; }
-.cirrus-leaving .message-meta { animation: cirrus-fade 420ms ease-in reverse both; }
+.cirrus-leaving .message-meta { animation: cirrus-fade var(--dur-exit) var(--ease-exit) reverse both; }
 
 .message[data-entering='true'][data-long-reply='true'] .cirrus-word {
-  animation: cirrus-word 360ms ease-out both;
+  animation: cirrus-word var(--dur-enter) var(--ease) both;
   animation-delay: calc(160ms + var(--word) * 18ms);
 }
 
@@ -356,3 +416,67 @@ html.theme-transition:not([data-effects='off']) *::before,
 html.theme-transition:not([data-effects='off']) *::after {
   transition: background-color var(--dur-panel) var(--ease), color var(--dur-panel) var(--ease), border-color var(--dur-panel) var(--ease), fill var(--dur-panel) var(--ease) !important;
 }
+/* ── Claude 皮肤覆盖（dsh-claude-style 移植）────────────────────────────
+   纯色画布、无玻璃/噪点/天空图；对方消息不套气泡，自己消息为中性色块；
+   分隔线 0.5px，焦点环用中性色。 */
+.app-atmosphere { background: var(--bg); }
+
+.cirrus-sky { display: none; }
+
+.cirrus-bubble {
+  padding: 8px 12px;
+  border-radius: var(--radius-bubble);
+  backdrop-filter: none;
+}
+
+.cirrus-bubble::before { background: var(--cirrus-tint); }
+
+.message--peer .cirrus-bubble {
+  --cirrus-tint: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.message--self .cirrus-bubble { --cirrus-tint: var(--bubble-out); }
+
+.border-divider { border-width: 0.5px; }
+.border-b.border-divider { border-bottom-width: 0.5px; }
+.border-t.border-divider { border-top-width: 0.5px; }
+
+:where(button, a, input, textarea, select, [role='button'], [role='tab'], [role='menuitem'], [tabindex]):focus-visible {
+  outline-color: var(--text-3);
+  outline-width: 2px;
+  outline-offset: 2px;
+}
+
+/* ── 动效偏好（设置 → 外观 → 动效）────────────────────────────────
+   与 dsh-claude-style 面板同义：新文字淡入 / 消息气泡（原地长出 vs 从输入框飞上来）
+   / 聊天区滚动（跟随滑动 vs 直接跳到）。默认值保持现有观感。 */
+html[data-new-text='instant'] .message[data-entering='true'] .cirrus-word,
+html[data-new-text='instant'] .message[data-entering='true'] .message-content {
+  animation: none !important;
+}
+
+.message[data-entering='true'] .message-content {
+  animation: cirrus-text-in var(--dur-reveal) var(--ease) both;
+}
+
+@keyframes cirrus-text-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+html[data-bubble-motion='grow'] .message--self[data-entering='true'] .cirrus-bubble-column {
+  animation: cirrus-grow var(--dur-enter) var(--ease) both, cirrus-fade var(--dur-exit) var(--ease) both;
+}
+
+html[data-bubble-motion='grow'] .message--peer[data-entering='true'] .cirrus-bubble {
+  animation: cirrus-grow var(--dur-enter) var(--ease) both, cirrus-fade var(--dur-exit) var(--ease) both;
+}
+
+@keyframes cirrus-grow {
+  from { opacity: 0; transform: scale(.94) translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+html[data-scroll-motion='jump'] .scroll-thin { scroll-behavior: auto; }

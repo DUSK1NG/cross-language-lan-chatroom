@@ -194,6 +194,11 @@ export type CommandResult = {
   error?: BridgeError;
   certificateFile?: string;
   imageUrl?: string;
+  botSettings?: {
+    revision: number;
+    settings: { endpoint: string; source_id: string; provider_id: string; persona_id: string };
+    openapiKey?: string;
+  };
 };
 
 export type AttachmentEventPayload =

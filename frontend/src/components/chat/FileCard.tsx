@@ -50,14 +50,14 @@ export function FileCard({ attachment, bridge, self }: { attachment: MessageAtta
         <span className={cn('num flex flex-wrap items-center gap-x-2 text-small', meta)}>
           {(attachment.logicalSize > 0 || attachment.transport === 'tls') && <span>{formatSize(attachment.logicalSize)}</span>}
           {attachment.transport !== 'tls' && <span className="inline-flex items-center gap-1"><Lock size={12} aria-hidden="true" />端到端加密</span>}
-          {status && <span className={cn(invalid && (self ? 'text-on-accent' : 'text-danger-text'))}>{status}</span>}
+          {status && <span className={cn(invalid && (self ? 'text-danger-text' : 'text-danger-text'))}>{status}</span>}
         </span>
       </span>
       <button type="button" aria-label={`下载 ${attachment.fileName}`} title={expired || invalid ? status : '下载附件'}
         disabled={expired || invalid}
         onClick={() => bridge.dispatch(createCommand('attachment.download', { attachmentId: attachment.attachmentId, chunkIndex: 0 }))}
         className={cn('press inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50',
-          self ? 'text-on-accent hover:bg-on-accent/10' : 'text-accent-text hover:bg-active/40')}>
+          self ? 'text-ink hover:bg-ink/5' : 'text-accent-text hover:bg-active/40')}>
         <Download size={20} aria-hidden="true" />
       </button>
     </div>

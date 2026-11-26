@@ -8,7 +8,7 @@ export function effectsDisabled(): boolean {
 /** Spec easing and durations, in seconds for Framer Motion. */
 export const ease = [0.22, 1, 0.36, 1] as const;
 export const easeExit = [0.45, 0, 0.8, 0.55] as const;
-export const duration = { hover: 0.15, enter: 0.2, panel: 0.3 } as const;
+export const duration = { surface: 0.15, open: 0.25, exit: 0.12 } as const;
 
 /** Duration multiplier published by the native performance profile. */
 let motionScale = 1;

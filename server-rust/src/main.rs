@@ -19,7 +19,10 @@ use lan_chat_protocol::{
     HEARTBEAT, HEARTBEAT_TIMEOUT_SECS, MAX_FRAME_BYTES, Message, ONLINE_ACCOUNTS, ONLINE_FILES,
     ONLINE_GROUPS, ONLINE_IMAGES, ONLINE_MESSAGE_EDIT, ONLINE_SOCIAL, read_message, write_message,
 };
-use lan_chat_protocol::{ONLINE_GROUP_ATTACHMENTS, ONLINE_GROUP_MANAGEMENT, ONLINE_HISTORY_PAGES};
+use lan_chat_protocol::{
+    ONLINE_BOT_KEY_SYNC, ONLINE_BOT_SETTINGS, ONLINE_GROUP_ATTACHMENTS, ONLINE_GROUP_MANAGEMENT,
+    ONLINE_HISTORY_PAGES,
+};
 use online::Online;
 use store::{Rejected, Store};
 use tokio::{
@@ -82,6 +85,8 @@ struct Args {
     cert: Option<PathBuf>,
     #[arg(long)]
     key: Option<PathBuf>,
+    #[arg(long)]
+    bot_key_file: Option<PathBuf>,
     #[arg(long, default_value_t = 64)]
     max_clients: usize,
     #[arg(long)]
@@ -190,7 +195,13 @@ async fn main() -> Result<()> {
         })
         .transpose()
         .context("配置 FCM 推送")?;
-    let online = Arc::new(Mutex::new(Online::new(store, push)));
+    let bot_key = args
+        .bot_key_file
+        .or_else(|| env::var_os("CHAT_BOT_KEY_FILE").map(PathBuf::from))
+        .as_deref()
+        .map(online::BotKey::load)
+        .transpose()?;
+    let online = Arc::new(Mutex::new(Online::new(store, push, bot_key)));
     let database = Arc::new(args.db);
     let maintenance = online.clone();
     tokio::spawn(async move {
@@ -258,6 +269,14 @@ async fn serve(
         .capabilities
         .iter()
         .any(|value| value == ONLINE_GROUP_ATTACHMENTS);
+    let bot_settings = request
+        .capabilities
+        .iter()
+        .any(|value| value == ONLINE_BOT_SETTINGS);
+    let bot_key_sync = request
+        .capabilities
+        .iter()
+        .any(|value| value == ONLINE_BOT_KEY_SYNC);
     let login_state = online.clone();
     let identity = spawn_blocking(move || {
         login_state
@@ -302,6 +321,17 @@ async fn serve(
     }
     if group_attachments {
         capabilities.push(ONLINE_GROUP_ATTACHMENTS.into());
+    }
+    if bot_settings {
+        capabilities.push(ONLINE_BOT_SETTINGS.into());
+        if bot_key_sync
+            && online
+                .lock()
+                .expect("online state poisoned")
+                .supports_bot_key_sync()
+        {
+            capabilities.push(ONLINE_BOT_KEY_SYNC.into());
+        }
     }
     send(
         &mut stream,

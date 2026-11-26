@@ -1,9 +1,9 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, Bell, Info, Palette, Shield, Sparkles, UserRound } from 'lucide-react';
+import { ArrowLeft, Bell, Bot, Info, Palette, Shield, Sparkles, UserRound } from 'lucide-react';
 
 import { createCommand } from '../bridge/chatBridge';
 import type { BridgeState, ChatBridgeClient } from '../bridge/types';
-import { accentPresets, saveAppSettings, useAppSettings, type AccentPreset, type SizePreference, type ThemePreference } from '../state/appSettings';
+import { accentPresets, saveAppSettings, useAppSettings, type AccentPreset, type BubbleMotion, type NewTextMotion, type ScrollMotion, type SizePreference, type ThemePreference } from '../state/appSettings';
 import { currentRelease } from '../changelog/releaseNotes';
 import catBrandMark from '../assets/lan-chat-cat.png';
 import { Avatar } from '../components/ui/avatar';
@@ -12,9 +12,10 @@ import { SegmentedRadio, Select, Switch } from '../components/ui/controls';
 import { IconButton } from '../components/ui/icon-button';
 import { cn } from '../lib/cn';
 import { desktopUpdateRuntime, type DesktopUpdate } from './runtimeBridge';
+import { BotSettingsSection } from './BotSettingsSection';
 
 type SettingsPageProps = { bridge: ChatBridgeClient; state: BridgeState; onBack(): void; onShowReleaseNotes?(): void };
-type Category = 'account' | 'appearance' | 'notifications' | 'privacy' | 'about';
+type Category = 'account' | 'appearance' | 'notifications' | 'privacy' | 'bot' | 'about';
 
 const performanceDiagnosticsEnabled = import.meta.env.VITE_ENABLE_PERFORMANCE_DIAGNOSTICS !== 'false';
 
@@ -23,6 +24,7 @@ const categories: { id: Category; label: string; icon: ReactNode }[] = [
   { id: 'appearance', label: '外观', icon: <Palette size={20} aria-hidden="true" /> },
   { id: 'notifications', label: '通知', icon: <Bell size={20} aria-hidden="true" /> },
   { id: 'privacy', label: '隐私与安全', icon: <Shield size={20} aria-hidden="true" /> },
+  { id: 'bot', label: '机器人', icon: <Bot size={20} aria-hidden="true" /> },
   { id: 'about', label: '关于', icon: <Info size={20} aria-hidden="true" /> }
 ];
 
@@ -36,6 +38,15 @@ const messageSizeOptions: { value: SizePreference; label: string }[] = [
 const bubbleRadiusOptions: { value: SizePreference; label: string }[] = [
   { value: 'small', label: '小圆角' }, { value: 'medium', label: '标准' }, { value: 'large', label: '大圆角' }
 ];
+const newTextOptions: { value: NewTextMotion; label: string }[] = [
+  { value: 'fade', label: '淡入' }, { value: 'instant', label: '直接出现' }
+];
+const bubbleMotionOptions: { value: BubbleMotion; label: string }[] = [
+  { value: 'grow', label: '原地长出' }, { value: 'fly', label: '从输入框飞上来' }
+];
+const scrollMotionOptions: { value: ScrollMotion; label: string }[] = [
+  { value: 'smooth', label: '跟随滑动' }, { value: 'jump', label: '直接跳到' }
+];
 const modeLabels: Record<string, string> = { Automatic: '自动', High: '高性能', Balanced: '均衡', 'Power Saving': '省电' };
 
 /** Settings (spec §10): category list on the left, the chosen category on the right. */
@@ -48,17 +59,17 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
   return (
     <main className="flex h-full w-full overflow-hidden text-ink">
       <nav aria-label="设置分类" className="surface-chrome flex w-[240px] shrink-0 flex-col border-r border-divider max-[699px]:w-[72px]">
-        <header className="flex h-14 shrink-0 items-center gap-2 px-3">
+        <header className="flex h-[52px] shrink-0 items-center gap-2 px-3">
           <IconButton label="返回聊天" onClick={onBack}><ArrowLeft size={20} aria-hidden="true" /></IconButton>
           <h1 className="truncate text-title font-semibold max-[699px]:visually-hidden">设置</h1>
         </header>
         <ul className="flex flex-col gap-1 px-2">
-          {categories.map((item) => (
+          {categories.filter((item) => item.id !== 'bot' || state.edition === 'online').map((item) => (
             <li key={item.id}>
               <button type="button" aria-current={item.id === category ? 'page' : undefined} aria-label={item.label} onClick={() => setCategory(item.id)}
                 className={cn('press flex h-11 w-full cursor-pointer items-center gap-4 rounded-md px-3 text-body',
-                  item.id === category ? 'bg-active text-on-accent' : 'text-ink hover:bg-hover')}>
-                <span className={cn('shrink-0', item.id === category ? 'text-on-accent' : 'text-ink-2')}>{item.icon}</span>
+                  item.id === category ? 'bg-active font-medium text-ink' : 'text-ink hover:bg-hover')}>
+                <span className={cn('shrink-0', item.id === category ? 'text-ink' : 'text-ink-2')}>{item.icon}</span>
                 <span className="truncate max-[699px]:visually-hidden">{item.label}</span>
               </button>
             </li>
@@ -93,6 +104,17 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
                   <Switch label="显示发送时间" checked={settings.showSendTime} onCheckedChange={(checked) => update('showSendTime', checked)} />
                 </Row>
               </Group>
+              <Group title="动效">
+                <Row label="新文字淡入">
+                  <SegmentedRadio label="新文字淡入" value={settings.newText} onValueChange={(value) => update('newText', value)} options={newTextOptions} />
+                </Row>
+                <Row label="消息气泡动画">
+                  <SegmentedRadio label="消息气泡动画" value={settings.bubbleMotion} onValueChange={(value) => update('bubbleMotion', value)} options={bubbleMotionOptions} />
+                </Row>
+                <Row label="聊天区滚动动画">
+                  <SegmentedRadio label="聊天区滚动动画" value={settings.scrollMotion} onValueChange={(value) => update('scrollMotion', value)} options={scrollMotionOptions} />
+                </Row>
+              </Group>
               {performanceDiagnosticsEnabled && <PerformanceSection bridge={bridge} state={state} />}
             </>}
             {category === 'notifications' && (
@@ -101,6 +123,9 @@ export function SettingsPage({ bridge, state, onBack, onShowReleaseNotes }: Sett
               </Group>
             )}
             {category === 'privacy' && <PrivacySection bridge={bridge} state={state} />}
+            {category === 'bot' && state.edition === 'online' && (
+              <BotSettingsSection key={state.identity.userCode} bridge={bridge} />
+            )}
             {category === 'about' && (
               <Group title="LAN Chat">
                 <div className="flex items-center gap-4 px-4 py-4">
@@ -214,8 +239,8 @@ function DesktopUpdatePanel({ edition }: { edition: BridgeState['edition'] }) {
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section aria-label={title} className="flex flex-col gap-2">
-      <h3 className="px-4 text-small font-medium text-accent-text">{title}</h3>
-      <div className="surface-glass flex flex-col overflow-hidden rounded-card">{children}</div>
+      <h3 className="px-1 text-small font-medium text-ink-3">{title}</h3>
+      <div className="flex flex-col overflow-hidden rounded-[10px] border border-divider bg-sidebar">{children}</div>
     </section>
   );
 }
@@ -239,8 +264,8 @@ function Value({ children }: { children: ReactNode }) {
 function AccountSection({ state, onSignOut }: { state: BridgeState; onSignOut: () => void }) {
   const endpoint = `${state.savedConnection.serverIp || '未设置'}:${state.savedConnection.serverPort || '—'}`;
   return <>
-    <div className="flex items-center gap-4 rounded-md bg-sidebar px-4 py-4">
-      <Avatar name={state.identity.displayName} seed={state.identity.userCode} size={80} />
+    <div className="flex items-center gap-3 rounded-[10px] border border-divider bg-sidebar px-4 py-3.5">
+      <Avatar name={state.identity.displayName} seed={state.identity.userCode} size={44} />
       <span className="flex min-w-0 flex-col">
         <strong className="truncate text-title font-semibold">{state.identity.displayName}</strong>
         <small className="num text-body text-ink-2">#{state.identity.userCode}{state.identity.admin ? ' · 管理员' : ''}</small>

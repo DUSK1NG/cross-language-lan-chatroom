@@ -1,0 +1,17 @@
+<resources>
+    <style name="LanChatTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#E08A6D</item>
+        <item name="android:colorBackgroundFloating">#1F1F1F</item>
+        <item name="android:windowBackground">#191919</item>
+        <item name="android:statusBarColor">#191919</item>
+        <item name="android:navigationBarColor">#191919</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:alertDialogTheme">@style/LanChatDialog</item>
+    </style>
+
+    <style name="LanChatDialog" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/dialog_surface</item>
+        <item name="android:colorAccent">@color/dialog_accent</item>
+        <item name="android:colorBackgroundFloating">@color/dialog_surface</item>
+    </style>
+</resources>

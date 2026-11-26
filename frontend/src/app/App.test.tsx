@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createFakeBridge } from '../bridge/chatBridge';
-import type { BridgeState } from '../bridge/types';
+import type { BridgeState, CommandResult } from '../bridge/types';
 import { App } from './App';
 
 const disconnectedState: BridgeState = {
@@ -202,7 +202,7 @@ describe('App', () => {
     });
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '# lobby' })).toBeInTheDocument());
-    expect(screen.getByText('Alice #A001')).toBeInTheDocument();
+    expect(screen.getByTestId('identity-card')).toHaveTextContent('Alice #A001');
 
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     expect(screen.getByRole('heading', { name: '设置' })).toBeInTheDocument();
@@ -262,6 +262,67 @@ describe('App', () => {
 
     expect(screen.getByText('局域网')).toBeInTheDocument();
     expect(screen.getByText('127.0.0.1:8888')).toBeInTheDocument();
+  });
+
+  it('syncs the AstrBot OpenAPI key with the account and sends the model API key only to AstrBot', async () => {
+    const bridge = createFakeBridge({
+      ...disconnectedState,
+      edition: 'online',
+      connection: { phase: 'connected', statusText: '已连接', retryable: false },
+      navigation: { page: 'workspace' }
+    });
+    const settings = { endpoint: 'https://bot.example.com', source_id: 'source', provider_id: 'model', persona_id: 'persona' };
+    const listeners = new Set<(result: CommandResult) => void>();
+    vi.spyOn(bridge, 'subscribeCommandResult').mockImplementation((listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    });
+    const dispatch = vi.spyOn(bridge, 'dispatch').mockImplementation((command) => {
+      queueMicrotask(() => listeners.forEach((listener) => listener({
+        id: command.id, ok: true, botSettings: { revision: 3, settings, openapiKey: 'test-openapi-key' }
+      })));
+    });
+    const invoke = vi.fn(async (_command: string, args: { operation: string }) => {
+      if (args.operation === 'list') return ['default', 'persona', 'xiaojingyu'];
+      return args.operation === 'read' ? { api_base: 'https://model.example.com/v1' } : null;
+    });
+    vi.stubGlobal('__TAURI__', { core: { invoke } });
+    try {
+      render(<App bridge={bridge} />);
+      fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+      fireEvent.click(screen.getByRole('button', { name: '机器人' }));
+      await screen.findByText('账号设置已同步');
+      expect(screen.getByLabelText('AstrBot 地址')).toHaveValue(settings.endpoint);
+      expect(screen.getByLabelText('AstrBot OpenAPI Key')).toHaveValue('test-openapi-key');
+      const source = within(screen.getByRole('form', { name: '模型源' }));
+      fireEvent.click(source.getByRole('button', { name: '读取配置' }));
+      const apiKey = await source.findByLabelText('模型 API Key');
+      expect(apiKey).toHaveValue('');
+      fireEvent.change(apiKey, { target: { value: 'test-model-key' } });
+      fireEvent.click(source.getByRole('button', { name: '保存到 AstrBot' }));
+      await source.findByText('已保存到 AstrBot');
+      expect(invoke).toHaveBeenLastCalledWith('astrbot_settings', expect.objectContaining({
+        token: 'test-openapi-key', operation: 'save', fields: expect.objectContaining({ api_key: 'test-model-key' })
+      }));
+      fireEvent.click(screen.getByRole('button', { name: '保存到账号' }));
+      expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+        type: 'botSettings.save', payload: { revision: 3, content: JSON.stringify(settings), openapiKey: 'test-openapi-key' }
+      }));
+      await screen.findByText('账号设置已同步');
+      const persona = within(screen.getByRole('form', { name: '人格' }));
+      const list = persona.getByRole('button', { name: '读取列表' });
+      expect(persona.getByLabelText('人格编号')).toHaveValue('persona');
+      fireEvent.keyDown(list, { key: 'ArrowDown' });
+      const menu = within(await screen.findByRole('menu'));
+      expect(await menu.findByRole('menuitem', { name: 'default' })).toBeVisible();
+      expect(menu.getByRole('menuitem', { name: 'persona，当前编号' })).toBeVisible();
+      fireEvent.click(menu.getByRole('menuitem', { name: 'xiaojingyu' }));
+      expect(persona.getByLabelText('人格编号')).toHaveValue('xiaojingyu');
+      fireEvent.change(screen.getByLabelText('AstrBot 地址'), { target: { value: 'https://other.example.com' } });
+      expect(screen.getByLabelText('AstrBot OpenAPI Key')).toHaveValue('');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('shows performance and graphics status and dispatches performance mode changes', async () => {
@@ -327,7 +388,7 @@ describe('App', () => {
       navigation: { page: 'workspace', activeConversation: { kind: 'room', id: 'lobby', title: 'lobby' } }
     });
     render(<App bridge={bridge} />);
-    await waitFor(() => expect(document.documentElement.dataset.accent).toBe('blue'));
+    await waitFor(() => expect(document.documentElement.dataset.accent).toBe('orange'));
     fireEvent.click(screen.getByRole('button', { name: '设置' }));
     fireEvent.click(screen.getByRole('button', { name: '外观' }));
 

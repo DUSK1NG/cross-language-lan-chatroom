@@ -7,7 +7,7 @@ import { Button } from '../components/ui/button';
 export function StatusScreen({ icon, title, alert, note, actions }: { icon: ReactNode; title: string; alert: string; note: string; actions: ReactNode }) {
   return (
     <main className="app-atmosphere flex h-full w-full items-center justify-center p-4 text-ink">
-      <section className="view-enter surface-glass flex w-full max-w-[440px] flex-col items-center gap-4 rounded-card p-8 text-center shadow-dialog">
+      <section className="view-enter surface-glass flex w-full max-w-[440px] flex-col items-center gap-4 rounded-[15px] border border-divider p-8 text-center shadow-dialog">
         <span aria-hidden="true" className="inline-flex size-14 items-center justify-center rounded-full bg-hover text-danger-text">{icon}</span>
         <h1 className="text-title font-semibold">{title}</h1>
         <p role="alert" className="text-body text-danger-text">{alert}</p>

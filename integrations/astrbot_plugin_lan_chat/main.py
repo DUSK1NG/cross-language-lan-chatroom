@@ -1,15 +1,12 @@
 import asyncio
 import json
-import os
 import re
 import ssl
 import struct
-from contextlib import suppress
-from pathlib import Path
 from uuid import uuid4
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Plain
 from astrbot.api.platform import (
     AstrBotMessage,
@@ -21,9 +18,6 @@ from astrbot.api.platform import (
 )
 from astrbot.api.star import Star
 from astrbot.core.platform.message_session import MessageSession
-from astrbot.core.platform.platform import PlatformStatus
-from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-from watchfiles import awatch
 
 MAX_FRAME_BYTES = 65536
 USER_CODE = re.compile(r"[A-Za-z0-9]{3,16}")
@@ -35,10 +29,6 @@ REPLY_TOKENS = re.compile(
     r"|https?://[^\s<>。！？；，、」』]+(?<![.!?,;:])"
     r"|(?i:\b(?:mr|mrs|ms|dr|vs|e\.g|i\.e)\.)|\b(?:[A-Za-z]\.){2,})"
     r"|(?P<boundary>[。！？!?]+[”’」』）)\]]*|…{2,}[”’」』）)\]]*|\.+(?=\s|$)|[；;])"
-)
-DEFAULT_CERTIFICATE = (
-    str(Path(os.environ["LOCALAPPDATA"]) / "DUSK1NG" / "LAN Chat" / "host" / "certs" / "server-lan.crt")
-    if "LOCALAPPDATA" in os.environ else ""
 )
 
 
@@ -110,12 +100,12 @@ class LanChatEvent(AstrMessageEvent):
     "lan_chat",
     "LAN Chat TLS room",
     default_config_tmpl={
-        "host": "127.0.0.1",
+        "host": "",
         "port": 8888,
-        "tls_name": "localhost",
-        "certificate": DEFAULT_CERTIFICATE,
-        "username": "AstrBot",
-        "user_code": "BOT001",
+        "tls_name": "",
+        "certificate": "",
+        "username": "",
+        "user_code": "",
         "online": False,
         "password": "",
         "allowed_user_codes": [],
@@ -124,6 +114,10 @@ class LanChatEvent(AstrMessageEvent):
 class LanChatPlatform(Platform):
     def __init__(self, platform_config: dict, platform_settings: dict, event_queue: asyncio.Queue):
         super().__init__(platform_config, event_queue)
+        for field in ("host", "tls_name", "username", "user_code"):
+            value = platform_config.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Configure LAN Chat {field} in AstrBot before enabling this adapter")
         self.writer: asyncio.StreamWriter | None = None
         self.user_code = platform_config["user_code"]
         if not USER_CODE.fullmatch(self.user_code):
@@ -283,44 +277,4 @@ class LanChatPlatform(Platform):
 
 
 class LanChatPlugin(Star):
-    @filter.on_llm_request()
-    async def route_online_search(self, event: AstrMessageEvent, request):
-        if not isinstance(event, LanChatEvent) or not event.platform.online:
-            return
-        request.system_prompt = (request.system_prompt or "") + (
-            "\n\n【自然语言检索】\n"
-            "先判断用户是否需要检索。每轮只先调用一个最合适的工具，等结果回来再决定下一步。"
-            "查时效信息、新闻、公开资料或核实来源时用 anysearch_search；"
-            "阅读用户给出的公开网页时用 anysearch_extract。"
-            "问梗、流行语、黑话或缩写的含义、出处、用法时先用 search_meme_wiki，"
-            "只传要查的词。若上下文已有 MemeWiki 词条，直接用词条；"
-            "等词库返回无结果且确实要核实时，再用 AnySearch。"
-            "问候、日常聊天和稳定常识直接回答。检索仅发送必要关键词，"
-            "给出可核实的来源。结果不足时如实说明。\n"
-            "\n【聊天回复】\n"
-            "日常对话简洁自然，每句尽量只表达一个完整意思，按正常句号、问号和叹号断句。"
-            "关联紧密的分句用逗号连接。详细解释可以按要点分组，保留列表、引用、链接和代码的格式。\n"
-        )
-
-    async def initialize(self):
-        request = Path(get_astrbot_data_path()) / "lan-chat-join.request"
-        self.join_requests = asyncio.create_task(self.wait_for_join_requests(request))
-
-    async def wait_for_join_requests(self, request: Path):
-        async for _ in awatch(
-            request.parent,
-            recursive=False,
-            watch_filter=lambda _, path: Path(path).name == request.name,
-        ):
-            if not request.exists():
-                continue
-            request.unlink()
-            manager = self.context.platform_manager
-            for platform in tuple(manager.get_insts()):
-                if isinstance(platform, LanChatPlatform) and platform.status == PlatformStatus.ERROR:
-                    await manager.reload(platform.config)
-
-    async def terminate(self):
-        self.join_requests.cancel()
-        with suppress(asyncio.CancelledError):
-            await self.join_requests
+    pass

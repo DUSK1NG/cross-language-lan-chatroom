@@ -7,11 +7,19 @@ pub(crate) use files::{migrate_schema, migrate_storage};
 use std::{
     collections::HashMap,
     net::IpAddr,
+    path::Path,
     time::{Duration, Instant},
 };
 
-use anyhow::{Result, bail, ensure};
-use lan_chat_protocol::{MAX_FRAME_BYTES, Message, is_legacy_generated_message_id};
+use anyhow::{Context, Result, anyhow, bail, ensure};
+use lan_chat_protocol::{
+    MAX_FRAME_BYTES, Message, OnlineBotSettings, OnlineBotSettingsWithKey,
+    is_legacy_generated_message_id,
+};
+use ring::{
+    aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey},
+    rand::{SecureRandom, SystemRandom},
+};
 use rusqlite::{OptionalExtension, params};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -41,18 +49,24 @@ fn hide_group_attachment(message: &mut Message) {
 pub struct Online {
     store: Store,
     push: Option<Push>,
+    bot_key: Option<BotKey>,
     peers: HashMap<Uuid, Peer>,
     login_attempts: HashMap<IpAddr, (usize, Instant)>,
 }
 
 impl Online {
-    pub fn new(store: Store, push: Option<Push>) -> Self {
+    pub fn new(store: Store, push: Option<Push>, bot_key: Option<BotKey>) -> Self {
         Self {
             store,
             push,
+            bot_key,
             peers: HashMap::new(),
             login_attempts: HashMap::new(),
         }
+    }
+
+    pub fn supports_bot_key_sync(&self) -> bool {
+        self.bot_key.is_some()
     }
 
     pub fn admit_login(&mut self, address: IpAddr, kind: &str) -> Result<()> {
@@ -200,6 +214,24 @@ impl Online {
             "friend_list" | "friend_request" | "friend_respond" | "profile_get"
             | "profile_save" => {
                 self.social(id, identity, request)?;
+            }
+            "bot_settings_get"
+            | "bot_settings_save"
+            | "bot_settings_get_with_key"
+            | "bot_settings_save_with_key" => {
+                let (revision, content) =
+                    self.store
+                        .bot_settings(&identity.code, request, self.bot_key.as_ref())?;
+                self.deliver(
+                    id,
+                    Message {
+                        kind: request.kind.clone(),
+                        command_id: request.command_id.clone(),
+                        revision,
+                        content,
+                        ..Message::default()
+                    },
+                );
             }
             "group_list" | "group_create" | "group_detail" | "group_send" | "group_history"
             | "group_leave" | "group_invite" | "group_kick" | "group_role" | "group_transfer"
@@ -430,6 +462,200 @@ impl Online {
     }
 }
 
+pub struct BotKey(LessSafeKey);
+
+impl BotKey {
+    pub fn load(path: &Path) -> Result<Self> {
+        let bytes = std::fs::read(path).context("读取 AstrBot 同步加密密钥文件")?;
+        Self::new(&bytes)
+    }
+
+    fn new(bytes: &[u8]) -> Result<Self> {
+        let key = UnboundKey::new(&AES_256_GCM, bytes)
+            .map_err(|_| anyhow!("AstrBot 同步加密密钥须为 32 字节"))?;
+        Ok(Self(LessSafeKey::new(key)))
+    }
+
+    fn seal(&self, owner: &str, endpoint: &str, key: &str) -> Result<Vec<u8>> {
+        let mut nonce = [0; NONCE_LEN];
+        SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| anyhow!("无法生成 AstrBot 密钥加密随机数"))?;
+        let mut ciphertext = key.as_bytes().to_vec();
+        self.0
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(format!("lan-chat-astrbot-key-v1\0{owner}\0{endpoint}")),
+                &mut ciphertext,
+            )
+            .map_err(|_| anyhow!("无法加密 AstrBot OpenAPI Key"))?;
+        Ok([nonce.as_slice(), &ciphertext].concat())
+    }
+
+    fn open(&self, owner: &str, endpoint: &str, mut ciphertext: Vec<u8>) -> Result<String> {
+        let (nonce, data) = ciphertext
+            .split_at_mut_checked(NONCE_LEN)
+            .context("AstrBot 密钥密文格式无效")?;
+        let plaintext = self
+            .0
+            .open_in_place(
+                Nonce::try_assume_unique_for_key(nonce)
+                    .map_err(|_| anyhow!("AstrBot 密钥随机数无效"))?,
+                Aad::from(format!("lan-chat-astrbot-key-v1\0{owner}\0{endpoint}")),
+                data,
+            )
+            .map_err(|_| anyhow!("无法验证 AstrBot 密钥密文"))?;
+        Ok(std::str::from_utf8(plaintext)
+            .context("AstrBot 密钥格式无效")?
+            .into())
+    }
+}
+
+impl Store {
+    fn bot_settings(
+        &self,
+        owner: &str,
+        request: &Message,
+        bot_key: Option<&BotKey>,
+    ) -> Result<(i64, String)> {
+        ensure!(
+            request.target_user_code.is_empty(),
+            Rejected("只能同步自己的机器人设置")
+        );
+        let cipher = match request.kind.as_str() {
+            "bot_settings_get_with_key" | "bot_settings_save_with_key" => {
+                Some(bot_key.ok_or(Rejected("服务器未启用 AstrBot 密钥同步"))?)
+            }
+            _ => None,
+        };
+        if matches!(
+            request.kind.as_str(),
+            "bot_settings_save" | "bot_settings_save_with_key"
+        ) {
+            let (settings, key) = if cipher.is_some() {
+                let data: OnlineBotSettingsWithKey = serde_json::from_str(&request.content)
+                    .map_err(|_| Rejected("机器人设置或 OpenAPI Key 格式无效"))?;
+                (data.settings, Some(data.openapi_key))
+            } else {
+                let settings = serde_json::from_str(&request.content).map_err(|_| {
+                    Rejected("机器人设置只接受 AstrBot 地址、模型源、模型和人格编号")
+                })?;
+                (settings, None)
+            };
+            if !settings.endpoint.is_empty() {
+                let url = url::Url::parse(&settings.endpoint)
+                    .map_err(|_| Rejected("AstrBot 地址格式无效"))?;
+                ensure!(
+                    settings.endpoint.len() <= 512
+                        && url.host().is_some()
+                        && url.scheme() == "https"
+                        && url.path() == "/"
+                        && url.username().is_empty()
+                        && url.password().is_none()
+                        && url.query().is_none()
+                        && url.fragment().is_none()
+                        && !settings.endpoint.contains('\\')
+                        && !settings.endpoint.chars().any(char::is_whitespace),
+                    Rejected("AstrBot 地址须为 HTTPS 根地址")
+                );
+            }
+            ensure!(
+                [
+                    &settings.source_id,
+                    &settings.provider_id,
+                    &settings.persona_id
+                ]
+                .into_iter()
+                .all(|id| id.len() <= 256 && !id.chars().any(char::is_control)),
+                Rejected("模型源、模型和人格编号须为不超过 256 字节的单行文字")
+            );
+            let encrypted = if let Some((cipher, key)) = cipher.zip(key.as_deref()) {
+                ensure!(
+                    key.len() <= 1024
+                        && key.bytes().all(|byte| byte.is_ascii_graphic())
+                        && (key.is_empty() || !settings.endpoint.is_empty()),
+                    Rejected("OpenAPI Key 须为不超过 1024 字节的单行字符，并填写 AstrBot 地址")
+                );
+                Some(if key.is_empty() {
+                    Vec::new()
+                } else {
+                    cipher.seal(owner, &settings.endpoint, key)?
+                })
+            } else {
+                None
+            };
+            let content = serde_json::to_string(&settings)?;
+            let changed = self.0.execute(
+                "INSERT INTO online_bot_settings(user_code,revision,settings,openapi_key)
+                 SELECT ?1, 1, ?3, NULLIF(?4, X'') WHERE ?2 = 0 OR EXISTS
+                     (SELECT 1 FROM online_bot_settings WHERE user_code=?1 AND revision=?2)
+                 ON CONFLICT(user_code) DO UPDATE SET revision=online_bot_settings.revision+1,
+                     settings=excluded.settings,
+                     openapi_key=CASE WHEN ?4 IS NOT NULL THEN excluded.openapi_key
+                         WHEN json_extract(online_bot_settings.settings,'$.endpoint')=?5
+                         THEN online_bot_settings.openapi_key END
+                 WHERE online_bot_settings.revision=?2",
+                params![
+                    owner,
+                    request.revision,
+                    content,
+                    encrypted,
+                    settings.endpoint
+                ],
+            )?;
+            ensure!(
+                changed == 1,
+                Rejected("机器人设置已在其他设备更新，请重新读取账号设置")
+            );
+            let content = match key {
+                Some(openapi_key) => serde_json::to_string(&OnlineBotSettingsWithKey {
+                    settings,
+                    openapi_key,
+                })?,
+                None => content,
+            };
+            return Ok((request.revision + 1, content));
+        }
+        let saved = self
+            .0
+            .query_row(
+                "SELECT revision, settings, openapi_key FROM online_bot_settings WHERE user_code=?",
+                [owner],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<Vec<u8>>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let (revision, content, encrypted) = match saved {
+            Some(saved) => saved,
+            None => (
+                0,
+                serde_json::to_string(&OnlineBotSettings::default())?,
+                None,
+            ),
+        };
+        let Some(cipher) = cipher else {
+            return Ok((revision, content));
+        };
+        let settings: OnlineBotSettings = serde_json::from_str(&content)?;
+        let openapi_key = match encrypted {
+            Some(bytes) => cipher.open(owner, &settings.endpoint, bytes)?,
+            None => String::new(),
+        };
+        Ok((
+            revision,
+            serde_json::to_string(&OnlineBotSettingsWithKey {
+                settings,
+                openapi_key,
+            })?,
+        ))
+    }
+}
+
 fn private_target(identity: &Identity, request: &Message) -> Result<String> {
     let code = user_code(&request.target_user_code)
         .map_err(|_| Rejected("请输入其他用户的有效用户代码"))?;
@@ -458,6 +684,182 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
+
+    #[test]
+    fn bot_settings_follow_account_and_reject_stale_writes() -> Result<()> {
+        let database = std::env::temp_dir().join(format!("lan-chat-bot-{}.db", Uuid::new_v4()));
+        let store = Store::open(&database)?;
+        store
+            .0
+            .execute_batch("DROP TABLE online_bot_settings; PRAGMA user_version=3;")?;
+        for code in ["alice", "bobby"] {
+            store.0.execute(
+                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                [code],
+            )?;
+        }
+        drop(store);
+
+        let mut online = Online::new(Store::open(&database)?, None, Some(BotKey::new(&[42; 32])?));
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let connect = |online: &mut Online, id, code: &str| -> Result<_> {
+            let (sender, mut receiver) = mpsc::channel(8);
+            online.register(
+                id,
+                Identity {
+                    code: code.into(),
+                    username: code.into(),
+                    display_code: code.into(),
+                },
+                sender,
+                false,
+                false,
+            )?;
+            while receiver.try_recv().is_ok() {}
+            Ok(receiver)
+        };
+        let mut first_reply = connect(&mut online, first, "alice")?;
+        let mut second_reply = connect(&mut online, second, "alice")?;
+        let mut other_reply = connect(&mut online, other, "bobby")?;
+        let get = Message {
+            kind: "bot_settings_get".into(),
+            command_id: "get".into(),
+            ..Message::default()
+        };
+        online.command(second, get.clone());
+        assert_eq!(second_reply.try_recv()?.revision, 0);
+
+        let data = serde_json::json!({"endpoint":"https://bot.example.com", "source_id":"自定义源",
+            "provider_id":"my/model", "persona_id":"工作助手"});
+        let save = Message {
+            kind: "bot_settings_save".into(),
+            command_id: "save".into(),
+            content: data.to_string(),
+            ..Message::default()
+        };
+        online.command(first, save.clone());
+        assert_eq!(first_reply.try_recv()?.revision, 1);
+        online.command(second, get.clone());
+        let synced = second_reply.try_recv()?;
+        assert_eq!(synced.command_id, "get");
+        assert_eq!(synced.revision, 1);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&synced.content)?,
+            data
+        );
+
+        online.command(second, save.clone());
+        assert_eq!(second_reply.try_recv()?.kind, "error");
+        online.command(other, get.clone());
+        assert_eq!(other_reply.try_recv()?.revision, 0);
+        online.command(
+            other,
+            Message {
+                target_user_code: "alice".into(),
+                ..get
+            },
+        );
+        assert_eq!(other_reply.try_recv()?.kind, "error");
+        let mut secret = data.clone();
+        secret["api_key"] = serde_json::json!("test-secret");
+        online.command(
+            second,
+            Message {
+                revision: 1,
+                content: secret.to_string(),
+                ..save.clone()
+            },
+        );
+        assert_eq!(second_reply.try_recv()?.kind, "error");
+        online.command(
+            second,
+            Message {
+                revision: 1,
+                ..save.clone()
+            },
+        );
+        assert_eq!(second_reply.try_recv()?.revision, 2);
+
+        let key = "abk_account_test_fixture";
+        let save_key = Message {
+            kind: "bot_settings_save_with_key".into(),
+            revision: 2,
+            content: serde_json::json!({"settings": data, "openapi_key": key}).to_string(),
+            ..save.clone()
+        };
+        online.command(first, save_key.clone());
+        assert_eq!(first_reply.try_recv()?.revision, 3);
+        let (settings_json, ciphertext): (String, Vec<u8>) = online.store.0.query_row(
+            "SELECT settings,openapi_key FROM online_bot_settings WHERE user_code='alice'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert!(!settings_json.contains(key));
+        assert!(
+            !ciphertext
+                .windows(key.len())
+                .any(|part| part == key.as_bytes())
+        );
+
+        let get_key = Message {
+            kind: "bot_settings_get_with_key".into(),
+            ..Message::default()
+        };
+        online.command(second, get_key.clone());
+        assert_eq!(
+            serde_json::from_str::<OnlineBotSettingsWithKey>(&second_reply.try_recv()?.content)?
+                .openapi_key,
+            key
+        );
+        online.command(other, get_key.clone());
+        assert!(
+            serde_json::from_str::<OnlineBotSettingsWithKey>(&other_reply.try_recv()?.content)?
+                .openapi_key
+                .is_empty()
+        );
+        online.command(second, save_key);
+        assert_eq!(second_reply.try_recv()?.kind, "error");
+
+        online.command(
+            second,
+            Message {
+                kind: "bot_settings_get".into(),
+                ..Message::default()
+            },
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&second_reply.try_recv()?.content)?,
+            data
+        );
+        let mut changed_endpoint = data;
+        changed_endpoint["endpoint"] = serde_json::json!("https://other.example.com");
+        online.command(
+            second,
+            Message {
+                revision: 3,
+                content: changed_endpoint.to_string(),
+                ..save
+            },
+        );
+        assert_eq!(second_reply.try_recv()?.revision, 4);
+        online.command(first, get_key);
+        assert!(
+            serde_json::from_str::<OnlineBotSettingsWithKey>(&first_reply.try_recv()?.content)?
+                .openapi_key
+                .is_empty()
+        );
+        drop(online);
+        let reopened = Store::open(&database)?;
+        assert_eq!(
+            reopened.bot_settings("alice", &Message::default(), None)?.0,
+            4
+        );
+        drop(reopened);
+        fs::remove_file(database)?;
+        Ok(())
+    }
 
     #[test]
     fn online_migration_group_visibility_and_legacy_transfer() -> Result<()> {
@@ -502,7 +904,7 @@ mod tests {
             store
                 .0
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            3
+            5
         );
         assert_eq!(
             store
@@ -526,7 +928,7 @@ mod tests {
                 .image_size,
             legacy_photo.len() as i64
         );
-        let mut online = Online::new(store, None);
+        let mut online = Online::new(store, None, None);
         let mut connect = |code: &str, modern| -> Result<_> {
             let id = Uuid::new_v4();
             let identity = Identity {

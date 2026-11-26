@@ -15,8 +15,9 @@ function fixture(t, installerVersion = '1.4.0') {
   t.after(() => fs.rmSync(root, { recursive: true }));
   const files = {
     'Cargo.toml': '[workspace.package]\nversion = "1.4.0"',
-    'Cargo.lock': 'name = "lan-chat-desktop"\nversion = "1.4.0"',
+    'Cargo.lock': 'name = "lan-chat-desktop"\nversion = "1.4.0"\n\nname = "lan-chat-server"\nversion = "1.4.0"',
     'apps/desktop/src-tauri/Cargo.toml': 'version.workspace = true',
+    'server-rust/Cargo.toml': 'version.workspace = true',
     'apps/desktop/src-tauri/tauri.conf.json': '{"version": "1.4.0"}',
     'frontend/package.json': '{"version": "1.4.0"}',
     'installer/LANChat.iss': `#define AppVersion "${installerVersion}"`,
@@ -31,7 +32,7 @@ function fixture(t, installerVersion = '1.4.0') {
   return root;
 }
 
-test('桌面和安装器版本与工作区发布版本一致', () => {
+test('桌面、服务端和安装器版本与工作区发布版本一致', () => {
   assert.equal(checkVersions(), '1.4.0');
 });
 
@@ -42,9 +43,11 @@ test('拒绝安装器版本与工作区版本不符的构建', (t) => {
   assert.match(proc.stderr, /LANChat\.iss 的版本应为 1\.4\.0，实际为 1\.3\.0/);
 });
 
-test('同步安装器和前端版本字段', (t) => {
+test('同步安装器、前端和锁文件中的版本字段', (t) => {
   const root = fixture(t, '1.3.0');
   fs.writeFileSync(path.join(root, 'frontend/package.json'), '{"version": "1.3.0"}');
+  const lockfile = path.join(root, 'Cargo.lock');
+  fs.writeFileSync(lockfile, fs.readFileSync(lockfile, 'utf8').replaceAll('1.4.0', '1.3.0'));
   assert.equal(checkVersions(root, true), '1.4.0');
   assert.equal(checkVersions(root), '1.4.0');
 });
