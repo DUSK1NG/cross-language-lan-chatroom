@@ -55,6 +55,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-26 21:20 · 线上群聊撤回真机验收（测试数据已清理）
+
+- **执行者**：lead（DeepSeek Harness）
+- **目的**：验证上一提交里的「群里别人撤回 → 灰色小字提示」。
+- **做法**：本地 python TLS 客户端（.tools/tmp/xcall.py，4 字节长度前缀 + JSON 帧）注册临时账号 T9001「测试员」→ 向 001 发好友申请 → 手机端同意 → T9001 建群「撤回测试群」并邀 001 → 群里发消息并撤回。
+- **结果**：手机上实时显示居中灰色小字「测试员 撤回了一条消息」（.tools/tmp/group2.png）；杀掉进程重进群，历史里仍是同一条灰字（group3.png）；私聊与自己的消息仍显示「消息已撤回」。
+- **清理**：测试群、群消息、好友关系、临时账号 T9001 已从线上 chat.db 删除（WHERE 精确到 group id / 账号），线上回到原有状态（仅 001 dusk 与 BOT001 AstrBot，好友关系仍是未接受的 bot001）。
+- **坑**：服务端没有解散群接口，群主也不能直接退群，测试群只能靠 DB 清理；group_create 与 group_invite 都要求双方已是好友（profile.friendship == friend）；脚本客户端要按「发一帧、读一帧」同步收发，带缓冲的循环读取会卡住。
+- **未做**：桌面端撤回仍是把整条隐藏（crates/client-core/src/state.rs:293 filter !hidden），与 Android 的灰字提示不一致，如需统一另行处理。
+- **阻塞**：无。
+
 ## 2026-11-26 21:09 · 撤回消息改为灰色居中小字
 
 - **执行者**：lead（DeepSeek Harness）
