@@ -55,6 +55,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-26 20:55 · 部署在线服务端到 1.4.1（含群消息撤回）
+
+- **执行者**：lead（DeepSeek Harness）
+- **目标**：把本轮 `message_recall` 的服务端改动推到线上（1.15.129.115:8888），让在线群成员能撤回自己的消息。
+- **远端环境**：腾讯云上海 `ubuntu@1.15.129.115`，私钥 `~/.ssh/lan_chat_tencent_shanghai_ed25519`；systemd unit `lan-chat-online.service`（`DynamicUser=yes`、`StateDirectory=lan-chat-online`、`LoadCredential=tls-cert/tls-key/firebase-admin/fcm-relay-secret`），`ExecStart=/usr/local/bin/lan-chat-online -online -listen 0.0.0.0:8888 -db /var/lib/lan-chat-online/chat.db` 加 FCM 参数。该二进制实为 Rust `lan-chat-server`（clap 解析，含 `--mode online` 与 `message_recalled`）。
+- **构建**：远端 `~/lan-chat-v14.H8K06wDp`（含 `source`、`cargo-home`、`target`），工具链 `~/lan-chat-rust.iCGPKo/toolchain/usr`（rust 1.93.1）；`LD_LIBRARY_PATH` 必须含 `.../usr/lib/x86_64-linux-gnu`，否则 cargo 报 `libgit2.so.1.9: cannot open shared object file`。registry 是 rsproxy.cn 镜像，`--offline` 解析失败（`no matching package named serde_json found`），改带 `--config 'source.crates-io.replace-with="rsproxy"'` 与 `--config 'source.rsproxy.registry="sparse+https://rsproxy.cn/index/"'` 在线构建，44s 通过。
+- **同步源码**：本地 `tar czf out/tmp/lan-chat-src.tgz Cargo.toml Cargo.lock server-rust protocol-rust crates apps/desktop/src-tauri tools/bootstrap` → scp → 远端把 `source` 改名为 `source.bak-<时间戳>` 后解包。坑：workspace 成员 `desktop-rust` 未打包，首次 cargo metadata 报 `failed to read .../desktop-rust/Cargo.toml`，从备份 `cp -a` 补回后成功。
+- **安装**：旧二进制备份为 `/usr/local/bin/lan-chat-online.bak-20261126-205206`（9,949,152 B，更早的 `.before-android` 保留）；`sudo install -o root -g root -m 0755` 新二进制 9,973,184 B（sha256 `4474c0a7d57c2a4d3ed422afc9e913801d30ce53c9fee96e315c9cc6c54d18ce`）；`systemctl restart lan-chat-online` 后输出 `listening on 0.0.0.0:8888`，`ss` 显示 AstrBot（127.0.0.1）与一个外网客户端（183.217.27.249）已重连。
+- **未做**：没有用真实账号做端到端「撤回」验证，避免在线上群留下测试消息；该逻辑由 `online_recall_allows_only_the_author` 单测覆盖。
+- **回滚**：`sudo install -m 0755 /usr/local/bin/lan-chat-online.bak-20261126-205206 /usr/local/bin/lan-chat-online && sudo systemctl restart lan-chat-online`。
+- **阻塞**：无。
 ## 2026-11-26 20:38 · 普通成员权限对齐（在线群撤回）与双版重装
 
 - **执行者**：lead（DeepSeek Harness）
