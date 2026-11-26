@@ -135,6 +135,7 @@ public final class MainActivity extends Activity {
     private static final int MAX_IMAGE = 4 * 1024 * 1024;
     private static final int HISTORY_PAGE = 30;
     private static final int INITIAL_HISTORY = 16;
+    private static final String RECALLED_TEXT = "消息已撤回";
     // Claude 中性色卡（与桌面 tokens.css 同源）：浅色纸白底 / 深色炭黑底，强调色 terracotta。
     // 全部视图在 onCreate 里构建，所以 applyPalette() 必须在建视图之前按 uiMode 定好这些值。
     private static boolean DARK;
@@ -328,6 +329,10 @@ public final class MainActivity extends Activity {
                                long revision, boolean recalled, ChatConnection.Attachment attachment) {
         ChatMessage withDelivery(String state) {
             return new ChatMessage(id, author, authorName, text, imageSize, time, state, revision, recalled, attachment);
+        }
+
+        ChatMessage withRecalled() {
+            return new ChatMessage(id, author, authorName, RECALLED_TEXT, 0, time, delivery, revision, true, null);
         }
     }
     private static final Comparator<ChatMessage> MESSAGE_ORDER = Comparator
@@ -770,6 +775,31 @@ public final class MainActivity extends Activity {
                     }
                 }
             }
+            case "message_recalled" -> {
+                String recalledId = packet.getString("message_id");
+                confirmText(recalledId);
+                boolean changed = false;
+                boolean activeChanged = false;
+                for (Map.Entry<String, Map<String, ChatMessage>> entry : histories.entrySet()) {
+                    Map<String, ChatMessage> history = entry.getValue();
+                    for (String identifier : new ArrayList<>(history.keySet())) {
+                        ChatMessage prior = history.get(identifier);
+                        if (prior == null || prior.recalled() || !prior.id().equals(recalledId)) continue;
+                        history.put(identifier, prior.withRecalled());
+                        changed = true;
+                        if (active != null && key(active.code()).equals(entry.getKey())) activeChanged = true;
+                    }
+                }
+                if (selectedQuote != null && selectedQuote.id().equals(recalledId)) {
+                    selectedQuote = null;
+                    quoteBar.setVisibility(View.GONE);
+                }
+                if (activeChanged) {
+                    renderMessages(false);
+                } else if (changed && active == null && !settings) {
+                    renderContacts(false);
+                }
+            }
             case "history_response" -> {
                 if (!packet.optString("search_query").isEmpty()) {
                     if (chatSearch != null) chatSearch.receive(packet);
@@ -867,8 +897,8 @@ public final class MainActivity extends Activity {
                 ? ChatConnection.Attachment.read(packet) : null;
         String author = packet.getString("user_code");
         return new ChatMessage(packet.getString("message_id"), author, packet.optString("username", author),
-                packet.getString("content"), recalled ? 0 : size, time, packet.optString("delivery_state"),
-                packet.optLong("revision"), recalled, attachment);
+                recalled ? RECALLED_TEXT : packet.getString("content"), recalled ? 0 : size, time,
+                packet.optString("delivery_state"), packet.optLong("revision"), recalled, attachment);
     }
 
     private static ChatMessage mergeMessage(ChatMessage prior, ChatMessage received) {
@@ -2468,7 +2498,8 @@ public final class MainActivity extends Activity {
 
     private String messageTime(ChatMessage row, boolean includeDelivery) {
         String clock = row.time() == null ? "" : row.time().atZone(ZoneId.systemDefault()).format(CLOCK);
-        if (row.revision() > 0 && !row.recalled()) clock += (clock.isEmpty() ? "" : " · ") + "已编辑";
+        if (row.recalled()) return clock;
+        if (row.revision() > 0) clock += (clock.isEmpty() ? "" : " · ") + "已编辑";
         if (includeDelivery && "delivered".equals(row.delivery())) clock += (clock.isEmpty() ? "" : " · ") + "已送达";
         if (includeDelivery && "sending".equals(row.delivery())) clock += " · 发送中";
         if (includeDelivery && "failed".equals(row.delivery())) clock += " · 未发送，点此重试";
@@ -2532,6 +2563,12 @@ public final class MainActivity extends Activity {
             getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("消息", row.text()));
             popup.dismiss();
         }), new LinearLayout.LayoutParams(-1, -2));
+        if (self && !pendingTexts.containsKey(row.id())) {
+            addSpaced(actions, button("撤回", false, () -> {
+                popup.dismiss();
+                recallMessage(row);
+            }), 4);
+        }
         if (self && !peer.group() && editingAvailable && !pendingTexts.containsKey(row.id())) {
             addSpaced(actions, button("编辑", false, () -> {
                 popup.dismiss();
@@ -2584,6 +2621,14 @@ public final class MainActivity extends Activity {
         });
         dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
         dialog.show();
+    }
+
+    private void recallMessage(ChatMessage row) {
+        if (connection == null) {
+            toast("连接尚未恢复，请稍后重试");
+            return;
+        }
+        send("message_recall", "message_id", row.id(), "command_id", UUID.randomUUID().toString());
     }
 
     private enum ComposerTool { EMOJI, ATTACHMENT }

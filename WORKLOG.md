@@ -55,6 +55,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-26 21:07 · Android 补撤回入口（在线版）
+
+- **执行者**：lead（DeepSeek Harness）
+- **目标**：手机端也能撤回自己发的消息（此前只有桌面/前端有入口，Android 只显示撤回态）。
+- **改动**：android/app/src/main/java/dev/dusk1ng/lanchat/MainActivity.java
+  - ChatMessage 增加 withRecalled()：文本换成「消息已撤回」，图片/附件清零，recalled 置真。
+  - message() 解析时若 recalled 直接显示占位文案，不再回显原文。
+  - receive() 新增 case message_recalled：按 message_id 在所有会话历史里就地替换成撤回态；当前会话重绘；正被引用的消息则清掉引用条。
+  - 长按菜单对本人且未在发送中的消息新增「撤回」，点击发 message_recall（自带 command_id），失败走既有 error 分支 toast 服务端原因。
+  - messageTime() 对撤回消息只留时间，不再追加「已送达」。
+- **验证**：bash .tools/build-android.sh → BUILD SUCCESSFUL；adb install -r 到 e7125192（Redmi K60 Ultra / shennong 23116PN5BC）；真机长按自己消息，菜单出现「引用回复 / 复制 / 撤回 / 编辑」，点「撤回」后气泡变为「消息已撤回」，服务端 chat.db 该条 recalled=1（message_id web-1795695286684-f90d6041b2c178）；重装后重开会话仍显示「消息已撤回 · 20:14」且无「已送达」，logcat 无崩溃。
+- **未验证**：群聊内撤回仅在代码路径上复用（群用 group_id 分支），未在线上群真机跑；对方在线时实时消失未对测。
+- **下一步**：需要的话给撤回消息加系统消息样式（当前仍是普通气泡）。
+- **阻塞**：无。
+
 ## 2026-11-26 20:55 · 部署在线服务端到 1.4.1（含群消息撤回）
 
 - **执行者**：lead（DeepSeek Harness）
