@@ -28,6 +28,20 @@ Android 发布使用 Secrets `LANCHAT_ANDROID_KEYSTORE_BASE64`、`LANCHAT_ANDROI
 
 工作流根据已存在的 `vX.Y.Z` 或 `vX.Y.Z-rc.N` 标签生成两版桌面 ZIP、Inno 安装器、签名、独立清单和已签名 Android APK。稳定版使用 `latest-lan.json` 与 `latest-online.json`，候选版清单名带 `-rc`，候选客户端绑定该候选标签的更新地址。清单生成时核对安装器实际产品名和版本。全部资产构建成功后创建草稿，公开发布按批准范围执行。
 
+### 更新签名密钥管理
+
+桌面自动更新的密钥对由 Tauri 签名工具生成，两版必须不同：
+
+```powershell
+npm exec --yes --package '@tauri-apps/cli@2.12.6' -- tauri signer generate --ci -p "<私钥口令>" -w "<私钥路径>" -f
+```
+
+- 私钥写入 `release` 环境的 `LANCHAT_UPDATER_PRIVATE_KEY` / `LANCHAT_ONLINE_UPDATER_PRIVATE_KEY`，口令写 `_PASSWORD`；公钥写仓库变量 `LANCHAT_UPDATER_PUBLIC_KEY` / `LANCHAT_ONLINE_UPDATER_PUBLIC_KEY`，由 `option_env!` 在编译期嵌入客户端。
+- 本机副本存放于用户目录 `.lan-chat-keys`（不纳入仓库）：`online-updater.key`、`online-updater.key.pub`、`online-updater.password`、`android-release.jks`、`android-release.password`。LAN 私钥只存在于 GitHub 环境机密，本机没有副本，须另做离线备份。
+- 本地打包 LAN 版前设置 `LANCHAT_UPDATER_PUBLIC_KEY`，打包 Online 版前设置 `LANCHAT_ONLINE_UPDATER_PUBLIC_KEY`，否则构建出的客户端会提示「当前构建未配置签名更新公钥」。
+- Android 正式签名使用 `release` 环境的 `LANCHAT_ANDROID_KEYSTORE_BASE64`、`LANCHAT_ANDROID_KEY_ALIAS`（`lanchat`）、`LANCHAT_ANDROID_STORE_PASSWORD`、`LANCHAT_ANDROID_KEY_PASSWORD` 与 `LANCHAT_ANDROID_GOOGLE_SERVICES_JSON`。换用新密钥签名的 APK 不能覆盖旧密钥签名的安装，用户需先卸载。
+- 私钥或口令丢失将无法再为对应版本签名更新，只能换新密钥并提示用户覆盖安装；换密钥同时更新公钥变量与私钥机密。
+
 首次启用签名更新时，用安装器覆盖现有安装。之后在设置的「关于」主动检查、下载并确认安装。安装包校验 HTTPS、包大小、发布签名和签名中的版本。便携版从对应发布页下载 ZIP 后解压运行。更新异常时撤回发布清单并按配套的数据备份恢复合适版本。
 
 ## 2. 确认 CI 绿灯
