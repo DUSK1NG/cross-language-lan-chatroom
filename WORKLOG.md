@@ -55,6 +55,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+### 2026-11-26 13:45 — 发布桌面双版 1.4.0 正式版（更新签名密钥、公告、v1.4.0 标签与 CI）
+
+- 执行者：lead（DSH）。
+- 改动：
+  - 生成桌面在线版自动更新签名密钥对（Tauri minisign），公钥/私钥/口令保存在 `C:\Users\Q1573\.lan-chat-keys\`（`online-updater.key`、`.key.pub`、`.password` 等）；生成 Android 正式发布 keystore `android-release.jks`（PKCS12，alias `lanchat`，有效期 10950 天，SHA-256 指纹 `0B:6D:D7:A8:31:18:B4:9B:59:41:4F:BA:22:00:39:D7:88:69:8C:EB:6F:35:61:13:63:E3:61:E2:E2:A6:4C:18`）。
+  - GitHub 配置：仓库变量新增 `LANCHAT_ONLINE_UPDATER_PUBLIC_KEY`；`release` 环境机密新增 `LANCHAT_ONLINE_UPDATER_PRIVATE_KEY` / `_PASSWORD`、`LANCHAT_ANDROID_KEYSTORE_BASE64`、`LANCHAT_ANDROID_KEY_ALIAS`、`LANCHAT_ANDROID_STORE_PASSWORD`、`LANCHAT_ANDROID_KEY_PASSWORD`、`GOOGLE_SERVICES_JSON`。
+  - 发布公告：`docs/release-notes/v1.4.0.md` 重写为「新增 / 改进 / 修复」三段；`frontend/src/changelog/releaseNotes.ts` 的 `currentRelease` 更新为 1.4.0 正式版卡片；`docs/release-runbook.md` 新增「### 更新签名密钥管理」（生成命令、变量与机密映射、换钥须卸载重装）。
+  - 打标签 `v1.4.0`（指向 `68b65f4`）并推送，触发 Release workflow `45761851648`；两次批准 `environment: release` 审批门（构建 job 与 draft job 各一次）。
+- 验证：
+  - `node scripts/check-version.mjs` → 发布版本一致：1.4.0；`frontend` 的 `npm run typecheck` 通过、`npx vitest run src/changelog` 2/2 通过。
+  - CI 全部通过：validate、desktop (lan)、desktop (online)、android、draft 均 success。Draft release `v1.4.0` 产出 10 个资产：`LANChat-Desktop-Windows-x64.zip` 14,086,603、`LANChat-Online-Windows-x64.zip` 10,769,724、`LANChat-Setup-x64.exe` 12,618,862（`.sig` 428）、`LANChat-Online-Setup-x64.exe` 10,319,890（`.sig` 436）、`LANChat-Android-arm64.apk` 11,863,163、`latest-lan.json` 2,661、`latest-online.json` 2,679、`SHA256SUMS` 837。
+  - 两份 manifest 的 `version` 为 1.4.0、`signature` 解码含 `version:1.4.0` 且 `size` 与安装器一致；安装器 SHA256：LAN `e84496e418cf001f78224d261cdcfe120af625bde7373b22c7dd582314f24797`，Online `1b4b237e2d1d75e19281f6caf2004c677e73dbaaed219572837ba3afca88c3ef`。
+- 下一步：draft 需要人工发布并设为 latest（更新检查走 `releases/latest/download`），发布后安装版才能收到 1.4.0 更新；本机已装的 Online 是 11:40 构建、未嵌入新公钥，须先手工换成 1.4.0 安装包才能走后续自动更新；Android 新签名与旧调试签名 APK 不兼容，安装新版需先卸载。
+- 阻塞与需拍板：是否发布该 draft release、是否删除 2026-11-24 遗留的 draft release `lan-v1.4.0`。
+
 ### 2026-11-26 12:26 — 推送 master 与 stage/1.4-candidate
 
 - 执行者：lead（DSH）。
