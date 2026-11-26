@@ -393,7 +393,7 @@ impl State {
             attachment
         };
         let content = if message.recalled {
-            RECALLED_MESSAGE.into()
+            recalled_notice(&message.username, message.group_id.is_empty() || own)
         } else if message.crypto.is_some() && attachment.is_none() {
             "加密内容暂不可读取".into()
         } else {
@@ -431,6 +431,37 @@ impl State {
         }
     }
 
+    /// Live recall: the server event carries only the message id, so the stored row is rewritten
+    /// in place instead of hidden — the thread keeps a centred notice where the message was.
+    pub fn recall(&mut self, id: &str) {
+        for (key, rows) in self.histories.iter_mut() {
+            let group = key.starts_with("group:");
+            for row in rows.iter_mut().filter(|row| row.message_id == id) {
+                if row.system_message {
+                    continue;
+                }
+                let name = row.display_name.clone();
+                row.content = recalled_notice(&name, !group || row.self_message);
+                row.system_message = true;
+                row.attachment = None;
+                row.image_size = None;
+                row.image_group.clear();
+                row.delivery_state.clear();
+            }
+        }
+        for row in self.search.iter_mut().filter(|row| row.message_id == id) {
+            if row.system_message {
+                continue;
+            }
+            row.content = RECALLED_MESSAGE.into();
+            row.system_message = true;
+            row.attachment = None;
+            row.image_size = None;
+            row.image_group.clear();
+            row.delivery_state.clear();
+        }
+    }
+
     pub fn update_delivery(&mut self, id: &str, delivery: &str) {
         for rows in self.histories.values_mut() {
             for row in rows {
@@ -439,6 +470,16 @@ impl State {
                 }
             }
         }
+    }
+}
+
+/// Recalled messages keep their slot in the thread as a centred notice (Android parity):
+/// "X 撤回了一条消息" for somebody else's group message, the bare notice everywhere else.
+fn recalled_notice(name: &str, bare: bool) -> String {
+    if bare || name.is_empty() {
+        RECALLED_MESSAGE.into()
+    } else {
+        format!("{name} 撤回了一条消息")
     }
 }
 

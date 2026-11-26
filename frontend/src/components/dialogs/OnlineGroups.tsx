@@ -84,7 +84,7 @@ export function OnlineGroupTools({ bridge, state, onClose, onCreated }: {
   );
 }
 
-type GroupChange = { action: 'leave' | 'kick' | 'transfer'; title: string; userCode?: string };
+type GroupChange = { action: 'leave' | 'kick' | 'transfer' | 'dissolve'; title: string; userCode?: string };
 
 export function OnlineGroupInfo({ bridge, state, group }: {
   bridge: ChatBridgeClient; state: BridgeState; group: GroupSummary;
@@ -149,7 +149,10 @@ export function OnlineGroupInfo({ bridge, state, group }: {
           })}
         </ul>
       </section>
-      {group.role !== 'owner' && <Button variant="danger-outline" disabled={pending} onClick={() => setConfirm({ action: 'leave', title: `退出 ${group.name}` })}>退出群聊</Button>}
+      {owner ? <div className="flex flex-col gap-1">
+        <p className="text-small text-ink-2">解散后所有成员都会被移出，聊天记录会被删除。</p>
+        <Button variant="danger-outline" disabled={pending} onClick={() => setConfirm({ action: 'dissolve', title: `解散 ${group.name}` })}>解散群聊</Button>
+      </div> : <Button variant="danger-outline" disabled={pending} onClick={() => setConfirm({ action: 'leave', title: `退出 ${group.name}` })}>退出群聊</Button>}
       {!confirm && <CommandFeedback {...feedback} />}
       {confirm && <Dialog open title={confirm.title} dismissible={!pending} onOpenChange={(open) => { if (!open) setConfirm(null); }}>
         <CommandFeedback {...feedback} />

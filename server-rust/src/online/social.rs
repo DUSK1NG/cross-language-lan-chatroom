@@ -154,6 +154,18 @@ impl Online {
                 changed.push(owner.clone());
                 changed.extend(self.store.group_codes(&group.id)?);
             }
+            "group_dissolve" => {
+                ensure!(group.role == "owner", Rejected("只有群主可以解散群聊"));
+                ensure!(
+                    self.peers[&id].group_management,
+                    Rejected("客户端未协商群管理能力")
+                );
+                let mut codes = self.store.dissolve_group(&group.id)?;
+                codes.push(owner.clone());
+                self.deliver(id, reply);
+                self.groups_changed(&group.id, codes);
+                return Ok(());
+            }
             "group_send" => {
                 return self.send_group(id, identity, &group, request, None);
             }
@@ -547,6 +559,31 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    fn dissolve_group(&mut self, group: &str) -> Result<Vec<String>> {
+        let members = {
+            let mut query = self.0.prepare(
+                "SELECT user_code FROM online_group_members WHERE group_id=? ORDER BY user_code",
+            )?;
+            query
+                .query_map([group], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?
+        };
+        let tx = self.0.transaction()?;
+        tx.execute(
+            "DELETE FROM chat_messages WHERE kind='online_group' AND conversation_key=?",
+            [group],
+        )?;
+        tx.execute(
+            "DELETE FROM online_file_chunks WHERE file_id IN (SELECT id FROM online_files WHERE group_id=?)",
+            [group],
+        )?;
+        tx.execute("DELETE FROM online_files WHERE group_id=?", [group])?;
+        tx.execute("DELETE FROM online_group_members WHERE group_id=?", [group])?;
+        tx.execute("DELETE FROM online_groups WHERE id=?", [group])?;
+        tx.commit()?;
+        Ok(members)
     }
 }
 

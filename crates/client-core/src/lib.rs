@@ -454,6 +454,7 @@ impl Client {
                         } else {
                             let action = match payload.action.as_str() {
                                 "leave" => "group_leave",
+                                "dissolve" => "group_dissolve",
                                 "invite" => "group_invite",
                                 "kick" => "group_kick",
                                 "role" => "group_role",
@@ -812,8 +813,22 @@ impl Client {
                     }
                 }
             }
+            "group_leave" | "group_dissolve" => {
+                if state.room_commands.remove(&message.command_id) {
+                    state.groups.remove(&message.group_id);
+                    state.histories.remove(&format!("group:{}", message.group_id));
+                    let leaving_active = state.active.as_ref().is_some_and(|active| {
+                        active.kind == "group" && active.id == message.group_id
+                    });
+                    if leaving_active {
+                        state.active = None;
+                        state.group_members.clear();
+                    }
+                    self.result(&message.command_id, Ok(()));
+                }
+            }
             "room_action" | "admin_action" | "friend_request" | "friend_respond"
-            | "group_leave" | "group_invite" | "group_kick" | "group_role" | "group_transfer"
+            | "group_invite" | "group_kick" | "group_role" | "group_transfer"
             | "group_update" | "group_announce" => {
                 if state.room_commands.remove(&message.command_id) {
                     self.result(&message.command_id, Ok(()));
@@ -923,7 +938,7 @@ impl Client {
                 state.approvals.remove(&message.message_id);
             }
             "message_recalled" => {
-                state.hidden.insert(message.message_id.clone());
+                state.recall(&message.message_id);
                 if state.room_commands.remove(&message.command_id) {
                     self.result(&message.command_id, Ok(()));
                 }

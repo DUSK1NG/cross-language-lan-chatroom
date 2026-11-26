@@ -1315,7 +1315,13 @@ public final class MainActivity extends Activity {
                         : () -> openProfile(code, () -> showGroupDetails(current))), 8);
             }
             if (owner && groupManagementAvailable) {
-                addSpaced(body, label("转让群主后可退出群聊", 14, MUTED), 14);
+                addSpaced(body, label("群主不能直接退出，可转让群主或解散群聊", 14, MUTED), 10);
+                addSpaced(body, button("解散群聊", false, () -> new AlertDialog.Builder(this)
+                        .setTitle("解散「" + current.name() + "」？").setMessage("所有成员都会被移出，聊天记录会被删除。")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("解散", (dialog, which) -> socialRequest("group_dissolve", dissolved -> {
+                            forgetGroup(key(current.code()));
+                        }, "group_id", current.code())).show()), 10);
             } else {
                 addSpaced(body, button("退出群聊", false, () -> new AlertDialog.Builder(this)
                         .setTitle("退出「" + current.name() + "」？").setNegativeButton("取消", null)

@@ -236,7 +236,7 @@ impl Online {
             }
             "group_list" | "group_create" | "group_detail" | "group_send" | "group_history"
             | "group_leave" | "group_invite" | "group_kick" | "group_role" | "group_transfer"
-            | "group_update" | "group_announce" => {
+            | "group_update" | "group_announce" | "group_dissolve" => {
                 self.group(id, identity, request)?;
             }
             "history_request" if request.private => {
@@ -1254,6 +1254,138 @@ mod tests {
         online.handle_command(a, &alice, &request("group_leave", "", ""))?;
         drop(online);
         fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn online_group_dissolve_removes_group_and_history() -> Result<()> {
+        let database =
+            std::env::temp_dir().join(format!("lan-chat-dissolve-{}.db", Uuid::new_v4()));
+        let store = Store::open(&database)?;
+        for code in ["alice", "bobby"] {
+            store
+                .0
+                .execute("INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')", [code])?;
+        }
+        store.0.execute(
+            "INSERT INTO online_friendships VALUES ('alice','bobby','alice',1)",
+            [],
+        )?;
+        drop(store);
+        let mut online = Online::new(Store::open(&database)?, None, None);
+        let connect =
+            |online: &mut Online, code: &str| -> Result<(Uuid, mpsc::Receiver<Message>)> {
+                let id = Uuid::new_v4();
+                let (sender, receiver) = mpsc::channel(16);
+                online.register(
+                    id,
+                    Identity {
+                        code: code.into(),
+                        username: code.into(),
+                        display_code: code.into(),
+                    },
+                    sender,
+                    true,
+                    true,
+                )?;
+                Ok((id, receiver))
+            };
+        let (alice_id, mut alice) = connect(&mut online, "alice")?;
+        let (bobby_id, mut bobby) = connect(&mut online, "bobby")?;
+        while alice.try_recv().is_ok() {}
+        while bobby.try_recv().is_ok() {}
+        online.command(
+            alice_id,
+            Message {
+                kind: "group_create".into(),
+                room: "解散测试群".into(),
+                users: vec!["bobby".into()],
+                command_id: "create".into(),
+                ..Message::default()
+            },
+        );
+        let group = loop {
+            let mut reply = alice.try_recv()?;
+            if reply.kind == "group_create" {
+                break reply.groups.remove(0).id;
+            }
+        };
+        while bobby.try_recv().is_ok() {}
+        online.command(
+            alice_id,
+            Message {
+                kind: "group_send".into(),
+                group_id: group.clone(),
+                message_id: Uuid::new_v4().to_string(),
+                content: "解散后应当消失".into(),
+                ..Message::default()
+            },
+        );
+        while bobby.try_recv().is_ok() {}
+        online.command(
+            bobby_id,
+            Message {
+                kind: "group_dissolve".into(),
+                group_id: group.clone(),
+                command_id: "dissolve-member".into(),
+                ..Message::default()
+            },
+        );
+        let denied = loop {
+            let reply = bobby.try_recv()?;
+            if reply.command_id == "dissolve-member" {
+                break reply;
+            }
+        };
+        assert_eq!(denied.kind, "error");
+        online.command(
+            alice_id,
+            Message {
+                kind: "group_dissolve".into(),
+                group_id: group.clone(),
+                command_id: "dissolve-owner".into(),
+                ..Message::default()
+            },
+        );
+        let dissolved = loop {
+            let reply = alice.try_recv()?;
+            if reply.command_id == "dissolve-owner" {
+                break reply;
+            }
+        };
+        assert_eq!(dissolved.kind, "group_dissolve");
+        let changed = loop {
+            let reply = bobby.try_recv()?;
+            if reply.kind == "groups_changed" {
+                break reply;
+            }
+        };
+        assert_eq!(changed.group_id, group);
+        online.command(
+            bobby_id,
+            Message {
+                kind: "group_list".into(),
+                command_id: "list".into(),
+                ..Message::default()
+            },
+        );
+        let listing = loop {
+            let reply = bobby.try_recv()?;
+            if reply.kind == "group_list" {
+                break reply;
+            }
+        };
+        assert!(listing.groups.is_empty());
+        let counts: (i64, i64, i64) = online.store.0.query_row(
+            "SELECT (SELECT COUNT(*) FROM online_groups),
+                    (SELECT COUNT(*) FROM online_group_members),
+                    (SELECT COUNT(*) FROM chat_messages WHERE conversation_key=?)",
+            [group.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(counts, (0, 0, 0));
+        drop(online);
+        fs::remove_file(database)?;
         Ok(())
     }
 }

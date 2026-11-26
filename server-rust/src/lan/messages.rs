@@ -47,7 +47,7 @@ impl Hub {
             | "dm_file_chunk" | "dm_file_commit" | "dm_file_get" | "friend_list"
             | "friend_request" | "friend_respond" | "profile_get" | "profile_save"
             | "group_list" | "group_create" | "group_detail" | "group_send" | "group_history"
-            | "group_leave" => bail!(Rejected("此命令需要在线版服务器")),
+            | "group_leave" | "group_dissolve" => bail!(Rejected("此命令需要在线版服务器")),
             _ => bail!(Rejected("Unsupported message type")),
         }
         Ok(())

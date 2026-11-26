@@ -55,6 +55,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-26 21:45 · 群主解散群聊与桌面/Android 同步
+
+- **执行者**：lead（DeepSeek Harness）
+- **做了什么**：
+  1. 服务端：`server-rust/src/online/social.rs` 新增 `group_dissolve`（仅群主、需 `group_management` 能力，拒绝语「只有群主可以解散群聊」）与 `Store::dissolve_group`（事务内删该群 `chat_messages`、`online_files`/`online_file_chunks`、`online_group_members`、`online_groups`，返回成员代码供 `groups_changed` 广播）；`server-rust/src/online.rs` 分发表追加；`server-rust/src/lan/messages.rs` 明确拒绝在线版命令。
+  2. 客户端核心：`crates/client-core/src/lib.rs` 动作映射 `dissolve → group_dissolve`；完成分支 `group_leave | group_dissolve` 同时清 `groups`、`histories`、`active`、`group_members`。
+  3. 桌面：`frontend/src/components/dialogs/OnlineGroups.tsx` 群主看到「解散群聊」与「解散后所有成员都会被移出，聊天记录会被删除。」，非群主仍是「退出群聊」。
+  4. Android：`MainActivity.showGroupDetails` 的 owner 分支改为「群主不能直接退出，可转让群主或解散群聊」+「解散群聊」按钮 + 二次确认，成功后 `forgetGroup`。
+  5. 撤回态统一：`crates/client-core/src/state.rs` 新增 `State::recall` 与 `recalled_notice`，`lib.rs` 收到 `message_recalled` 改调 `state.recall`；桌面由「整条隐藏」改为居中灰字（群聊「某某 撤回了一条消息」，私聊「消息已撤回」）。
+- **测试**：新增 `server-rust/src/online.rs::online_group_dissolve_removes_group_and_history`（成员解散被拒、群主解散成功、对方收到 `groups_changed`、`group_list` 为空、三张表计数 `(0,0,0)`）。
+- **验证**：
+  - `cargo test --workspace --locked` 通过（heartbeat 用例本身约 60s）；`cargo clippy --workspace --all-targets --locked` 无告警。
+  - `tsc6 --noEmit` 干净；vitest 21 文件 / 196 用例全绿。
+  - 线上 e2e（临时账号 E2E01/E2E02，已删）：成员解散 → `error 只有群主可以解散群聊`；群主解散 → `group_dissolve`；对方 `group_list` 返回 0 个群。
+  - 真机（临时账号 T9003，已删）：把群主转让给 001 后，Android 群资料出现「群主不能直接退出，可转让群主或解散群聊」与「解散群聊」，确认后回到联系人页且显示「还没有群聊」；服务端 `online_groups`/`online_group_members`/该群 `chat_messages` 均为 0。
+- **部署**：线上服务端重建（39.33s，9,967,552 B），备份 `lan-chat-online.bak-20261126-213145`，覆盖 `/usr/local/bin/lan-chat-online` 后 `systemctl restart lan-chat-online` → active、`0.0.0.0:8888` 监听。
+- **安装**：桌面双版 `out/desktop/LANChat.exe` 21,816,832 B、`out/desktop-online/LANChat.exe` 22,592,000 B，覆盖安装到 `%LocalAppData%\Programs\LAN Chat` 与 `LAN Chat Online`；`android/app/build/outputs/apk/debug/app-debug.apk` 已 `adb install -r` 到 e7125192（0.4.1 / versionCode 17）。
+- **说明**：1.4.1 更新说明补了「群主可以解散群聊」一条（同版本改文案不会重弹首启提示）；覆盖安装前停掉了当时运行的 LAN Chat Online，重开后需重填密码。
+- **下一步 / 阻塞**：无。
 ## 2026-11-26 21:20 · 线上群聊撤回真机验收（测试数据已清理）
 
 - **执行者**：lead（DeepSeek Harness）
