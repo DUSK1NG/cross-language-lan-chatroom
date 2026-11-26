@@ -2740,7 +2740,7 @@ dependencies = [
 
 [[package]]
 name = "lan-chat-desktop"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "anyhow",
  "lan-chat-client-core",
@@ -2774,7 +2774,7 @@ dependencies = [
 
 [[package]]
 name = "lan-chat-server"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

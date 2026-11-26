@@ -55,6 +55,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-26 20:20 · 1.4.1 更新说明与三端重装
+
+- **执行者**：lead（DeepSeek Harness）
+- **做了什么**：把六项反人类设计修完后的状态升为补丁版 `1.4.1`，让更新说明能真正弹出来。`Cargo.toml` 版本 1.4.0 → 1.4.1，`node scripts/check-version.mjs --sync` 同步 `Cargo.lock`、`apps/desktop/src-tauri/tauri.conf.json`、`frontend/package.json`、`installer/LANChat.iss`、`scripts/package-installer.ps1`；`frontend/src/changelog/releaseNotes.ts` 重写为 1.4.1「顺手版」，新增/改进/修复共 8 条；新增 `docs/release-notes/v1.4.1.md`（保留 v1.4.0）。
+- **验证**：`check-version.mjs --sync` 输出「发布版本一致：1.4.1」；`tsc6 --noEmit` 干净；vitest 21 文件 / 195 用例全绿；`cargo test --workspace --locked` 全通过；`cargo clippy --workspace --all-targets --locked -- -D warnings` 干净。
+- **产物与安装**：`out/desktop/LANChat.exe` 21,803,008 B + `lan-chat-server.exe` 8,145,408 B，`out/desktop-online/LANChat.exe` 22,573,568 B；覆盖安装到 `%LocalAppData%\Programs\LAN Chat` 与 `LAN Chat Online`，`VersionInfo` 核对 FileVersion/ProductVersion 均为 1.4.1。Android 0.4.1（versionCode 17）经 `adb install -r` 覆盖安装到 Redmi K60 Ultra（e7125192），启动正常、会话与历史保留。
+- **下一步**：桌面每版首启会弹 1.4.1 说明（同版本改文案不会重弹）；用户提出「设置普通用户的权限」，含义待确认。
+- **阻塞**：覆盖安装前停掉了正在运行的 `LANChat.exe`，若用户当时开着窗口需重开。
+
 ### 2026-11-26 19:50 — 修复六项反人类设计并替换本机双版
 
 - 执行者：lead（DSH）。
