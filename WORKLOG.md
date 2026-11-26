@@ -55,6 +55,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+### 2026-11-26 12:26 — 推送 master 与 stage/1.4-candidate
+
+- 执行者：lead（DSH）。
+- 改动：把 `1e0d3a8` 推到 origin：`refs/heads/master` 3ebc740→1e0d3a8，`refs/heads/stage/1.4-candidate` 1c3ca6d→1e0d3a8。本机 git 没有凭据配置，使用 `git -c credential.helper='!gh auth git-credential' push`（gh 已登录 DUSK1NG，scope 含 repo）。
+- 验证：`git fetch` 后 `git ls-remote origin` 两个分支均指向 `1e0d3a8581ad3a0ba25cf19c7e80e0a3069d2ca6`，本地与上游同步、工作区干净。顺带清掉仓库根部一个误建的 `CON` 设备名文件（35 字节，未跟踪、未提交）。
+- 下一步：桌面在线版自动更新验签公钥仍未配置；需要发版时按 runbook 打标签。
+
 ### 2026-11-26 12:23 — LAN 版安装替换
 
 - 执行者：lead（DSH）。
