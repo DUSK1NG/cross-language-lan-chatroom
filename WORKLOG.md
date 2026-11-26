@@ -55,6 +55,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+### 2026-11-26 12:17 — 桌面 Online 版本替换、1.4 合并与开发区清理
+
+- 执行者：lead（DSH）。
+- 改动：
+  - 用 `release/local-desktop-20261126-motion-1140/online/` 的 `LANChat.exe`（22,579,200 字节，FileVersion 1.4.0，11:41 构建）覆盖安装目录 `%LocalAppData%\Programs\LAN Chat Online`，保留 `unins000.exe`、`unins000.dat`、`lan-chat.install`；旧文件备份到 `%LocalAppData%\Temp\LANChat-online-backup-20261126-121559`。桌面快捷方式 `LAN Chat Online.lnk` 仍指向该目录，无需修改。
+  - 工作区 70 项改动（桌面动效与交互、AstrBot 桌面/Android 桥接、协议与在线服务端、预览工装、文档）提交为 `fc7e46e Capture the 1.4 desktop motion, interaction and AstrBot work`；`stage/1.4-candidate` 快进合并进 `master`，两条分支均指向 `fc7e46e`，工作区恢复干净。
+  - `.gitignore` 增加 `/.cargo-target/`。
+  - 清理开发区：删除 `out/`（1.7G）、`.cargo-target/`（873M）、`release/local-bot-20261125090210`、`release/rust-migration`、`release/v1.4-s0`、`release/v1.4-candidate`、`release/v1.4-full-acceptance`、`release/v1.4-local-acceptance`、`.tools/tmp` 与两个 Temp 冒烟目录，仓库占用 15G→12G。保留 `target/`（4.3G Cargo 缓存）、`.tools/`（6.9G Android SDK/JDK）、`release/local-desktop-20261126`（上一版）与 `release/local-desktop-20261126-motion-1140`。
+- 验证：安装后 `LANChat.exe` SHA256 `29870F26320E964B68B5CED64F9A57235A592BE08784427745CE43BE4FFF92C5` 与 release 包一致、与旧版 `344EE0F2…` 不同；启动安装版 8 秒后窗口标题 `LAN Chat Online`、`msedgewebview2.exe` 子进程存在，强制退出无残留。`git status --short` 为空；`git log -1 master` 与 `git log -1 stage/1.4-candidate` 均为 fc7e46e。未重跑 cargo test / vitest：源码树就是 11:40 出包时的状态，11:35 记录已通过 191 项测试、Lint、前端构建与 Windows Release 隔离启动。
+- 下一步：桌面在线版自动更新验签公钥仍未配置；LAN 版安装目录仍是 09:36 构建（同为 1.4.0），需要时可从 `release/local-desktop-20261126-motion-1140/lan/` 同法替换。未推送远端（origin/master 落后 2 个提交，origin/stage/1.4-candidate 落后 1 个）。
+- 阻塞与需拍板：是否把 `master` 与 `stage/1.4-candidate` 推送到 origin，以及是否同时替换 LAN 版安装。
+
 ### 2026-11-26 11:35 — 桌面动效播放
 
 - 执行者：Codex。
