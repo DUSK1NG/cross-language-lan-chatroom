@@ -55,6 +55,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+### 2026-11-26 12:23 — LAN 版安装替换
+
+- 执行者：lead（DSH）。
+- 改动：用 `release/local-desktop-20261126-motion-1140/lan/` 覆盖 `%LocalAppData%\Programs\LAN Chat`：`LANChat.exe` 21,727,232→21,771,264 字节、`lan-chat-server.exe` 8,145,408→8,206,336 字节（均 11:41 构建），保留 `unins000.exe`、`unins000.dat`、`lan-chat.install`。替换前该目录有 LANChat 进程（pid 6036）在运行，已先停止；旧文件备份到 `%LocalAppData%\Temp\LANChat-lan-backup-20261126-122304`。
+- 验证：两个 exe 的 SHA256 与 release 包一致、与旧版不同（LANChat `995DE026…` vs 旧 `9915F791…`；server `19620F71…` vs 旧 `574E63CE…`）；启动 8 秒后窗口标题 `LAN Chat`、`msedgewebview2.exe` 子进程存在，退出无残留。用户数据目录 `%LocalAppData%\DUSK1NG\LAN Chat\` 未改动。
+- 下一步：无；远端仍未推送（origin/master 落后 7 个提交，origin/stage/1.4-candidate 落后 3 个）。
+
 ### 2026-11-26 12:17 — 桌面 Online 版本替换、1.4 合并与开发区清理
 
 - 执行者：lead（DSH）。
