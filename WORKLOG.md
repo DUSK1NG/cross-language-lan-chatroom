@@ -55,6 +55,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+### 2026-11-26 15:00 — 发布 v1.4.0 为 latest、本机双版升级到 1.4.0 并复核更新验签链
+
+- 执行者：lead（DSH）。
+- 改动：
+  - 删除 2026-11-24 遗留 draft release `lan-v1.4.0`（只含 `LANChat-Desktop-Windows-x64.zip`），再 `gh release edit v1.4.0 --draft=false --latest` 把 v1.4.0 设为正式 latest；回滚方式仍按 runbook（`gh release delete v1.4.0 --yes` 并删 tag）。
+  - 本机两个安装目录换成 1.4.0 发布载荷（从 GitHub 资产 `LANChat-Desktop-Windows-x64.zip` / `LANChat-Online-Windows-x64.zip` 解压覆盖）：`%LocalAppData%\Programs\LAN Chat` 与 `%LocalAppData%\Programs\LAN Chat Online`；保留 `unins000.exe`、`unins000.dat`、`lan-chat.install`，卸载注册表 DisplayVersion 仍为 1.4.0。
+  - 清理开发区：删 `.tools/testinstall`、`.tools/inst-probe`、下载的 zip 与解压目录、`.tools/lan-install*.log`、本轮临时 ps1/cmd、`.tools/tmp/*`，删除计划任务 `DSHInstallLAN`；保留 `.tools/installer/LANChat-Setup-x64.exe`（12,618,862 B）与 `LANChat-Online-Setup-x64.exe`（10,319,890 B）供手动双击安装。
+- 验证：
+  - `gh release view v1.4.0 --json isDraft,isLatest,publishedAt` → `isDraft:false`、`isLatest:true`、`publishedAt:2026-11-26T06:34:33Z`；`curl` `https://github.com/DUSK1NG/cross-language-lan-chatroom/releases/latest/download/latest-lan.json` 与 `latest-online.json` 均返回 version 1.4.0 的 manifest。
+  - 本机 FileVersion：`LAN Chat\LANChat.exe` 21,728,768 B → 1.4.0，`LAN Chat\lan-chat-server.exe` 8,153,600 B（无版本资源），`LAN Chat Online\LANChat.exe` 22,598,144 B → 1.4.0；两版启动冒烟（窗口标题 `LAN Chat` / `LAN Chat Online`、WebView2 子进程存在、退出无残留）通过。
+  - 更新验签链复核：仓库变量 `LANCHAT_UPDATER_PUBLIC_KEY` / `LANCHAT_ONLINE_UPDATER_PUBLIC_KEY`（值为整份 `.pub` 文件内容的 base64）已由 `.github/workflows/release.yml:53-54` 注入构建；两个 `LANChat.exe` 二进制内均含各自公钥串。`tauri-plugin-updater-2.14.1/src/updater.rs:1893-1917` 的 `verify_signature` 先 `base64_to_string(pub_key)` 再 `PublicKey::decode(...)`，即该格式正是插件期望的；`requireSignedVersion` 由签名 trusted comment 的 `version:1.4.0` 满足。
+  - 安装器在本机自动化环境不可用（非构建缺陷）：静默运行 `LANChat-Setup-x64.exe` 在 `%LOCALAPPDATA%\Programs` 创建 `unins000.exe` 时报 `拒绝访问`（exit 5，需 `TMP/TEMP` 指向工作区才写得出日志）；`/DIR` 指到工作区可安装但写开始菜单快捷方式时报 `0x80070005` 后回滚；`release/local-desktop-20261126/LANChat-Setup-x64.exe` 对新建目录同样 `Error 5`；改用 WMI、计划任务（独立于 DSH 进程树）启动结果相同；Smart App Control、受控文件夹访问、Defender 事件与目录 ACL 均排除。故本机改用 ZIP 载荷覆盖升级。
+- 下一步：可手动双击 `.tools/installer/LANChat-Setup-x64.exe` / `LANChat-Online-Setup-x64.exe` 验证安装器是否只在自动化环境被拒；Android 新发布签名与旧调试签名 APK 不兼容，安装 1.4.0 APK 前须先卸载旧版。
+- 阻塞与需拍板：无。
 ### 2026-11-26 13:45 — 发布桌面双版 1.4.0 正式版（更新签名密钥、公告、v1.4.0 标签与 CI）
 
 - 执行者：lead（DSH）。
