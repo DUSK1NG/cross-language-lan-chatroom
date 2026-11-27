@@ -803,7 +803,7 @@ mod tests {
             .execute_batch("DROP TABLE online_bot_settings; PRAGMA user_version=3;")?;
         for code in ["alice", "bobby"] {
             store.0.execute(
-                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                "INSERT INTO accounts (username,normalized_username,user_code,normalized_code,password_hash,created_at) VALUES (?1,?1,?1,?1,'fixture','')",
                 [code],
             )?;
         }
@@ -976,7 +976,7 @@ mod tests {
         let store = Store::open(&database)?;
         for code in ["alice", "bobby"] {
             store.0.execute(
-                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                "INSERT INTO accounts (username,normalized_username,user_code,normalized_code,password_hash,created_at) VALUES (?1,?1,?1,?1,'fixture','')",
                 [code],
             )?;
         }
@@ -1095,7 +1095,7 @@ mod tests {
         let store = Store::open(&database)?;
         for code in ["alice", "bobby", "carol"] {
             store.0.execute(
-                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                "INSERT INTO accounts (username,normalized_username,user_code,normalized_code,password_hash,created_at) VALUES (?1,?1,?1,?1,'fixture','')",
                 [code],
             )?;
         }
@@ -1315,7 +1315,7 @@ mod tests {
         let store = Store::open(&database)?;
         for code in ["alice", "bobby"] {
             store.0.execute(
-                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                "INSERT INTO accounts (username,normalized_username,user_code,normalized_code,password_hash,created_at) VALUES (?1,?1,?1,?1,'fixture','')",
                 [code],
             )?;
         }

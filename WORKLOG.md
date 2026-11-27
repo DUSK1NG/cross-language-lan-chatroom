@@ -56,6 +56,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-27 18:42 · 修复 CI 暴露的 fixture 列数并移出锁内 bcrypt
+
+- **执行者**：lead（DeepSeek Harness）
+- **做了什么**：CI run 45982712484 在 Ubuntu 与 Windows 两个 server job 上暴露两类问题：①5 处测试 fixture 用无列名的 `INSERT INTO accounts VALUES (...)`，新增 `device_secret_hash` 后统一报 `table accounts has 7 columns but 6 values were supplied`，已改为显式列名；②设备绑定校验原先在 `hub` 互斥锁内跑 bcrypt，错误密码可让整个房间卡住，现改为锁外校验（`lan_identity` 返回哈希，`connection.rs` 校验，`approve_identity` 只写绑定），并补 `lan::store::tests::device_binding_rejects_other_devices_and_kick_resets_it`。
+- **验证**：`cargo check -p lan-chat-server --tests --locked` 通过、`cargo fmt --all` 无改动；本机仍无法创建临时 SQLite 库，结论以 CI 为准。
+- **下一步**：推送后确认两个 server job 转绿。
 ## 2026-11-27 18:35 · 补齐 P0 加固的剩余缺口
 
 - **执行者**：lead（DeepSeek Harness）

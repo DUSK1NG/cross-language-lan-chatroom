@@ -130,3 +130,9 @@
 - `online::auth::tests` 5/5 通过（不触碰 SQLite）。
 - 依赖临时数据库的 11 个用例在本机全部因 `拒绝访问 (os error 5)` / `Error code 14: Unable to open the database file` 失败：沙箱或杀软禁止测试子进程在 `%TEMP%` 建库（用 python/touch 做过可写对照），不是代码失败；这些用例须在 CI 的 ubuntu runner 上取得结论。
 - 未做：生产库升级演练、压测、真实多 `/64` 网络测试。
+
+### 7.7 CI 反馈后的修正
+
+- 设备绑定校验原本在 `hub` 互斥锁内执行 bcrypt（`lan/store.rs` 的 `lan_identity`），一次错误密码可让整个房间停约 60ms；现改为 `lan_identity` 只返回 `device_secret_hash`，由 `lan/connection.rs` 在锁外调用 `verify_device_binding`，`approve_identity` 只负责写入绑定并返回是否已绑定。
+- 新增 `lan::store::tests::device_binding_rejects_other_devices_and_kick_resets_it`，覆盖首次绑定、换设备被拒、踢出后重置。
+- 测试 fixture 的 `INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')` 没写列名，新增 `device_secret_hash` 后报 `table accounts has 7 columns but 6 values were supplied`；改为显式列名（`online.rs` 四处、`online/transfer.rs` 一处）。本机无法建库，这条只能由 CI 验证。

@@ -597,4 +597,26 @@ mod tests {
         std::fs::remove_file(path)?;
         Ok(())
     }
+
+    #[test]
+    fn device_binding_rejects_other_devices_and_kick_resets_it() -> Result<()> {
+        let path = std::env::temp_dir().join(format!("lan-device-{}.db", Uuid::new_v4()));
+        let store = Store::open_lan(&path)?;
+        let (identity, hash) = store.lan_identity("Alice", "A001")?;
+        assert!(hash.is_empty(), "a new account starts unbound");
+        assert!(store.approve_identity(&identity, "device-secret-one")?);
+        let (_, hash) = store.lan_identity("Alice", "A001")?;
+        verify_device_binding(&hash, "device-secret-one")?;
+        assert!(verify_device_binding(&hash, "device-secret-two").is_err());
+        assert!(verify_device_binding(&hash, "").is_err());
+        store.reset_lan_device(&identity.code)?;
+        let (_, hash) = store.lan_identity("Alice", "A001")?;
+        assert!(hash.is_empty(), "a kick clears the binding");
+        store.approve_identity(&identity, "device-secret-two")?;
+        let (_, hash) = store.lan_identity("Alice", "A001")?;
+        verify_device_binding(&hash, "device-secret-two")?;
+        drop(store);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
 }
