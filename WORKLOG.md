@@ -12,11 +12,12 @@
 5. 超过约 300 行时，把最早的条目移到 `docs/archive/worklog-YYYY.md`，本文件保留链接。
 6. 每次完成一项项目修改后，主代理把改动范围与验证结果交给 gpt-6-luna 子代理，由其在日志顶部记录，主代理核对；工作日志写入本身无需递归触发。
 
-## 接手摘要（更新：2026-11-27 12:40）
+## 接手摘要（更新：2026-11-27 13:25）
 
 - **项目**：Windows 聊天程序。局域网版 = 房主本机开房（TLS/TCP 8888 + UDP 38888 发现 + SQLite）；在线版 = 独立 Rust 服务器（账号、私信、离线消息、Android APK、FCM 推送）。桌面 = Tauri 2 + WebView2 + React；服务端、协议、桌面核心、Android JNI 传输均为 Rust。
 - **版本**：源码版本 `1.4.1`（Cargo workspace / 前端 / Android 0.4.1）；最新发布 `v1.4.0`（2026-11-26），1.4.1 的群解散、撤回灰字提示已完成验收，尚未发版。
-- **Git**：`master` 已与 `origin/master` 同步（本轮推送 1.4.1 提交、README/SECURITY 重写与版本测试修复，最新 `7721856`）；`stage/1.4-candidate` 为候选分支。
+- **Git**：`master` 已与 `origin/master` 同步（本轮推送 1.4.1 提交、README/SECURITY 重写、版本测试修复，并新增 P0 加固方案文档）；`stage/1.4-candidate` 为候选分支。
+- **待办**：[P0 加固计划](docs/plans/2026-11-27-p0-hardening-plan.md) 已就绪但未实施，需先拍板 §8 的 6 个决策。
 - **S0 当前状态**：`cargo test --workspace --locked` 除 Windows `lan_desktop` TLS 用例外全绿；该用例在 Ubuntu CI 覆盖，本机 schannel 报 `-2146893042`。前端 vitest 本机 21 文件 / 196 用例全绿；`scripts/check-version.test.mjs` 已改为 fixture 断言，不再随发版变红。
 
 ## 关键约束（改代码前必读）
@@ -54,6 +55,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 - 机器时区 Asia/Taipei，日志时间用本地时间。
 
 ## 日志
+
+## 2026-11-27 13:25 · 整理 P0 加固方案为文档
+
+- **执行者**：lead（DeepSeek Harness）
+- **做了什么**：新增 [docs/plans/2026-11-27-p0-hardening-plan.md](docs/plans/2026-11-27-p0-hardening-plan.md)（379 行）——把审计出的三条 P0（未投递私信无限驻留、预认证槽位耗尽、登录限流单维度）整理成可执行方案：每项给出 A/B/C/D 方案对比、推荐组合、SQL 与代码骨架、验收测试、PR 拆分、观测指标、仍需 P1 配合的事项与 6 个待拍板问题。同时在 [docs/README.md](docs/README.md) 的计划索引里加入该文档。
+- **验证**：纯文档改动，未跑构建；测试状态沿用 12:40 接手摘要（`cargo test --workspace --locked` 除 Windows `lan_desktop` TLS 用例外全绿；前端 196 用例全绿）。CI 随本次推送验证。
+- **下一步**：等用户拍板计划 §8 的 6 个决策，然后按 §6.1 的三笔 PR 实施；建议先落 P0-1（唯一会真把磁盘写满的一条）。
+- **阻塞**：TTL 默认值、每目标上限、"私信是否需先加好友"需产品或用户确认。
 
 ## 2026-11-27 12:52 · 修复发版即红的版本一致性测试
 

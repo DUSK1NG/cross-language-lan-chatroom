@@ -44,6 +44,7 @@
 - [v1.4 升级与加固合并计划（执行依据）](plans/2026-11-23-v1.4-plus-hardening-plan.md)
 - [服务端加固技术明细 v2](plans/2026-11-23-server-hardening-plan.md)
 - [v1.4 升级计划（已被合并计划取代）](plans/2026-11-22-v1.4-upgrade-plan.md)
+- [P0 加固计划（未投递私信 / 预认证槽位 / 登录限流，2026-11-27）](plans/2026-11-27-p0-hardening-plan.md)
 - [v1.4 阶段执行 Prompt](prompts/v1.4/README.md)
 
 ## 已知问题
