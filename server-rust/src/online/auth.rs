@@ -501,8 +501,10 @@ impl AuthReservation<'_> {
             .limiter
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // 只退还登录额度：注册成功也退的话 --register-source-limit 就形同虚设。
         if outcome == AccountAuthOutcome::Success
             && let Some((is_register, source)) = self.source.take()
+            && !is_register
         {
             limiter.refund_source(is_register, source, Instant::now());
         }
