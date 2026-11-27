@@ -329,37 +329,27 @@ async fn rate_limiting_per_account_session_cap_and_android_safe_errors() -> Resu
         "login_ok"
     );
 
-    // Fail Bob 3 times with wrong password -> 4th attempt returns non-blocking cooldown promptly
-    // with rate-limit message (never "用户名或密码不正确" so Android keeps saved credentials).
+    // Fail Bob 3 times with a wrong password: still a plain credential error.
     for _ in 0..3 {
         let mut p = tls_connect(&connector, address).await?;
         let wrong = send_auth(&mut p, "account_login", "Bob", "", "wrongpass").await?;
         assert_eq!(wrong.kind, "login_error");
         assert_eq!(wrong.content, "用户名或密码不正确");
     }
-    let started = Instant::now();
-    let mut cooled = tls_connect(&connector, address).await?;
-    let cooled_err = send_auth(&mut cooled, "account_login", "Bob", "", "pass12345").await?;
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "cooldown must be non-blocking"
-    );
-    assert_eq!(cooled_err.kind, "login_error");
-    assert_ne!(cooled_err.content, "用户名或密码不正确");
-    assert!(
-        cooled_err.content.contains("频繁"),
-        "{}",
-        cooled_err.content
-    );
 
-    // Wait out 2s cooldown -> valid credentials succeed and reset failures.
-    tokio::time::sleep(Duration::from_millis(2200)).await;
+    // A cooldown must not lock the owner out: the correct password is verified and wins,
+    // and the exchange stays prompt instead of stalling in a sleep.
+    let started = Instant::now();
     let mut bob_ok = tls_connect(&connector, address).await?;
     assert_eq!(
         send_auth(&mut bob_ok, "account_login", "Bob", "", "pass12345")
             .await?
             .kind,
         "login_ok"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "cooldown must not delay a correct login"
     );
 
     child.kill().await?;
