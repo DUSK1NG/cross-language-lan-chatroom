@@ -16,8 +16,8 @@
 
 - **项目**：Windows 聊天程序。局域网版 = 房主本机开房（TLS/TCP 8888 + UDP 38888 发现 + SQLite）；在线版 = 独立 Rust 服务器（账号、私信、离线消息、Android APK、FCM 推送）。桌面 = Tauri 2 + WebView2 + React；服务端、协议、桌面核心、Android JNI 传输均为 Rust。
 - **版本**：源码版本 `1.4.1`（Cargo workspace / 前端 / Android 0.4.1）；最新发布 `v1.4.0`（2026-11-26），1.4.1 的群解散、撤回灰字提示已完成验收，尚未发版。
-- **Git**：本地 `master` 领先 `origin/master` 8 个提交（最新 `7fd93c4`），本轮追加 README / SECURITY.md / `docs/assets/` 后推送；`stage/1.4-candidate` 为候选分支。
-- **S0 当前状态**：`cargo test --workspace --locked` 除 Windows `lan_desktop` TLS 用例外全绿；该用例在 Ubuntu CI 覆盖，本机 schannel 报 `-2146893042`。前端 vitest 在本会话因沙箱禁止 node 子进程未能本机执行，以 CI 为准。
+- **Git**：`master` 已与 `origin/master` 同步（本轮推送 1.4.1 提交、README/SECURITY 重写与版本测试修复，最新 `7721856`）；`stage/1.4-candidate` 为候选分支。
+- **S0 当前状态**：`cargo test --workspace --locked` 除 Windows `lan_desktop` TLS 用例外全绿；该用例在 Ubuntu CI 覆盖，本机 schannel 报 `-2146893042`。前端 vitest 本机 21 文件 / 196 用例全绿；`scripts/check-version.test.mjs` 已改为 fixture 断言，不再随发版变红。
 
 ## 关键约束（改代码前必读）
 
@@ -54,6 +54,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 - 机器时区 Asia/Taipei，日志时间用本地时间。
 
 ## 日志
+
+## 2026-11-27 12:52 · 修复发版即红的版本一致性测试
+
+- **执行者**：lead（DeepSeek Harness）
+- **问题**：推送 1.4.1 后 CI run 45941371509 的 `frontend` job 在「Check version consistency」失败。根因是 `scripts/check-version.test.mjs` 第一个用例直接断言 `checkVersions() === '1.4.0'`，即对真实仓库断言当前发版号；每次 `Cargo.toml` 升版都会让 master 变红，而该脚本恰是发布门禁。
+- **改动**：该用例改用 `fixture(t)`（临时目录里的完整一致版本树）断言 `'1.4.0'`，覆盖内容不变（仍验证锁文件、tauri.conf、package.json、iss、ps1 与 releaseNotes 的一致性），但不再耦合当前发版号。
+- **验证**：
+  - `node --test scripts/check-version.test.mjs`：4 个用例全绿。
+  - `node scripts/check-version.mjs`：`发布版本一致：1.4.1`。
+  - `node node_modules/vitest/vitest.mjs run`（frontend）：21 文件 / 196 用例全绿。
+  - 推送后 CI run 45942379294：`React frontend` success。
+- **阻塞与经验**：本机 `github.com:443` 一度整段不可达（`api.github.com` 正常），push 报 connection reset；经本机 127.0.0.1:7890 代理执行 `git -c http.proxy=... push` 成功。以后推送失败先分辨「线路」与「缺凭证」。
 
 ## 2026-11-27 12:40 · README 重写、安全策略与仓库元数据
 
