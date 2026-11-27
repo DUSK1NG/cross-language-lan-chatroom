@@ -59,6 +59,8 @@ pub trait Ui: Send + Sync {
 pub struct Client {
     edition: Edition,
     dir: PathBuf,
+    /// 首次运行生成并落盘的设备密钥，用于把局域网账号绑定到这台设备。
+    device_secret: String,
     host_dir: PathBuf,
     server_file: PathBuf,
     state: Mutex<State>,
@@ -128,9 +130,19 @@ impl Client {
             }
             Err(error) => return Err(error).context("读取连接设置"),
         };
+        let secret_path = dir.join("device-secret");
+        let device_secret = match fs::read_to_string(&secret_path) {
+            Ok(value) if value.trim().len() >= 16 => value.trim().to_owned(),
+            _ => {
+                let generated = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+                fs::write(&secret_path, &generated).context("保存设备密钥")?;
+                generated
+            }
+        };
         Ok(Self {
             edition,
             dir,
+            device_secret,
             host_dir,
             server_file,
             state: Mutex::new(State::new(edition, saved)),
@@ -816,7 +828,9 @@ impl Client {
             "group_leave" | "group_dissolve" => {
                 if state.room_commands.remove(&message.command_id) {
                     state.groups.remove(&message.group_id);
-                    state.histories.remove(&format!("group:{}", message.group_id));
+                    state
+                        .histories
+                        .remove(&format!("group:{}", message.group_id));
                     let leaving_active = state.active.as_ref().is_some_and(|active| {
                         active.kind == "group" && active.id == message.group_id
                     });
@@ -828,8 +842,8 @@ impl Client {
                 }
             }
             "room_action" | "admin_action" | "friend_request" | "friend_respond"
-            | "group_invite" | "group_kick" | "group_role" | "group_transfer"
-            | "group_update" | "group_announce" => {
+            | "group_invite" | "group_kick" | "group_role" | "group_transfer" | "group_update"
+            | "group_announce" => {
                 if state.room_commands.remove(&message.command_id) {
                     self.result(&message.command_id, Ok(()));
                 }

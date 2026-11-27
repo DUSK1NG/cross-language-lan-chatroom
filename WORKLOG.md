@@ -12,13 +12,13 @@
 5. 超过约 300 行时，把最早的条目移到 `docs/archive/worklog-YYYY.md`，本文件保留链接。
 6. 每次完成一项项目修改后，主代理把改动范围与验证结果交给 gpt-6-luna 子代理，由其在日志顶部记录，主代理核对；工作日志写入本身无需递归触发。
 
-## 接手摘要（更新：2026-11-27 13:25）
+## 接手摘要（更新：2026-11-27 16:53）
 
 - **项目**：Windows 聊天程序。局域网版 = 房主本机开房（TLS/TCP 8888 + UDP 38888 发现 + SQLite）；在线版 = 独立 Rust 服务器（账号、私信、离线消息、Android APK、FCM 推送）。桌面 = Tauri 2 + WebView2 + React；服务端、协议、桌面核心、Android JNI 传输均为 Rust。
 - **版本**：源码版本 `1.4.1`（Cargo workspace / 前端 / Android 0.4.1）；最新发布 `v1.4.0`（2026-11-26），1.4.1 的群解散、撤回灰字提示已完成验收，尚未发版。
-- **Git**：`master` 已与 `origin/master` 同步（本轮推送 1.4.1 提交、README/SECURITY 重写、版本测试修复，并新增 P0 加固方案文档）；`stage/1.4-candidate` 为候选分支。
-- **待办**：[P0 加固计划](docs/plans/2026-11-27-p0-hardening-plan.md) 已就绪但未实施，需先拍板 §8 的 6 个决策。
-- **S0 当前状态**：`cargo test --workspace --locked` 除 Windows `lan_desktop` TLS 用例外全绿；该用例在 Ubuntu CI 覆盖，本机 schannel 报 `-2146893042`。前端 vitest 本机 21 文件 / 196 用例全绿；`scripts/check-version.test.mjs` 已改为 fixture 断言，不再随发版变红。
+- **Git**：`master` 基础上当前工作区含 P0 加固代码、测试与文档改动（见最新日志条目）。
+- **待办**：[P0 加固计划](docs/plans/2026-11-27-p0-hardening-plan.md) 中的 P0-1/P0-2/P0-3 及顺手低风险修复已完成编码与服务端/工作区 Rust 回归验证；线上仍需在维护窗口完成多 `/64` 真实网络测试、压测、生产库升级前备份/回滚演练，以及推进 P1 项（群附件与全局磁盘/图片配额、FCM 推送队列与永久错误清理、在线 IO 出锁与 WAL）。
+- **当前构建与测试状态**：在 `TEMP`/`TMP` 指向工作区可写目录时，`cargo clippy --workspace --exclude lan-chat-desktop --all-targets --locked -- -D warnings` 与 `cargo test --workspace --exclude lan-chat-desktop --locked` 全绿（`lan-chat-protocol` 5 项、`lan-chat-server` 16 项单测 + `heartbeat` + `lan_desktop` + `online_hardening` 2 项均通过），`cargo build -p lan-chat-server --locked --release` 通过。全量包含 `lan-chat-desktop` 在本机无头沙箱因 `build_script_build` 退出码 `0xc0000142` (`STATUS_DLL_INIT_FAILED`) 未跑。
 
 ## 关键约束（改代码前必读）
 
@@ -55,6 +55,34 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 - 机器时区 Asia/Taipei，日志时间用本地时间。
 
 ## 日志
+
+## 2026-11-27 18:35 · 补齐 P0 加固的剩余缺口
+
+- **执行者**：lead（DeepSeek Harness）
+- **做了什么**（在 Antigravity 16:53 那轮之上继续）：
+  1. **存储上界**：新增 `--delivered-ttl-days`（默认 30）分批清理已送达私信并 `incremental_vacuum`；`--undelivered-bytes-per-target`（默认 64 MiB）让收件箱同时按字节计量；`--image-budget-bytes`（默认 2 GiB）限制图片总量；拒绝文案改为中性，不向发送方暴露对方收件箱状态。新库启用 `auto_vacuum=INCREMENTAL`，所有库启用 `journal_mode=WAL` + `synchronous=NORMAL`。
+  2. **索引自愈**：`ensure_cleanup_index` 按 `sqlite_master` 探测并补建 `idx_chat_messages_delivered_created`（大库只告警不建）；清理 SQL 去掉 `INDEXED BY` 硬绑定，索引缺失时退化为全表扫。
+  3. **认证**：`--preauth-fail-limit/--preauth-fail-window-secs/--preauth-ban-secs` 对 TLS/登录帧失败按来源封禁；账号冷却改为“先验密码后判”（正确密码在冷却期仍可登录，消除定向锁定）；成功登录退还来源窗口计数；`Mutex` 中毒全部 `PoisonError::into_inner` 兜底。
+  4. **局域网 P0-4**：`Message.device_secret` + `accounts.device_secret_hash`，首次批准登录时绑定、之后校验；房主踢出即 `reset_lan_device`；未绑定设备的旧客户端可登录但不投递离线私信。桌面客户端生成并持久化 `device-secret`，Android 仅在线登录无需改。
+  5. 更新 [README.md](README.md) 安全模型与部署参数、[docs/plans/2026-11-27-p0-hardening-plan.md](docs/plans/2026-11-27-p0-hardening-plan.md) 新增第 7 节，并改写受影响的 `online::auth` 单测。
+- **验证**：`cargo check --workspace --tests --locked` 通过；`cargo fmt --all` 无改动；`online::auth::tests` 5/5 通过；`cargo test --workspace --locked` 中 11 个依赖临时 SQLite 库的用例在本机报 `拒绝访问 (os error 5)`（沙箱/杀软限制，python/touch 对照可写），须以 CI 结果为准。
+- **下一步**：提交后跑全量 CI（重点 ubuntu 上的 server 测试），再安排生产库升级与备份演练；P1 仍包括出锁重构、更新器防回滚、附件按用户份额。
+- **阻塞**：本机无法验证任何建库用例；`git push` 到 github.com:443 需要 `git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push`。
+## 2026-11-27 16:53 · 实施 P0 服务端可持续运营加固
+
+- **执行者**：Antigravity
+- **做了什么**：
+  1. 审查并修订 [docs/plans/2026-11-27-p0-hardening-plan.md](docs/plans/2026-11-27-p0-hardening-plan.md)，完成可持续运营视角全仓漏洞审查，确认 §6 决策后落地三项 P0 加固与四项高收益低风险修复：
+  2. **P0-1（未确认私信配额与 TTL 清理）**：[server-rust/src/online/files.rs](server-rust/src/online/files.rs) 将在线库 `user_version` 由 `5` 升至 `6` 并创建部分索引 `idx_chat_messages_pending_target` 与 `idx_chat_messages_pending_created`（仅作用于在线模式）；[server-rust/src/online.rs](server-rust/src/online.rs)、[server-rust/src/online/transfer.rs](server-rust/src/online/transfer.rs)、[server-rust/src/online/social.rs](server-rust/src/online/social.rs) 与 [server-rust/src/store.rs](server-rust/src/store.rs) 统一在 `IMMEDIATE` 事务内先判幂等再查配额（默认每目标 200 条、TTL 14 天，`0` 可关闭），覆盖 `private_chat`、`dm_image_chunk`（`index == 0` 提前拦截与失败/重复落盘即时删除）、`dm_file_init`、`dm_file_commit`（被拒立即清理数据库暂存与 `.partial` 文件）；`prune_conversation` 将 `recalled=1` 纳入万条裁剪；`cleanup_maintenance` 在独立 SQLite 连接按 100/200 条分批清理超期消息（含 `recalled=1`、混合精度与异常时间戳保护）和无效附件行，仅短时持锁采集在传图片快照后带 120 秒修改宽限期清理 `.files/` 孤儿文件。
+  3. **P0-2 / P0-3 与顺手加固**：新增 [server-rust/src/online/auth.rs](server-rust/src/online/auth.rs) 并在 [server-rust/src/main.rs](server-rust/src/main.rs)、[server-rust/src/lan/mod.rs](server-rust/src/lan/mod.rs)、[server-rust/src/store.rs](server-rust/src/store.rs) 集成：`accept_client` 对 `EMFILE`/`ENFILE`/连接重置等瞬时错误容错重试而不退出进程（在线与局域网模式共用）；预认证（默认全局 128、每来源 8）与已认证会话槽位（`--max-clients` 64）分离并使用 RAII guard；TLS（5s）与登录帧（8s）超时拆分（保留 `LOGIN_TIMEOUT` 供 `lan/connection.rs` 复用）；读到合法帧且会话满额时先快速返回 `login_error`；`bcrypt` 并发上限 4 + 3s 有界队列；独立轻量限流器将来源登录（20/60s）、来源注册（5/300s）与账号失败（5 次起 30s 指数退避至 900s 非阻塞冷却，区分 `InvalidCredentials` 与服务错误并防并发 `epoch` 覆盖）分表限容，按 IPv6 `/64` 与 IPv4-mapped 归一化；限流/繁忙提示均不复用 `用户名或密码不正确` 保护 Android 凭据；`Online::register` 增加单账号并发会话上限（默认 8）；注册先查重再算 bcrypt；登录未知用户执行一次 `dummy_bcrypt_hash` 消除计时差异。
+  4. 新增单测与真实 TLS 端到端测试：[server-rust/tests/online_hardening.rs](server-rust/tests/online_hardening.rs)、`online::auth::tests`、`online::transfer::tests`、`store::tests::online_auth_hardening_and_prune_treat_recalled_sent_cleanly`。
+- **验证**：
+  - 将 `TEMP`/`TMP` 设为工作区可写目录后执行 `cargo clippy --workspace --exclude lan-chat-desktop --all-targets --locked -- -D warnings`：通过，0 告警。
+  - 执行 `cargo test --workspace --exclude lan-chat-desktop --locked`：全部通过（`lan-chat-protocol` 5 项、`lan-chat-server` 16 项单测 + `heartbeat` 1 项 + `lan_desktop` 1 项 + `online_hardening` 2 项）。
+  - 执行 `cargo build -p lan-chat-server --locked --release`：通过（1m 31s，0 告警）。
+  - 包含 `lan-chat-desktop` 的 `cargo clippy --workspace --all-targets --locked -- -D warnings` 在本机沙箱因 `lan-chat-desktop` `build_script_build` 返回 `0xc0000142` (`STATUS_DLL_INIT_FAILED`) 未能执行，桌面端构建需在完整桌面环境或 CI 验证。
+- **下一步**：提交改动后走 CI 全量校验；线上发布前在维护窗口执行数据库及 `.files/` 备份演练、多 `/64` 真实网络测试与压测，并规划 P1（群附件与全局空间/图片配额、FCM 推送速率/永久错误清理、在线 IO 出锁与 WAL）。
+- **阻塞与需关注**：注意 `git status` 中存在与本任务无关的未跟踪文件 `CON`（未触碰）。
 
 ## 2026-11-27 13:25 · 整理 P0 加固方案为文档
 

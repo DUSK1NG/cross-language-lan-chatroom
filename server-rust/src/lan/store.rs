@@ -246,7 +246,12 @@ impl Store {
         Ok(Self(db))
     }
 
-    pub(super) fn lan_identity(&self, username: &str, display_code: &str) -> Result<Identity> {
+    pub(super) fn lan_identity(
+        &self,
+        username: &str,
+        display_code: &str,
+        device_secret: &str,
+    ) -> Result<Identity> {
         ensure!(
             (1..=32).contains(&username.len()),
             Rejected("Invalid username")
@@ -256,7 +261,7 @@ impl Store {
         let existing = self
             .0
             .query_row(
-                "SELECT username,user_code,normalized_username,normalized_code FROM accounts
+                "SELECT username,user_code,normalized_username,normalized_code,device_secret_hash FROM accounts
              WHERE normalized_username=? OR normalized_code=?",
                 params![normalized, code],
                 |row| {
@@ -265,15 +270,17 @@ impl Store {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 },
             )
             .optional()?;
-        if let Some((username, display_code, old_username, old_code)) = existing {
+        if let Some((username, display_code, old_username, old_code, device_hash)) = existing {
             ensure!(
                 normalized == old_username && code == old_code,
                 Rejected("Connection identity failed")
             );
+            verify_device_binding(&device_hash, device_secret)?;
             return Ok(Identity {
                 username,
                 display_code,
@@ -287,13 +294,42 @@ impl Store {
         })
     }
 
-    pub(super) fn approve_identity(&self, identity: &Identity) -> Result<Identity> {
+    pub(super) fn approve_identity(
+        &self,
+        identity: &Identity,
+        device_secret: &str,
+    ) -> Result<(Identity, bool)> {
         self.0.execute(
             "INSERT INTO accounts (username,normalized_username,user_code,normalized_code,password_hash,created_at)
              VALUES (?,?,?,?,'',?) ON CONFLICT DO NOTHING",
             params![identity.username, normalize_username(&identity.username), identity.display_code, identity.code, now()],
         )?;
-        self.lan_identity(&identity.username, &identity.display_code)
+        if !device_secret.is_empty() {
+            self.0.execute(
+                "UPDATE accounts SET device_secret_hash=? WHERE normalized_code=? AND device_secret_hash=''",
+                params![password_hash(device_secret)?, identity.code],
+            )?;
+        }
+        let identity =
+            self.lan_identity(&identity.username, &identity.display_code, device_secret)?;
+        let bound = !self
+            .0
+            .query_row(
+                "SELECT device_secret_hash FROM accounts WHERE normalized_code=?",
+                params![identity.code],
+                |row| row.get::<_, String>(0),
+            )?
+            .is_empty();
+        Ok((identity, bound))
+    }
+
+    /// 房主踢人或重置设备后，下一次登录重新绑定当前设备。
+    pub(super) fn reset_lan_device(&self, code: &str) -> Result<()> {
+        self.0.execute(
+            "UPDATE accounts SET device_secret_hash='' WHERE normalized_code=?",
+            params![code],
+        )?;
+        Ok(())
     }
 
     pub(super) fn host_password(&self, password: &str) -> Result<()> {
@@ -471,15 +507,21 @@ impl Store {
 }
 
 fn normalize_username(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            character
-                .to_lowercase()
-                .next()
-                .expect("lowercase character")
-        })
-        .collect()
+    value.chars().flat_map(char::to_lowercase).collect()
+}
+
+/// 已绑定账号必须提供一致的设备密钥；未绑定的旧账号允许登录但不会取走离线私信。
+fn verify_device_binding(device_hash: &str, device_secret: &str) -> Result<()> {
+    if device_hash.is_empty() {
+        return Ok(());
+    }
+    let matches =
+        !device_secret.is_empty() && bcrypt::verify(device_secret, device_hash).unwrap_or(false);
+    ensure!(
+        matches,
+        Rejected("This account is bound to another device; ask the room owner to reset it")
+    );
+    Ok(())
 }
 
 pub(super) fn password_hash(password: &str) -> Result<String> {

@@ -75,7 +75,11 @@ pub(super) async fn serve(
             .lock()
             .expect("LAN hub poisoned")
             .store
-            .lan_identity(&request.username, &request.user_code)?;
+            .lan_identity(
+                &request.username,
+                &request.user_code,
+                &request.device_secret,
+            )?;
         let capabilities = [ROOM_PASSWORD, HEARTBEAT, LAN_HISTORY_PAGES, LAN_ROOM_ROLES]
             .into_iter()
             .filter(|supported| {
@@ -87,10 +91,17 @@ pub(super) async fn serve(
             .map(str::to_owned)
             .collect::<Vec<_>>();
         let heartbeat = wants_heartbeat(&request);
-        Ok((identity, admin, bootstrap, capabilities, heartbeat))
+        Ok((
+            identity,
+            request.device_secret.clone(),
+            admin,
+            bootstrap,
+            capabilities,
+            heartbeat,
+        ))
     })
     .await?;
-    let (identity, admin, bootstrap, capabilities, heartbeat) = match auth {
+    let (identity, device_secret, admin, bootstrap, capabilities, heartbeat) = match auth {
         Ok(auth) => auth,
         Err(error) => {
             return send(
@@ -155,17 +166,17 @@ pub(super) async fn serve(
     }
 
     let approve = server.clone();
-    let identity = match spawn_blocking(move || {
+    let (identity, device_bound) = match spawn_blocking(move || {
         approve
             .hub
             .lock()
             .expect("LAN hub poisoned")
             .store
-            .approve_identity(&identity)
+            .approve_identity(&identity, &device_secret)
     })
     .await?
     {
-        Ok(identity) => identity,
+        Ok((identity, device_bound)) => (identity, device_bound),
         Err(error) => {
             return send(
                 &mut stream,
@@ -188,7 +199,12 @@ pub(super) async fn serve(
     let initial = spawn_blocking(move || {
         let mut hub = register.hub.lock().expect("LAN hub poisoned");
         let welcomes = hub.store.pending_lan_welcomes(&identity.code)?;
-        let backlog = hub.store.take_lan_private(&identity)?;
+        // 未绑定设备的旧客户端仍可登录，但不会取走按用户代码即可猜到的离线私信。
+        let backlog = if device_bound {
+            hub.store.take_lan_private(&identity)?
+        } else {
+            Vec::new()
+        };
         let muted = hub.store.is_lan_muted(&identity.code)?;
         let room_roles = capabilities
             .iter()

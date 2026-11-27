@@ -1,15 +1,16 @@
+pub(crate) mod auth;
 mod files;
 mod social;
 mod transfer;
 
-pub(crate) use files::{migrate_schema, migrate_storage};
-
-use std::{
-    collections::HashMap,
-    net::IpAddr,
-    path::Path,
-    time::{Duration, Instant},
+pub use auth::{AuthConfig, AuthControl};
+pub(crate) use auth::{
+    INVALID_CREDENTIALS_MSG, is_invalid_credentials_error, validate_credentials,
 };
+pub(crate) use files::{migrate_schema, migrate_storage};
+pub use transfer::cleanup_maintenance;
+
+use std::{collections::HashMap, path::Path};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use lan_chat_protocol::{
@@ -46,22 +47,64 @@ fn hide_group_attachment(message: &mut Message) {
     message.logical_size = 0;
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct OnlineLimits {
+    pub undelivered_per_target: usize,
+    pub undelivered_bytes_per_target: usize,
+    pub undelivered_ttl_days: u32,
+    pub delivered_ttl_days: u32,
+    pub image_budget_bytes: usize,
+    pub max_sessions_per_account: usize,
+}
+
+impl OnlineLimits {
+    fn undelivered_quota(&self) -> transfer::Quota {
+        transfer::Quota {
+            limit: self.undelivered_per_target,
+            bytes: self.undelivered_bytes_per_target,
+        }
+    }
+}
+
+impl Default for OnlineLimits {
+    fn default() -> Self {
+        Self {
+            undelivered_per_target: 200,
+            undelivered_bytes_per_target: 64 * 1024 * 1024,
+            undelivered_ttl_days: 14,
+            delivered_ttl_days: 30,
+            image_budget_bytes: 2 * 1024 * 1024 * 1024,
+            max_sessions_per_account: 8,
+        }
+    }
+}
+
 pub struct Online {
     store: Store,
     push: Option<Push>,
     bot_key: Option<BotKey>,
     peers: HashMap<Uuid, Peer>,
-    login_attempts: HashMap<IpAddr, (usize, Instant)>,
+    limits: OnlineLimits,
 }
 
 impl Online {
+    #[cfg(test)]
     pub fn new(store: Store, push: Option<Push>, bot_key: Option<BotKey>) -> Self {
+        Self::with_limits(store, push, bot_key, OnlineLimits::default())
+    }
+
+    pub fn with_limits(
+        store: Store,
+        push: Option<Push>,
+        bot_key: Option<BotKey>,
+        limits: OnlineLimits,
+    ) -> Self {
         Self {
             store,
             push,
             bot_key,
             peers: HashMap::new(),
-            login_attempts: HashMap::new(),
+            limits,
         }
     }
 
@@ -69,24 +112,11 @@ impl Online {
         self.bot_key.is_some()
     }
 
-    pub fn admit_login(&mut self, address: IpAddr, kind: &str) -> Result<()> {
-        ensure!(
-            matches!(kind, "account_login" | "account_register"),
-            Rejected("请使用在线版客户端登录")
-        );
-        let now = Instant::now();
-        self.login_attempts.retain(|_, (_, expiry)| now < *expiry);
-        ensure!(
-            self.login_attempts.contains_key(&address) || self.login_attempts.len() < 4096,
-            Rejected("登录尝试过于频繁，请稍后再试")
-        );
-        let (count, _) = self
-            .login_attempts
-            .entry(address)
-            .or_insert((0, now + Duration::from_secs(60)));
-        ensure!(*count < 20, Rejected("登录尝试过于频繁，请稍后再试"));
-        *count += 1;
-        Ok(())
+    pub fn active_image_references(&self) -> Vec<String> {
+        self.peers
+            .values()
+            .filter_map(|peer| peer.image.as_ref().map(|image| image.reference.clone()))
+            .collect()
     }
 
     pub fn register(
@@ -97,6 +127,15 @@ impl Online {
         group_management: bool,
         group_attachments: bool,
     ) -> Result<()> {
+        let active_sessions = self
+            .peers
+            .values()
+            .filter(|peer| peer.identity.code == identity.code)
+            .count();
+        ensure!(
+            active_sessions < self.limits.max_sessions_per_account,
+            Rejected("该账号同时在线设备数已达上限")
+        );
         self.peers.insert(
             id,
             Peer {
@@ -108,11 +147,21 @@ impl Online {
                 group_attachments,
             },
         );
-        self.send_backlog(id)
+        if let Err(error) = self.send_backlog(id) {
+            self.peers.remove(&id);
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn remove(&mut self, id: Uuid) {
-        self.peers.remove(&id);
+        if let Some(mut peer) = self.peers.remove(&id)
+            && let Some(upload) = peer.image.take()
+            && let Ok(root) = files::root(&self.store.0)
+            && let Ok(path) = files::image_path(&root, &upload.reference)
+        {
+            let _ = std::fs::remove_file(path.with_extension("partial"));
+        }
     }
 
     fn deliver(&mut self, id: Uuid, message: Message) {
@@ -189,7 +238,7 @@ impl Online {
                     },
                 );
             }
-            "private_chat" => self.private_chat(id, identity, request, None)?,
+            "private_chat" => self.private_chat(id, identity, request, None).map(|_| ())?,
             "dm_image_chunk" => self.receive_image(id, identity, request)?,
             "dm_image_get" => self.read_image(id, identity, request)?,
             "dm_file_init" | "dm_file_chunk" | "dm_file_commit" | "dm_file_get"
@@ -256,7 +305,7 @@ impl Online {
         identity: &Identity,
         request: &Message,
         image: Option<&transfer::PublishedImage>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let target = private_target(identity, request)?;
         ensure!(
             !request.content.is_empty(),
@@ -284,25 +333,24 @@ impl Online {
             Rejected("私信超过服务器允许的长度")
         );
         let key = conversation(&identity.code, &target);
-        if self.store.insert_online_message(
-            &message,
-            "private",
-            &key,
-            &identity.code,
-            &target,
+        match self.store.insert_online_message(transfer::OnlineMessage {
+            message: &message,
+            kind: "private",
+            key: &key,
+            author: &identity.code,
+            target: &target,
             image,
-        )? {
-            self.publish_private(&identity.code, &message);
-        } else {
-            let state = self.store.0.query_row(
-                "SELECT delivery_state FROM chat_messages
-                 WHERE kind='private' AND conversation_key=? AND sender_code=? AND message_id=?",
-                params![key, identity.code, request.message_id],
-                |row| row.get::<_, String>(0),
-            )?;
-            self.deliver(id, delivery_receipt(message.message_id, &state));
+            undelivered: self.limits.undelivered_quota(),
+        })? {
+            transfer::InsertOutcome::Inserted => {
+                self.publish_private(&identity.code, &message);
+                Ok(true)
+            }
+            transfer::InsertOutcome::Duplicate { delivery_state } => {
+                self.deliver(id, delivery_receipt(message.message_id, &delivery_state));
+                Ok(false)
+            }
         }
-        Ok(())
     }
 
     fn publish_private(&mut self, sender: &str, message: &Message) {
@@ -355,7 +403,10 @@ impl Online {
 
     /// 撤回自己发出的私信或群消息：只允许作者本人，且只允许撤回一次。
     fn recall(&mut self, id: Uuid, identity: &Identity, request: &Message) -> Result<()> {
-        ensure!(!request.message_id.is_empty(), Rejected("撤回请求缺少消息编号"));
+        ensure!(
+            !request.message_id.is_empty(),
+            Rejected("撤回请求缺少消息编号")
+        );
         let rejected = || Rejected("只能撤回自己发送且尚未撤回的消息");
         let (kind, key, target) = self
             .store
@@ -1079,7 +1130,7 @@ mod tests {
             store
                 .0
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
-            5
+            6
         );
         assert_eq!(
             store
@@ -1263,9 +1314,10 @@ mod tests {
             std::env::temp_dir().join(format!("lan-chat-dissolve-{}.db", Uuid::new_v4()));
         let store = Store::open(&database)?;
         for code in ["alice", "bobby"] {
-            store
-                .0
-                .execute("INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')", [code])?;
+            store.0.execute(
+                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                [code],
+            )?;
         }
         store.0.execute(
             "INSERT INTO online_friendships VALUES ('alice','bobby','alice',1)",

@@ -93,6 +93,9 @@ pub struct Message {
     pub user_code: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub account_password: String,
+    /// 首次登录时绑定到账号的设备密钥，之后每次登录必须一致。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub device_secret: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub host_session_token: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]

@@ -389,6 +389,7 @@ impl Client {
                 kind: "login".into(),
                 username: form.username.clone(),
                 user_code: form.user_code.clone(),
+                device_secret: self.device_secret.clone(),
                 host_session_token: host_token.into(),
                 capabilities: vec![
                     ROOM_PASSWORD.into(),
@@ -446,7 +447,11 @@ impl Client {
             save_error = self.save_connection(form).err();
             state.identity = response.clone();
             state.phase = "connected";
-            state.status = if save_error.is_some() { "已连接 · 地址未保存" } else { "已连接" };
+            state.status = if save_error.is_some() {
+                "已连接 · 地址未保存"
+            } else {
+                "已连接"
+            };
             state.reconnect = 0;
             state.saved = form.clone();
             if reconnecting && self.edition == Edition::Online {
@@ -469,7 +474,10 @@ impl Client {
         }
         if let Some(error) = save_error {
             eprintln!("保存连接设置失败: {error}");
-            self.ui.emit("chat:presence", json!("本次已连接，但连接地址保存失败，下次启动需要重新填写。"));
+            self.ui.emit(
+                "chat:presence",
+                json!("本次已连接，但连接地址保存失败，下次启动需要重新填写。"),
+            );
         }
 
         if let Some(crypto) = &network.crypto {

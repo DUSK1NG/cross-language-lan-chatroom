@@ -1,13 +1,44 @@
-use std::{fmt, path::Path, time::Duration};
+use std::{fmt, path::Path, sync::OnceLock, time::Duration};
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use chrono::{SecondsFormat, Utc};
-use lan_chat_protocol::{
-    ACCOUNT_PASSWORD_MAX_BYTES, ACCOUNT_PASSWORD_MIN_BYTES, Message, OnlineUser, RECALLED_MESSAGE,
-};
+use lan_chat_protocol::{Message, OnlineUser, RECALLED_MESSAGE};
+use ring::rand::SecureRandom;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, TransactionBehavior, params};
 
 use crate::ONLINE_BACKLOG_LIMIT;
+
+pub(crate) const DEVICE_SECRET_COLUMN: &str = "device_secret_hash";
+
+/// 已送达私信的过期清理索引：仅在缺失且待清理规模可接受时创建，避免老库启动长时间阻塞。
+fn ensure_cleanup_index(db: &Connection) -> Result<()> {
+    const NAME: &str = "idx_chat_messages_delivered_created";
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='index' AND name=?1)",
+        [NAME],
+        |row| row.get(0),
+    )?;
+    if exists {
+        return Ok(());
+    }
+    let rows: i64 = db.query_row(
+        "SELECT COUNT(*) FROM chat_messages WHERE kind='private' AND delivery_state='delivered'",
+        [],
+        |row| row.get(0),
+    )?;
+    if rows > 2_000_000 {
+        eprintln!(
+            "跳过创建 {NAME}：待清理消息 {rows} 条，请择机手动执行 CREATE INDEX {NAME} \
+             ON chat_messages(created_at,id) WHERE kind='private' AND delivery_state='delivered'"
+        );
+        return Ok(());
+    }
+    db.execute_batch(&format!(
+        "CREATE INDEX {NAME} ON chat_messages(created_at,id)
+         WHERE kind='private' AND delivery_state='delivered'"
+    ))?;
+    Ok(())
+}
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS accounts (
@@ -135,6 +166,21 @@ pub struct Identity {
 
 pub struct Store(pub Connection);
 
+fn dummy_bcrypt_hash() -> Result<&'static str> {
+    static HASH: OnceLock<String> = OnceLock::new();
+    if let Some(hash) = HASH.get() {
+        return Ok(hash.as_str());
+    }
+    let mut entropy = [0u8; 32];
+    ring::rand::SystemRandom::new()
+        .fill(&mut entropy)
+        .map_err(|_| anyhow::anyhow!("无法初始化认证保护随机数"))?;
+    let generated =
+        bcrypt::hash_with_result(entropy, 10)?.format_for_version(bcrypt::Version::TwoA);
+    let _ = HASH.set(generated);
+    Ok(HASH.get().expect("dummy bcrypt hash initialized").as_str())
+}
+
 pub fn user_code(code: &str) -> Result<String> {
     ensure!(
         (3..=16).contains(&code.len()) && code.bytes().all(|byte| byte.is_ascii_alphanumeric()),
@@ -166,8 +212,26 @@ impl Store {
     }
 
     pub(crate) fn open_mode(path: &Path, mode: &str) -> Result<Self> {
+        let fresh = std::fs::metadata(path)
+            .map(|meta| meta.len() == 0)
+            .unwrap_or(true);
         let mut db = Connection::open(path)?;
         db.busy_timeout(Duration::from_secs(5))?;
+        // WAL 让读写分离、提交只追加 WAL，避免每次写都 fsync 整库；新库用
+        // INCREMENTAL auto_vacuum，删行后可用 incremental_vacuum 归还磁盘页。
+        if fresh {
+            if let Err(error) = db.pragma_update(None, "auto_vacuum", "INCREMENTAL") {
+                eprintln!("无法为新数据库启用 incremental auto_vacuum: {error}");
+            }
+        }
+        if let Err(error) =
+            db.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0))
+        {
+            eprintln!("无法启用 WAL 日志模式，继续使用回滚日志: {error}");
+        }
+        if let Err(error) = db.pragma_update(None, "synchronous", "NORMAL") {
+            eprintln!("无法设置 synchronous=NORMAL: {error}");
+        }
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(SCHEMA)?;
         tx.execute(
@@ -229,6 +293,24 @@ impl Store {
                 tx.execute(migration, [])?;
             }
         }
+        let account_columns = {
+            let mut statement = tx.prepare("SELECT name FROM pragma_table_info('accounts')")?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if !account_columns
+            .iter()
+            .any(|name| name == DEVICE_SECRET_COLUMN)
+        {
+            tx.execute(
+                &format!(
+                    "ALTER TABLE accounts ADD COLUMN {DEVICE_SECRET_COLUMN} TEXT NOT NULL DEFAULT ''"
+                ),
+                [],
+            )?;
+        }
+        ensure_cleanup_index(&tx)?;
         let definition: String = tx.query_row(
             "SELECT sql FROM sqlite_schema WHERE type='table' AND name='chat_messages'",
             [],
@@ -266,58 +348,63 @@ impl Store {
     }
 
     pub fn authenticate(path: &Path, request: Message) -> Result<Identity> {
-        let username = request.username.trim();
-        ensure!(
-            (1..=32).contains(&username.len()),
-            Rejected("用户名须为 1–32 个 UTF-8 字节")
-        );
-        let password = request.account_password;
-        ensure!(
-            (ACCOUNT_PASSWORD_MIN_BYTES..=ACCOUNT_PASSWORD_MAX_BYTES).contains(&password.len())
-                && !password.trim().is_empty(),
-            Rejected("密码须为 8–72 个 UTF-8 字节")
-        );
-        let normalized = username
-            .chars()
-            .map(|character| {
-                character
-                    .to_lowercase()
-                    .next()
-                    .expect("lowercase character")
-            })
-            .collect::<String>();
+        let validated = crate::online::validate_credentials(&request)?;
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         db.busy_timeout(Duration::from_secs(5))?;
         if request.kind == "account_register" {
-            let code = user_code(&request.user_code)?;
-            let hash =
-                bcrypt::hash_with_result(password, 10)?.format_for_version(bcrypt::Version::TwoA);
+            let (display_code, code) = validated.user_code.context("缺少用户代码")?;
+            let conflict: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM accounts WHERE normalized_username=?1 OR normalized_code=?2)",
+                params![validated.normalized_username, code],
+                |row| row.get(0),
+            )?;
+            ensure!(!conflict, Rejected("用户名或用户代码已被使用"));
+            let hash = bcrypt::hash_with_result(request.account_password, 10)?
+                .format_for_version(bcrypt::Version::TwoA);
             let changed = db.execute(
                 "INSERT INTO accounts (username,normalized_username,user_code,normalized_code,password_hash,created_at)
                  VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-                params![username, normalized, request.user_code, code, hash, now()],
+                params![
+                    validated.username,
+                    validated.normalized_username,
+                    display_code,
+                    code,
+                    hash,
+                    now()
+                ],
             )?;
             ensure!(changed != 0, Rejected("用户名或用户代码已被使用"));
             return Ok(Identity {
-                username: username.into(),
-                display_code: request.user_code,
+                username: validated.username,
+                display_code,
                 code,
             });
         }
-        let (username, display, hash): (String, String, String) = db.query_row(
-            "SELECT username,user_code,password_hash FROM accounts WHERE normalized_username=? AND password_hash<>''",
-            [normalized],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).optional()?.ok_or(Rejected("用户名或密码不正确"))?;
-        ensure!(
-            bcrypt::verify(password, &hash)?,
-            Rejected("用户名或密码不正确")
-        );
-        Ok(Identity {
-            username,
-            code: user_code(&display)?,
-            display_code: display,
-        })
+        let found: Option<(String, String, String)> = db
+            .query_row(
+                "SELECT username,user_code,password_hash FROM accounts WHERE normalized_username=? AND password_hash<>''",
+                [validated.normalized_username],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        match found {
+            Some((username, display, hash)) => {
+                ensure!(
+                    bcrypt::verify(request.account_password, &hash)?,
+                    Rejected(crate::online::INVALID_CREDENTIALS_MSG)
+                );
+                Ok(Identity {
+                    username,
+                    code: user_code(&display)?,
+                    display_code: display,
+                })
+            }
+            None => {
+                // Equalize verification timing with existing accounts to prevent username enumeration.
+                let _ = bcrypt::verify(request.account_password, dummy_bcrypt_hash()?);
+                Err(Rejected(crate::online::INVALID_CREDENTIALS_MSG).into())
+            }
+        }
     }
 
     pub fn account(&self, code: &str) -> Result<OnlineUser> {
@@ -339,6 +426,17 @@ impl Store {
         Ok(statement
             .query_map([code, code, code], online_user)?
             .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub(crate) fn prune_conversation(db: &Connection, kind: &str, key: &str) -> Result<()> {
+        db.execute(
+            "DELETE FROM chat_messages
+             WHERE kind=?1 AND conversation_key=?2 AND (kind='online_group' OR delivery_state<>'sent'
+               OR recalled=1 OR EXISTS (SELECT 1 FROM server_mode WHERE mode='lan'))
+               AND id NOT IN (SELECT id FROM chat_messages WHERE kind=?1 AND conversation_key=?2 ORDER BY id DESC LIMIT 10000)",
+            [kind, key],
+        )?;
+        Ok(())
     }
 
     pub(crate) fn persist_chat(
@@ -365,13 +463,7 @@ impl Store {
                 message.content, message.delivery_state, message.created_at, image, crypto],
         )?;
         if changed != 0 {
-            db.execute(
-                "DELETE FROM chat_messages
-                 WHERE kind=?1 AND conversation_key=?2 AND (kind='online_group' OR delivery_state<>'sent'
-                   OR EXISTS (SELECT 1 FROM server_mode WHERE mode='lan'))
-                   AND id NOT IN (SELECT id FROM chat_messages WHERE kind=?1 AND conversation_key=?2 ORDER BY id DESC LIMIT 10000)",
-                [kind, key],
-            )?;
+            Self::prune_conversation(db, kind, key)?;
         }
         Ok(changed != 0)
     }
@@ -668,6 +760,109 @@ mod tests {
         drop(reader);
         drop(reopened);
         std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn online_auth_hardening_and_prune_treat_recalled_sent_cleanly() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("lan-chat-store-p0-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("online.db");
+        let mut store = Store::open(&path)?;
+
+        // Register Alice and reject duplicate username/code cleanly.
+        let reg = Message {
+            kind: "account_register".into(),
+            username: "Alice".into(),
+            user_code: "ALC001".into(),
+            account_password: "password123".into(),
+            ..Message::default()
+        };
+        let id = Store::authenticate(&path, reg.clone())?;
+        assert_eq!(id.code, "alc001");
+        assert!(Store::authenticate(&path, reg).is_err());
+
+        // Valid login succeeds; missing user runs dummy bcrypt timing equalization cleanly.
+        assert!(
+            Store::authenticate(
+                &path,
+                Message {
+                    kind: "account_login".into(),
+                    username: "alice".into(),
+                    account_password: "password123".into(),
+                    ..Message::default()
+                },
+            )
+            .is_ok()
+        );
+        let missing_err = Store::authenticate(
+            &path,
+            Message {
+                kind: "account_login".into(),
+                username: "nobody".into(),
+                account_password: "password123".into(),
+                ..Message::default()
+            },
+        )
+        .err()
+        .expect("missing user must fail");
+        assert_eq!(
+            missing_err.to_string(),
+            crate::online::INVALID_CREDENTIALS_MSG
+        );
+
+        // Verify persist_chat 10,000-row prune protects pending non-recalled DM,
+        // while allowing recalled 'sent' DMs outside top 10,000 to be pruned.
+        let tx = store.0.transaction()?;
+        tx.execute(
+            "INSERT INTO chat_messages
+             (message_id,kind,conversation_key,sender_username,sender_code,target_code,content,delivery_state,created_at,recalled)
+             VALUES ('recalled-old','private','alc001:bob001','Alice','alc001','bob001','r','sent','2026-11-01T00:00:00Z',1),
+                    ('pending-old','private','alc001:bob001','Alice','alc001','bob001','p','sent','2026-11-01T00:00:01Z',0)",
+            [],
+        )?;
+        for idx in 0..10_000 {
+            tx.execute(
+                "INSERT INTO chat_messages
+                 (message_id,kind,conversation_key,sender_username,sender_code,target_code,content,delivery_state,created_at,recalled)
+                 VALUES (?1,'private','alc001:bob001','Alice','alc001','bob001','d','delivered','2026-11-02T00:00:00Z',0)",
+                [format!("d-{idx}")],
+            )?;
+        }
+        tx.commit()?;
+
+        let latest = Message {
+            message_id: uuid::Uuid::new_v4().to_string(),
+            username: "Alice".into(),
+            content: "newest".into(),
+            delivery_state: "sent".into(),
+            created_at: now(),
+            ..Message::default()
+        };
+        assert!(Store::persist_chat(
+            &store.0,
+            &latest,
+            "private",
+            "alc001:bob001",
+            "alc001",
+            "bob001",
+            None,
+        )?);
+        let recalled_left: i64 = store.0.query_row(
+            "SELECT COUNT(*) FROM chat_messages WHERE message_id='recalled-old'",
+            [],
+            |row| row.get(0),
+        )?;
+        let pending_left: i64 = store.0.query_row(
+            "SELECT COUNT(*) FROM chat_messages WHERE message_id='pending-old'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(recalled_left, 0);
+        assert_eq!(pending_left, 1);
+
+        drop(store);
+        std::fs::remove_dir_all(dir)?;
         Ok(())
     }
 }

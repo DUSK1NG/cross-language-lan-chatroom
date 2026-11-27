@@ -89,6 +89,7 @@ impl Hub {
         let name = format!("{}#{}", peer.identity.username, peer.identity.display_code);
         match request.content.as_str() {
             "kick" => {
+                self.store.reset_lan_device(&peer.identity.code)?;
                 self.system(target, "", "You were kicked by the administrator");
                 self.remove(target, false);
                 self.system(id, "", &format!("{name} was kicked"));

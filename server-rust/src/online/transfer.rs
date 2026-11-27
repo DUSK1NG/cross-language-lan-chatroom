@@ -1,14 +1,14 @@
-use std::fs;
+use std::{fs, path::Path, time::Duration};
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
 use image::{ImageFormat, ImageReader};
 use lan_chat_protocol::{
     MAX_ONLINE_FILE_BYTES, MAX_ONLINE_IMAGE_BYTES, Message, ONLINE_CHUNK_BYTES,
     is_legacy_generated_message_id,
 };
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use uuid::Uuid;
 
 use super::{Online, files, private_target};
@@ -20,6 +20,11 @@ const MAX_FILE_CHUNKS: i64 = (MAX_ONLINE_FILE_BYTES - 1) / ONLINE_CHUNK_BYTES + 
 const IMAGE_REQUEST: Rejected = Rejected("图片分片的消息编号、收件人、大小或序号无效");
 const IMAGE_READ: Rejected = Rejected("图片读取的会话、消息编号或序号无效");
 const IMAGE_FORMAT: Rejected = Rejected("图片须为 JPEG 或 PNG，宽高不超过 4096 像素");
+const UNDELIVERED_FULL: Rejected = Rejected("对方暂不可接收新的私信，请稍后再试");
+const UNDELIVERED_BYTES_FULL: Rejected = Rejected("对方待接收的消息数据已达上限，请稍后再试");
+const IMAGE_BUDGET_FULL: Rejected = Rejected("服务器图片存储空间已满，请稍后再试");
+const TTL_CLEANUP_BATCH: usize = 100;
+const FILE_CLEANUP_BATCH: usize = 200;
 
 pub(super) struct ImageUpload {
     message_id: String,
@@ -27,13 +32,71 @@ pub(super) struct ImageUpload {
     pub(super) group_id: String,
     size: i64,
     offset: i64,
-    reference: String,
+    pub(super) reference: String,
 }
 
 pub(super) struct PublishedImage {
     reference: String,
     digest: String,
     pub size: i64,
+}
+
+pub(super) enum InsertOutcome {
+    Inserted,
+    Duplicate { delivery_state: String },
+}
+
+/// 每个目标待投递私信的配额：条数与字节数各自独立，0 表示该项不限制。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Quota {
+    pub(super) limit: usize,
+    pub(super) bytes: usize,
+}
+
+pub(super) struct OnlineMessage<'a> {
+    pub(super) message: &'a Message,
+    pub(super) kind: &'a str,
+    pub(super) key: &'a str,
+    pub(super) author: &'a str,
+    pub(super) target: &'a str,
+    pub(super) image: Option<&'a PublishedImage>,
+    pub(super) undelivered: Quota,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CleanupStats {
+    pub deleted_messages: usize,
+    pub deleted_file_rows: usize,
+    pub deleted_chunks: usize,
+    pub deleted_orphan_files: usize,
+    pub skipped_invalid_timestamps: usize,
+}
+
+fn remove_if_exists(path: &Path) {
+    if let Err(error) = fs::remove_file(path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!(
+            "remove staging/orphan file {} failed: {error}",
+            path.display()
+        );
+    }
+}
+
+fn inspect_image(staging: &Path) -> Result<()> {
+    let image = ImageReader::open(staging)?
+        .with_guessed_format()
+        .map_err(|_| IMAGE_FORMAT)?;
+    ensure!(
+        matches!(image.format(), Some(ImageFormat::Jpeg | ImageFormat::Png)),
+        IMAGE_FORMAT
+    );
+    let (width, height) = image.into_dimensions().map_err(|_| IMAGE_FORMAT)?;
+    ensure!(
+        (1..=4096).contains(&width) && (1..=4096).contains(&height),
+        IMAGE_FORMAT
+    );
+    Ok(())
 }
 
 impl Online {
@@ -73,53 +136,116 @@ impl Online {
         );
 
         let root = files::root(&self.store.0)?;
-        let peer = self.peers.get_mut(&id).expect("registered client");
         if index == 0 {
             ensure!(
-                peer.image.is_none(),
+                self.peers.get(&id).is_some_and(|peer| peer.image.is_none()),
                 Rejected("当前连接已有进行中的图片上传")
             );
-            peer.image = Some(ImageUpload {
+            if group.is_none() {
+                self.store.account(&target)?;
+                let key = conversation(&identity.code, &target);
+                if Store::private_message_state(
+                    &self.store.0,
+                    &key,
+                    &identity.code,
+                    &request.message_id,
+                )?
+                .is_none()
+                {
+                    Store::check_undelivered_quota(
+                        &self.store.0,
+                        &target,
+                        self.limits.undelivered_quota(),
+                    )?;
+                }
+            }
+            let upload = ImageUpload {
                 message_id: request.message_id.clone(),
                 target: target.clone(),
                 group_id: request.group_id.clone(),
                 size: request.image_size,
                 offset: 0,
                 reference: format!("image-{}", Uuid::new_v4()),
-            });
+            };
+            let path = files::image_path(&root, &upload.reference)?;
+            let staging = path.with_extension("partial");
+            fs::create_dir_all(&root)?;
+            if let Err(error) = files::append(&staging, 0, &data) {
+                remove_if_exists(&staging);
+                return Err(error);
+            }
+            let peer = self.peers.get_mut(&id).expect("registered client");
+            let mut upload = upload;
+            upload.offset = data.len() as i64;
+            if upload.offset < upload.size {
+                peer.image = Some(upload);
+                return Ok(());
+            }
+            return self.finish_image(id, identity, group.as_ref(), upload, &path, &staging);
         }
-        let upload = peer
-            .image
-            .as_mut()
-            .filter(|upload| {
-                upload.message_id == request.message_id
-                    && upload.target == target
-                    && upload.group_id == request.group_id
-                    && upload.size == request.image_size
-                    && upload.offset == offset
-            })
-            .ok_or(Rejected("图片分片与当前上传不匹配"))?;
-        let path = files::image_path(&root, &upload.reference)?;
-        let staging = path.with_extension("partial");
-        fs::create_dir_all(&root)?;
-        files::append(&staging, offset, &data)?;
-        upload.offset += data.len() as i64;
-        if upload.offset < upload.size {
-            return Ok(());
+
+        let completed = {
+            let peer = self.peers.get_mut(&id).expect("registered client");
+            let upload = peer
+                .image
+                .as_mut()
+                .filter(|upload| {
+                    upload.message_id == request.message_id
+                        && upload.target == target
+                        && upload.group_id == request.group_id
+                        && upload.size == request.image_size
+                        && upload.offset == offset
+                })
+                .ok_or(Rejected("图片分片与当前上传不匹配"))?;
+            let path = files::image_path(&root, &upload.reference)?;
+            let staging = path.with_extension("partial");
+            fs::create_dir_all(&root)?;
+            files::append(&staging, offset, &data)?;
+            upload.offset += data.len() as i64;
+            if upload.offset < upload.size {
+                None
+            } else {
+                Some((peer.image.take().expect("completed upload"), path, staging))
+            }
+        };
+        if let Some((upload, path, staging)) = completed {
+            return self.finish_image(id, identity, group.as_ref(), upload, &path, &staging);
         }
-        let upload = peer.image.take().expect("completed upload");
-        let image = ImageReader::open(&staging)?
-            .with_guessed_format()
-            .map_err(|_| IMAGE_FORMAT)?;
-        ensure!(
-            matches!(image.format(), Some(ImageFormat::Jpeg | ImageFormat::Png)),
-            IMAGE_FORMAT
-        );
-        let (width, height) = image.into_dimensions().map_err(|_| IMAGE_FORMAT)?;
-        ensure!(
-            (1..=4096).contains(&width) && (1..=4096).contains(&height),
-            IMAGE_FORMAT
-        );
+        Ok(())
+    }
+
+    fn finish_image(
+        &mut self,
+        id: Uuid,
+        identity: &Identity,
+        group: Option<&lan_chat_protocol::OnlineGroup>,
+        upload: ImageUpload,
+        path: &Path,
+        staging: &Path,
+    ) -> Result<()> {
+        if let Err(error) = inspect_image(staging) {
+            remove_if_exists(staging);
+            return Err(error);
+        }
+        let budget = self.limits.image_budget_bytes;
+        if budget > 0 {
+            let used: i64 = self.store.0.query_row(
+                "SELECT COALESCE(SUM(COALESCE(online_image_size,0)),0) FROM chat_messages",
+                [],
+                |row| row.get(0),
+            )?;
+            if used.saturating_add(upload.size) > budget as i64 {
+                remove_if_exists(staging);
+                return Err(IMAGE_BUDGET_FULL.into());
+            }
+        }
+        let digest = match files::finalize(path, upload.size) {
+            Ok(digest) => digest,
+            Err(error) => {
+                remove_if_exists(staging);
+                return Err(error);
+            }
+        };
         let message = Message {
             message_id: upload.message_id,
             target_user_code: upload.target,
@@ -129,13 +255,24 @@ impl Online {
         };
         let image = PublishedImage {
             reference: upload.reference,
-            digest: files::finalize(&path, upload.size)?,
+            digest,
             size: upload.size,
         };
-        if let Some(group) = group {
-            self.send_group(id, identity, &group, &message, Some(&image))
+        let outcome = if let Some(group) = group {
+            self.send_group(id, identity, group, &message, Some(&image))
         } else {
             self.private_chat(id, identity, &message, Some(&image))
+        };
+        match outcome {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                remove_if_exists(path);
+                Ok(())
+            }
+            Err(error) => {
+                remove_if_exists(path);
+                Err(error)
+            }
         }
     }
 
@@ -225,8 +362,13 @@ impl Online {
                 self.store.group_for(&identity.code, &request.group_id)?;
                 String::new()
             };
-            self.store
-                .begin_file(identity, &target, request, &mut reply)?;
+            self.store.begin_file(
+                identity,
+                &target,
+                request,
+                &mut reply,
+                self.limits.undelivered_quota(),
+            )?;
         } else {
             let invalid_id = Rejected("无效的附件编号");
             let uuid = Uuid::parse_str(&request.attachment_id).map_err(|_| invalid_id)?;
@@ -251,9 +393,11 @@ impl Online {
                     reply.chunk_index = Some(index);
                 }
                 "dm_file_commit" => {
-                    if let Some(message) =
-                        self.store.commit_file(identity, &request.attachment_id)?
-                    {
+                    if let Some(message) = self.store.commit_file(
+                        identity,
+                        &request.attachment_id,
+                        self.limits.undelivered_quota(),
+                    )? {
                         if message.group_id.is_empty() {
                             self.publish_private(&identity.code, &message);
                         } else {
@@ -273,46 +417,352 @@ impl Online {
         Ok(())
     }
 
-    pub fn cleanup_files(&mut self) -> Result<()> {
-        let tx = self.store.0.transaction()?;
-        tx.execute(
-            "DELETE FROM online_files WHERE (chat_id IS NULL AND expires<=?)
-             OR (chat_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.id=online_files.chat_id))",
-            [Utc::now().timestamp()],
+    #[cfg(test)]
+    pub fn cleanup_files_at(
+        &mut self,
+        now_utc: DateTime<Utc>,
+        min_orphan_age: Duration,
+    ) -> Result<CleanupStats> {
+        let mut stats = cleanup_database_batches(
+            &mut self.store.0,
+            now_utc,
+            self.limits.undelivered_ttl_days,
+            self.limits.delivered_ttl_days,
         )?;
-        tx.execute(
-            "DELETE FROM online_file_chunks WHERE file_id NOT IN (SELECT id FROM online_files)",
-            [],
-        )?;
-        tx.commit()?;
         let active: Vec<_> = self
             .peers
             .values()
             .filter_map(|peer| peer.image.as_ref().map(|image| image.reference.as_str()))
             .collect();
-        files::cleanup_orphans(&self.store.0, &active)?;
-        Ok(())
+        stats.deleted_orphan_files =
+            files::cleanup_orphans(&self.store.0, &active, min_orphan_age)?;
+        Ok(stats)
     }
 }
 
-impl Store {
-    pub(super) fn insert_online_message(
-        &mut self,
-        message: &Message,
-        kind: &str,
-        key: &str,
-        author: &str,
-        target: &str,
-        image: Option<&PublishedImage>,
-    ) -> Result<bool> {
-        let tx = self.0.transaction()?;
-        let changed = Self::persist_chat(&tx, message, kind, key, author, target, None)?;
-        if let Some(image) = image.filter(|_| changed) {
-            tx.execute("UPDATE chat_messages SET online_image_ref=?,online_image_size=?,online_image_sha256=? WHERE kind=? AND conversation_key=? AND sender_code=? AND message_id=?",
-                params![image.reference, image.size, image.digest, kind, key, author, message.message_id])?;
+pub fn cleanup_maintenance(
+    database: &Path,
+    online: &std::sync::Mutex<Online>,
+) -> Result<CleanupStats> {
+    let (ttl_days, delivered_ttl_days) = {
+        let state = online
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (
+            state.limits.undelivered_ttl_days,
+            state.limits.delivered_ttl_days,
+        )
+    };
+    let mut db = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    db.busy_timeout(Duration::from_secs(5))?;
+    let mut stats = cleanup_database_batches(&mut db, Utc::now(), ttl_days, delivered_ttl_days)?;
+    let active_owned = online
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .active_image_references();
+    let active: Vec<&str> = active_owned.iter().map(String::as_str).collect();
+    stats.deleted_orphan_files = files::cleanup_orphans(&db, &active, Duration::from_secs(120))?;
+    Ok(stats)
+}
+
+pub(super) fn cleanup_database_batches(
+    db: &mut Connection,
+    now_utc: DateTime<Utc>,
+    ttl_days: u32,
+    delivered_ttl_days: u32,
+) -> Result<CleanupStats> {
+    let mut stats = CleanupStats::default();
+    if ttl_days > 0 {
+        let delta = TimeDelta::try_days(i64::from(ttl_days)).context("无效的未确认消息过期天数")?;
+        let cutoff = now_utc - delta;
+        let cutoff_upper =
+            (cutoff + TimeDelta::seconds(2)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let mut cursor: Option<(String, i64)> = None;
+        loop {
+            let batch: Vec<(i64, String)> = match &cursor {
+                None => {
+                    let mut stmt = db.prepare(
+                        "SELECT id, created_at FROM chat_messages
+                         WHERE kind='private' AND delivery_state='sent' AND created_at < ?1
+                         ORDER BY created_at ASC, id ASC LIMIT ?2",
+                    )?;
+                    stmt.query_map(params![cutoff_upper, TTL_CLEANUP_BATCH as i64], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+                }
+                Some((last_created, last_id)) => {
+                    let mut stmt = db.prepare(
+                        "SELECT id, created_at FROM chat_messages
+                         WHERE kind='private' AND delivery_state='sent'
+                           AND created_at < ?1
+                           AND (created_at, id) > (?2, ?3)
+                         ORDER BY created_at ASC, id ASC LIMIT ?4",
+                    )?;
+                    stmt.query_map(
+                        params![
+                            cutoff_upper,
+                            last_created,
+                            last_id,
+                            TTL_CLEANUP_BATCH as i64
+                        ],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+                }
+            };
+            if batch.is_empty() {
+                break;
+            }
+            let count = batch.len();
+            let last = batch.last().map(|(id, ts)| (ts.clone(), *id));
+            let mut delete_ids = Vec::new();
+            for (id, ts) in batch {
+                match DateTime::parse_from_rfc3339(&ts) {
+                    Ok(parsed) if parsed.with_timezone(&Utc) <= cutoff => delete_ids.push(id),
+                    Ok(_) => {}
+                    Err(_) => stats.skipped_invalid_timestamps += 1,
+                }
+            }
+            if !delete_ids.is_empty() {
+                let placeholders = vec!["?"; delete_ids.len()].join(",");
+                let sql = format!(
+                    "DELETE FROM chat_messages WHERE kind='private' AND delivery_state='sent' AND id IN ({placeholders})"
+                );
+                let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                stats.deleted_messages +=
+                    tx.execute(&sql, rusqlite::params_from_iter(delete_ids.iter()))?;
+                tx.commit()?;
+            }
+            cursor = last;
+            if count < TTL_CLEANUP_BATCH {
+                break;
+            }
+        }
+    }
+
+    if delivered_ttl_days > 0 {
+        let delta = TimeDelta::try_days(i64::from(delivered_ttl_days))
+            .context("无效的已送达消息保留天数")?;
+        let cutoff = now_utc - delta;
+        let cutoff_upper =
+            (cutoff + TimeDelta::seconds(2)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let mut cursor: Option<(String, i64)> = None;
+        loop {
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let batch: Vec<(i64, String)> = match &cursor {
+                None => {
+                    let mut stmt = tx.prepare(
+                        "SELECT id, created_at FROM chat_messages
+                         WHERE kind='private' AND delivery_state='delivered' AND created_at < ?1
+                         ORDER BY created_at ASC, id ASC LIMIT ?2",
+                    )?;
+                    stmt.query_map(params![cutoff_upper, TTL_CLEANUP_BATCH as i64], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+                }
+                Some((last_created, last_id)) => {
+                    let mut stmt = tx.prepare(
+                        "SELECT id, created_at FROM chat_messages
+                         WHERE kind='private' AND delivery_state='delivered'
+                           AND created_at < ?1
+                           AND (created_at, id) > (?2, ?3)
+                         ORDER BY created_at ASC, id ASC LIMIT ?4",
+                    )?;
+                    stmt.query_map(
+                        params![
+                            cutoff_upper,
+                            last_created,
+                            last_id,
+                            TTL_CLEANUP_BATCH as i64
+                        ],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+                }
+            };
+            if batch.is_empty() {
+                tx.commit()?;
+                break;
+            }
+            let count = batch.len();
+            cursor = batch.last().map(|(id, ts)| (ts.clone(), *id));
+            let mut delete_ids = Vec::new();
+            for (id, ts) in batch {
+                match DateTime::parse_from_rfc3339(&ts) {
+                    Ok(parsed) if parsed.with_timezone(&Utc) <= cutoff => delete_ids.push(id),
+                    Ok(_) => {}
+                    Err(_) => stats.skipped_invalid_timestamps += 1,
+                }
+            }
+            if !delete_ids.is_empty() {
+                let placeholders = vec!["?"; delete_ids.len()].join(",");
+                let sql = format!(
+                    "DELETE FROM chat_messages WHERE kind='private' AND delivery_state='delivered' AND id IN ({placeholders})"
+                );
+                stats.deleted_messages +=
+                    tx.execute(&sql, rusqlite::params_from_iter(delete_ids.iter()))?;
+            }
+            tx.commit()?;
+            if count < TTL_CLEANUP_BATCH {
+                break;
+            }
+        }
+    }
+
+    let now_ts = now_utc.timestamp();
+    loop {
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let removed_ids: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "DELETE FROM online_files
+                 WHERE id IN (
+                     SELECT id FROM online_files
+                     WHERE (chat_id IS NULL AND expires<=?1)
+                        OR (chat_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.id=online_files.chat_id))
+                     LIMIT ?2
+                 )
+                 RETURNING id",
+            )?;
+            stmt.query_map(params![now_ts, FILE_CLEANUP_BATCH as i64], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let count = removed_ids.len();
+        stats.deleted_file_rows += count;
+        if count > 0 {
+            let placeholders = vec!["?"; count].join(",");
+            let sql = format!("DELETE FROM online_file_chunks WHERE file_id IN ({placeholders})");
+            stats.deleted_chunks +=
+                tx.execute(&sql, rusqlite::params_from_iter(removed_ids.iter()))?;
         }
         tx.commit()?;
-        Ok(changed)
+        if count < FILE_CLEANUP_BATCH {
+            break;
+        }
+    }
+
+    loop {
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let stray_ids: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT DISTINCT file_id FROM online_file_chunks c
+                 WHERE NOT EXISTS (SELECT 1 FROM online_files f WHERE f.id=c.file_id)
+                 LIMIT ?1",
+            )?;
+            stmt.query_map([FILE_CLEANUP_BATCH as i64], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if stray_ids.is_empty() {
+            break;
+        }
+        let count = stray_ids.len();
+        let placeholders = vec!["?"; count].join(",");
+        let sql = format!("DELETE FROM online_file_chunks WHERE file_id IN ({placeholders})");
+        stats.deleted_chunks += tx.execute(&sql, rusqlite::params_from_iter(stray_ids.iter()))?;
+        tx.commit()?;
+        if count < FILE_CLEANUP_BATCH {
+            break;
+        }
+    }
+    // 仅 incremental auto_vacuum 的库会真正归还页；其他库上是空操作。
+    let _ = db.execute_batch("PRAGMA incremental_vacuum(4096);");
+    Ok(stats)
+}
+
+impl Store {
+    pub(super) fn private_message_state(
+        db: &Connection,
+        key: &str,
+        author: &str,
+        message_id: &str,
+    ) -> Result<Option<String>> {
+        Ok(db
+            .query_row(
+                "SELECT delivery_state FROM chat_messages
+                 WHERE kind='private' AND conversation_key=?1 AND sender_code=?2 AND message_id=?3",
+                params![key, author, message_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub(super) fn check_undelivered_quota(
+        db: &Connection,
+        target: &str,
+        quota: Quota,
+    ) -> Result<()> {
+        if quota.limit == 0 && quota.bytes == 0 {
+            return Ok(());
+        }
+        let (count, bytes): (i64, i64) = db.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(length(content)+COALESCE(online_image_size,0)),0)
+             FROM chat_messages
+             WHERE kind='private' AND target_code=?1 AND delivery_state='sent' AND recalled=0",
+            params![target],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if quota.limit > 0 {
+            ensure!(count < quota.limit as i64, UNDELIVERED_FULL);
+        }
+        if quota.bytes > 0 {
+            ensure!(bytes < quota.bytes as i64, UNDELIVERED_BYTES_FULL);
+        }
+        Ok(())
+    }
+
+    pub(super) fn insert_online_message(
+        &mut self,
+        spec: OnlineMessage<'_>,
+    ) -> Result<InsertOutcome> {
+        let tx = self
+            .0
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(delivery_state) = tx
+            .query_row(
+                "SELECT delivery_state FROM chat_messages
+                 WHERE kind=?1 AND conversation_key=?2 AND sender_code=?3 AND message_id=?4",
+                params![spec.kind, spec.key, spec.author, spec.message.message_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        {
+            return Ok(InsertOutcome::Duplicate { delivery_state });
+        }
+        if spec.kind == "private" {
+            Self::check_undelivered_quota(&tx, spec.target, spec.undelivered)?;
+        }
+        let changed = Self::persist_chat(
+            &tx,
+            spec.message,
+            spec.kind,
+            spec.key,
+            spec.author,
+            spec.target,
+            None,
+        )?;
+        if let Some(image) = spec.image.filter(|_| changed) {
+            tx.execute(
+                "UPDATE chat_messages SET online_image_ref=?,online_image_size=?,online_image_sha256=? WHERE kind=? AND conversation_key=? AND sender_code=? AND message_id=?",
+                params![
+                    image.reference,
+                    image.size,
+                    image.digest,
+                    spec.kind,
+                    spec.key,
+                    spec.author,
+                    spec.message.message_id
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(if changed {
+            InsertOutcome::Inserted
+        } else {
+            InsertOutcome::Duplicate {
+                delivery_state: spec.message.delivery_state.clone(),
+            }
+        })
     }
 
     fn begin_file(
@@ -321,6 +771,7 @@ impl Store {
         target: &str,
         request: &Message,
         reply: &mut Message,
+        quota: Quota,
     ) -> Result<()> {
         let name = &request.file_name;
         let size = request.logical_size;
@@ -334,6 +785,7 @@ impl Store {
         );
         if request.group_id.is_empty() {
             self.account(target)?;
+            Self::check_undelivered_quota(&self.0, target, quota)?;
         }
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp();
@@ -394,8 +846,15 @@ impl Store {
         Ok(())
     }
 
-    fn commit_file(&mut self, identity: &Identity, id: &str) -> Result<Option<Message>> {
-        let tx = self.0.transaction()?;
+    fn commit_file(
+        &mut self,
+        identity: &Identity,
+        id: &str,
+        quota: Quota,
+    ) -> Result<Option<Message>> {
+        let tx = self
+            .0
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let Some((recipient, name, size, received, published, disk, group)) = tx.query_row(
                 "SELECT recipient,name,size,received,chat_id,disk_backed,group_id FROM online_files f
              WHERE id=? AND owner=? AND (chat_id IS NOT NULL OR expires>?)
@@ -418,6 +877,22 @@ impl Store {
             return Ok(None);
         }
         ensure!(size == received, Rejected("文件尚未完整上传"));
+        if group.is_none()
+            && let Err(error) = Self::check_undelivered_quota(&tx, &recipient, quota)
+        {
+            tx.execute(
+                "DELETE FROM online_files WHERE id=? AND owner=? AND chat_id IS NULL",
+                params![id, identity.code],
+            )?;
+            tx.execute("DELETE FROM online_file_chunks WHERE file_id=?", [id])?;
+            tx.commit()?;
+            if disk {
+                remove_if_exists(
+                    &files::file_path(&files::root(&self.0)?, id)?.with_extension("partial"),
+                );
+            }
+            return Err(error);
+        }
         let digest = if disk {
             let root = files::root(&tx)?;
             fs::create_dir_all(&root)?;
@@ -453,6 +928,7 @@ impl Store {
             "UPDATE online_files SET chat_id=?,disk_sha256=? WHERE id=?",
             params![chat_id, digest, id],
         )?;
+        Self::prune_conversation(&tx, kind, &key)?;
         tx.commit()?;
         Ok(Some(Message {
             kind: wire_kind.into(),
@@ -521,6 +997,11 @@ impl Store {
         ensure!(removed == 1, FILE_ACCESS);
         tx.execute("DELETE FROM online_file_chunks WHERE file_id=?", [id])?;
         tx.commit()?;
+        if let Ok(root) = files::root(&self.0)
+            && let Ok(path) = files::file_path(&root, id)
+        {
+            remove_if_exists(&path.with_extension("partial"));
+        }
         Ok(())
     }
 }
@@ -529,4 +1010,499 @@ fn file_index(request: &Message) -> Result<i64> {
     let index = request.chunk_index.unwrap_or(0);
     ensure!((0..MAX_FILE_CHUNKS).contains(&index), FILE_CHUNK);
     Ok(index)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::online::OnlineLimits;
+
+    const PNG_1X1_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1sAAAAASUVORK5CYII=";
+
+    fn setup_accounts(db: &Path, limits: OnlineLimits) -> Result<Online> {
+        let store = Store::open(db)?;
+        for code in ["alice", "bobby", "carol"] {
+            store.0.execute(
+                "INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')",
+                [code],
+            )?;
+        }
+        Ok(Online::with_limits(store, None, None, limits))
+    }
+
+    fn connect_peer(online: &mut Online, code: &str) -> Result<(Uuid, mpsc::Receiver<Message>)> {
+        let id = Uuid::new_v4();
+        let (sender, receiver) = mpsc::channel(64);
+        online.register(
+            id,
+            Identity {
+                code: code.into(),
+                username: code.into(),
+                display_code: code.into(),
+            },
+            sender,
+            true,
+            true,
+        )?;
+        Ok((id, receiver))
+    }
+
+    #[test]
+    fn migration_5_to_6_creates_partial_indexes_hits_plans_and_skips_lan() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("lan-chat-mig6-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir)?;
+        let online_db = dir.join("online.db");
+        let store = Store::open(&online_db)?;
+        store.0.execute_batch(
+            "DROP INDEX IF EXISTS idx_chat_messages_pending_target;
+             DROP INDEX IF EXISTS idx_chat_messages_pending_created;
+             PRAGMA user_version=5;",
+        )?;
+        drop(store);
+
+        let mut reopened = Store::open(&online_db)?;
+        let version: i64 = reopened
+            .0
+            .pragma_query_value(None, "user_version", |row| row.get(0))?;
+        assert_eq!(version, 6);
+
+        // Seed realistic delivered + pending rows and run EXPLAIN QUERY PLAN on exact production queries.
+        {
+            let tx = reopened.0.transaction()?;
+            for i in 0..200 {
+                tx.execute(
+                    "INSERT INTO chat_messages(message_id,kind,conversation_key,sender_username,sender_code,target_code,content,delivery_state,created_at,recalled)
+                     VALUES (?1,'private','alice:bobby','alice','alice','bobby','hist','delivered','2026-10-01T00:00:00Z',0)",
+                    [format!("hist-{i}")],
+                )?;
+            }
+            for i in 0..10 {
+                tx.execute(
+                    "INSERT INTO chat_messages(message_id,kind,conversation_key,sender_username,sender_code,target_code,content,delivery_state,created_at,recalled)
+                     VALUES (?1,'private','alice:bobby','alice','alice','bobby','pend','sent','2026-10-01T00:00:00Z',0)",
+                    [format!("pend-{i}")],
+                )?;
+            }
+            tx.commit()?;
+        }
+        let explain = |sql: &str| -> Result<Vec<String>> {
+            let mut stmt = reopened.0.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+            let plans = stmt
+                .query_map([], |row| row.get::<_, String>(3))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(plans)
+        };
+        let quota_plan = explain(
+            "SELECT 1 FROM chat_messages WHERE kind='private' AND target_code='bobby' AND delivery_state='sent' AND recalled=0 LIMIT 1 OFFSET 199",
+        )?;
+        assert!(
+            quota_plan
+                .iter()
+                .any(|line| line.contains("idx_chat_messages_pending_target")),
+            "unexpected quota plan: {quota_plan:?}"
+        );
+        let ttl_plan = explain(
+            "SELECT id, created_at FROM chat_messages INDEXED BY idx_chat_messages_pending_created WHERE kind='private' AND delivery_state='sent' AND created_at < '2026-11-01T00:00:00Z' ORDER BY created_at ASC, id ASC LIMIT 100",
+        )?;
+        assert!(
+            ttl_plan
+                .iter()
+                .any(|line| line.contains("idx_chat_messages_pending_created"))
+                && !ttl_plan.iter().any(|line| line.contains("TEMP B-TREE")),
+            "unexpected ttl plan: {ttl_plan:?}"
+        );
+        let ttl_cursor_plan = explain(
+            "SELECT id, created_at FROM chat_messages INDEXED BY idx_chat_messages_pending_created WHERE kind='private' AND delivery_state='sent' AND created_at < '2026-11-01T00:00:00Z' AND (created_at, id) > ('2026-10-01T00:00:00Z', 10) ORDER BY created_at ASC, id ASC LIMIT 100",
+        )?;
+        assert!(
+            ttl_cursor_plan
+                .iter()
+                .any(|line| line.contains("idx_chat_messages_pending_created"))
+                && !ttl_cursor_plan
+                    .iter()
+                    .any(|line| line.contains("TEMP B-TREE")),
+            "unexpected ttl cursor plan: {ttl_cursor_plan:?}"
+        );
+        drop(reopened);
+
+        // Verify read-only compatibility & that LAN mode DB does not receive online partial indexes.
+        let ro = Connection::open_with_flags(&online_db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let count: i64 =
+            ro.query_row("SELECT COUNT(*) FROM chat_messages", [], |row| row.get(0))?;
+        assert_eq!(count, 210);
+        drop(ro);
+
+        let lan_db = dir.join("lan.db");
+        let lan = Store::open_mode(&lan_db, "lan")?;
+        let lan_idx_count: i64 = lan.0.query_row(
+            "SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND name LIKE 'idx_chat_messages_pending_%'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(lan_idx_count, 0);
+        drop(lan);
+
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn undelivered_quota_enforces_text_image_file_idempotency_and_commit_cleanup() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("lan-chat-p01-quota-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir)?;
+        let db = dir.join("chat.db");
+        let mut online = setup_accounts(
+            &db,
+            OnlineLimits {
+                undelivered_per_target: 2,
+                undelivered_bytes_per_target: 0,
+                undelivered_ttl_days: 14,
+                delivered_ttl_days: 0,
+                image_budget_bytes: 0,
+                max_sessions_per_account: 8,
+            },
+        )?;
+        let (alice_id, mut alice_rx) = connect_peer(&mut online, "alice")?;
+        let alice = Identity {
+            code: "alice".into(),
+            username: "alice".into(),
+            display_code: "alice".into(),
+        };
+        let png = BASE64.decode(PNG_1X1_BASE64)?;
+
+        let text_id = Uuid::new_v4().to_string();
+        online.handle_command(
+            alice_id,
+            &alice,
+            &Message {
+                kind: "private_chat".into(),
+                target_user_code: "bobby".into(),
+                message_id: text_id.clone(),
+                content: "dm-1".into(),
+                ..Message::default()
+            },
+        )?;
+        let img_id = Uuid::new_v4().to_string();
+        online.handle_command(
+            alice_id,
+            &alice,
+            &Message {
+                kind: "dm_image_chunk".into(),
+                target_user_code: "bobby".into(),
+                message_id: img_id.clone(),
+                image_size: png.len() as i64,
+                chunk_index: Some(0),
+                image_data: PNG_1X1_BASE64.into(),
+                ..Message::default()
+            },
+        )?;
+
+        // Target quota (2) reached: new text, image index==0, and file init must fail cleanly.
+        assert!(
+            online
+                .handle_command(
+                    alice_id,
+                    &alice,
+                    &Message {
+                        kind: "private_chat".into(),
+                        target_user_code: "bobby".into(),
+                        message_id: Uuid::new_v4().to_string(),
+                        content: "dm-overflow".into(),
+                        ..Message::default()
+                    },
+                )
+                .is_err()
+        );
+        assert!(
+            online
+                .handle_command(
+                    alice_id,
+                    &alice,
+                    &Message {
+                        kind: "dm_image_chunk".into(),
+                        target_user_code: "bobby".into(),
+                        message_id: Uuid::new_v4().to_string(),
+                        image_size: png.len() as i64,
+                        chunk_index: Some(0),
+                        image_data: PNG_1X1_BASE64.into(),
+                        ..Message::default()
+                    },
+                )
+                .is_err()
+        );
+        assert!(
+            online
+                .handle_command(
+                    alice_id,
+                    &alice,
+                    &Message {
+                        kind: "dm_file_init".into(),
+                        target_user_code: "bobby".into(),
+                        file_name: "blocked.txt".into(),
+                        logical_size: 4,
+                        ..Message::default()
+                    },
+                )
+                .is_err()
+        );
+
+        // Idempotent resend of existing text and image succeeds even while quota is full,
+        // and duplicate image upload leaves only the original image file on disk.
+        online.handle_command(
+            alice_id,
+            &alice,
+            &Message {
+                kind: "private_chat".into(),
+                target_user_code: "bobby".into(),
+                message_id: text_id.clone(),
+                content: "dm-1".into(),
+                ..Message::default()
+            },
+        )?;
+        online.handle_command(
+            alice_id,
+            &alice,
+            &Message {
+                kind: "dm_image_chunk".into(),
+                target_user_code: "bobby".into(),
+                message_id: img_id.clone(),
+                image_size: png.len() as i64,
+                chunk_index: Some(0),
+                image_data: PNG_1X1_BASE64.into(),
+                ..Message::default()
+            },
+        )?;
+        let files_root = files::root(&online.store.0)?;
+        let disk_count = fs::read_dir(&files_root)?.count();
+        assert_eq!(disk_count, 1, "duplicate image upload left extra disk file");
+
+        // Race between dm_file_init and dm_file_commit fills carol's quota; commit rejection must
+        // clean both DB staging row and .partial file immediately (no upload slot lockup).
+        while alice_rx.try_recv().is_ok() {}
+        online.handle_command(
+            alice_id,
+            &alice,
+            &Message {
+                kind: "dm_file_init".into(),
+                target_user_code: "carol".into(),
+                file_name: "race.txt".into(),
+                logical_size: 5,
+                ..Message::default()
+            },
+        )?;
+        let file_id = alice_rx.try_recv()?.attachment_id;
+        online.handle_command(
+            alice_id,
+            &alice,
+            &Message {
+                kind: "dm_file_chunk".into(),
+                attachment_id: file_id.clone(),
+                chunk_index: Some(0),
+                file_data: BASE64.encode(b"hello"),
+                ..Message::default()
+            },
+        )?;
+        for content in ["c1", "c2"] {
+            online.handle_command(
+                alice_id,
+                &alice,
+                &Message {
+                    kind: "private_chat".into(),
+                    target_user_code: "carol".into(),
+                    message_id: Uuid::new_v4().to_string(),
+                    content: content.into(),
+                    ..Message::default()
+                },
+            )?;
+        }
+        assert!(
+            online
+                .handle_command(
+                    alice_id,
+                    &alice,
+                    &Message {
+                        kind: "dm_file_commit".into(),
+                        attachment_id: file_id.clone(),
+                        ..Message::default()
+                    },
+                )
+                .is_err()
+        );
+        let pending_uploads: i64 = online.store.0.query_row(
+            "SELECT COUNT(*) FROM online_files WHERE owner='alice' AND chat_id IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(pending_uploads, 0);
+        assert!(
+            !files::file_path(&files_root, &file_id)?
+                .with_extension("partial")
+                .exists()
+        );
+
+        // Recalling one pending DM for bobby frees slot for a new message (no reverse inbox DoS).
+        online.handle_command(
+            alice_id,
+            &alice,
+            &Message {
+                kind: "message_recall".into(),
+                message_id: text_id,
+                ..Message::default()
+            },
+        )?;
+        online.handle_command(
+            alice_id,
+            &alice,
+            &Message {
+                kind: "private_chat".into(),
+                target_user_code: "bobby".into(),
+                message_id: Uuid::new_v4().to_string(),
+                content: "after-recall".into(),
+                ..Message::default()
+            },
+        )?;
+
+        drop(online);
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn ttl_cleanup_handles_mixed_precision_recalled_attachments_invalid_ts_and_freelist()
+    -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("lan-chat-p01-ttl-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir)?;
+        let db = dir.join("chat.db");
+        let mut online = setup_accounts(
+            &db,
+            OnlineLimits {
+                undelivered_per_target: 200,
+                undelivered_bytes_per_target: 0,
+                undelivered_ttl_days: 14,
+                delivered_ttl_days: 30,
+                image_budget_bytes: 0,
+                max_sessions_per_account: 8,
+            },
+        )?;
+        let root = files::root(&online.store.0)?;
+        fs::create_dir_all(&root)?;
+
+        // Boundary reference: 2026-11-27T12:00:00.500Z => cutoff = 2026-11-13T12:00:00.500Z
+        let now_utc = DateTime::parse_from_rfc3339("2026-11-27T12:00:00.500Z")?.with_timezone(&Utc);
+        let insert = |kind: &str, state: &str, recalled: i64, ts: &str, pad: &str| -> Result<i64> {
+            let msg_id = Uuid::new_v4().to_string();
+            let content = if pad.is_empty() {
+                msg_id.clone()
+            } else {
+                pad.to_owned()
+            };
+            Ok(online.store.0.query_row(
+                "INSERT INTO chat_messages
+                 (message_id,kind,conversation_key,sender_username,sender_code,target_code,content,delivery_state,created_at,recalled)
+                 VALUES (?1,?2,'alice:bobby','alice','alice','bobby',?3,?4,?5,?6) RETURNING id",
+                params![msg_id, kind, content, state, ts, recalled],
+                |row| row.get(0),
+            )?)
+        };
+
+        let expired_whole = insert(
+            "private",
+            "sent",
+            0,
+            "2026-11-13T12:00:00Z",
+            &"x".repeat(4000),
+        )?;
+        let unexpired_frac = insert("private", "sent", 0, "2026-11-13T12:00:00.900Z", "")?;
+        let recalled_expired = insert(
+            "private",
+            "sent",
+            1,
+            "2026-11-10T00:00:00Z",
+            &"r".repeat(2000),
+        )?;
+        let delivered_old = insert("private", "delivered", 0, "2026-11-01T00:00:00Z", "")?;
+        let group_old = insert("online_group", "sent", 0, "2026-11-01T00:00:00Z", "")?;
+
+        // Attach a disk file + disk image to the recalled expired row.
+        let file_id = Uuid::new_v4().to_string();
+        let file_disk = files::file_path(&root, &file_id)?;
+        fs::write(&file_disk, b"recalled-file")?;
+        online.store.0.execute(
+            "INSERT INTO online_files(id,owner,recipient,name,size,received,expires,disk_backed,disk_sha256,chat_id)
+             VALUES (?1,'alice','bobby','a.bin',13,13,9999999999,1,'deadbeef',?2)",
+            params![file_id, recalled_expired],
+        )?;
+        let image_ref = format!("image-{}", Uuid::new_v4());
+        let image_disk = files::image_path(&root, &image_ref)?;
+        fs::write(&image_disk, b"recalled-image")?;
+        online.store.0.execute(
+            "UPDATE chat_messages SET online_image_ref=?1, online_image_size=14 WHERE id=?2",
+            params![image_ref, recalled_expired],
+        )?;
+
+        // More than TTL_CLEANUP_BATCH invalid timestamps at the start of the index must be skipped
+        // without halting cursor progress or deleting invalid rows.
+        for index in 0..105 {
+            let ts = if index % 2 == 0 {
+                ""
+            } else {
+                "0000-bad-timestamp"
+            };
+            insert("private", "sent", 0, ts, "")?;
+        }
+
+        // With ttl_days = 0, nothing is removed.
+        online.limits.undelivered_ttl_days = 0;
+        let disabled_stats = online.cleanup_files_at(now_utc, Duration::ZERO)?;
+        assert_eq!(disabled_stats.deleted_messages, 0);
+
+        online.limits.undelivered_ttl_days = 14;
+        let stats = online.cleanup_files_at(now_utc, Duration::ZERO)?;
+        assert_eq!(stats.deleted_messages, 2);
+        assert_eq!(stats.skipped_invalid_timestamps, 105);
+        assert_eq!(stats.deleted_file_rows, 1);
+        assert_eq!(stats.deleted_orphan_files, 2);
+
+        let exists = |id: i64| -> Result<bool> {
+            Ok(online
+                .store
+                .0
+                .query_row("SELECT 1 FROM chat_messages WHERE id=?", [id], |_| Ok(()))
+                .optional()?
+                .is_some())
+        };
+        assert!(!exists(expired_whole)?);
+        assert!(!exists(recalled_expired)?);
+        assert!(exists(unexpired_frac)?);
+        assert!(exists(delivered_old)?);
+        assert!(exists(group_old)?);
+        assert!(!file_disk.exists());
+        assert!(!image_disk.exists());
+
+        let freelist: i64 = online
+            .store
+            .0
+            .pragma_query_value(None, "freelist_count", |row| row.get(0))?;
+        assert!(freelist > 0, "expected SQLite freelist pages after deletes");
+
+        // Verify background cleanup_maintenance helper works out-of-lock while preserving active grace.
+        let orphan_old = files::image_path(&root, &format!("image-{}", Uuid::new_v4()))?;
+        fs::write(&orphan_old, b"recent")?;
+        drop(online);
+        let online_arc = Mutex::new(Online::new(Store::open(&db)?, None, None));
+        let bg_stats = cleanup_maintenance(&db, &online_arc)?;
+        assert_eq!(
+            bg_stats.deleted_orphan_files, 0,
+            "recent orphan should wait grace window"
+        );
+        assert!(orphan_old.exists());
+
+        drop(online_arc);
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
 }

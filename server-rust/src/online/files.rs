@@ -46,6 +46,17 @@ pub(crate) fn migrate_schema(db: &Connection) -> Result<()> {
         db.execute_batch("ALTER TABLE online_bot_settings ADD COLUMN openapi_key BLOB")?;
         db.pragma_update(None, "user_version", 5)?;
     }
+    if version < 6 {
+        db.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_pending_target
+                 ON chat_messages(target_code, id)
+                 WHERE kind='private' AND delivery_state='sent' AND recalled=0;
+             CREATE INDEX IF NOT EXISTS idx_chat_messages_pending_created
+                 ON chat_messages(created_at, id)
+                 WHERE kind='private' AND delivery_state='sent';",
+        )?;
+        db.pragma_update(None, "user_version", 6)?;
+    }
     Ok(())
 }
 
@@ -288,11 +299,17 @@ pub(crate) fn migrate_storage(database: &Path, dry_run: bool, prune: bool) -> Re
     Ok(())
 }
 
-pub(super) fn cleanup_orphans(db: &Connection, active_images: &[&str]) -> Result<()> {
+pub(super) fn cleanup_orphans(
+    db: &Connection,
+    active_images: &[&str],
+    min_age: std::time::Duration,
+) -> Result<usize> {
     let root = root(db)?;
     if !root.try_exists()? {
-        return Ok(());
+        return Ok(0);
     }
+    let cutoff = (!min_age.is_zero()).then(|| std::time::SystemTime::now() - min_age);
+    let mut removed = 0;
     for entry in fs::read_dir(&root)? {
         let entry = entry?;
         if !entry.file_type()?.is_file() {
@@ -321,8 +338,22 @@ pub(super) fn cleanup_orphans(db: &Connection, active_images: &[&str]) -> Result
             continue;
         };
         if !used {
-            fs::remove_file(entry.path())?;
+            // Async maintenance runs outside the Online mutex; preserve recently modified files
+            // so in-flight finalized images between memory take and DB insert are never reaped.
+            if let Some(cutoff) = cutoff {
+                let Ok(metadata) = entry.metadata() else {
+                    continue;
+                };
+                if metadata.modified().is_ok_and(|modified| modified > cutoff) {
+                    continue;
+                }
+            }
+            match fs::remove_file(entry.path()) {
+                Ok(()) => removed += 1,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
         }
     }
-    Ok(())
+    Ok(removed)
 }

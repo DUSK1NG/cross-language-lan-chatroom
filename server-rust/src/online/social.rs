@@ -167,7 +167,9 @@ impl Online {
                 return Ok(());
             }
             "group_send" => {
-                return self.send_group(id, identity, &group, request, None);
+                return self
+                    .send_group(id, identity, &group, request, None)
+                    .map(|_| ());
             }
             _ => {
                 ensure!(
@@ -195,7 +197,7 @@ impl Online {
         group: &OnlineGroup,
         request: &Message,
         image: Option<&PublishedImage>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let parsed =
             Uuid::parse_str(&request.message_id).map_err(|_| Rejected("群消息正文或编号无效"))?;
         ensure!(
@@ -220,25 +222,32 @@ impl Online {
             serde_json::to_vec(&message)?.len() <= MAX_FRAME_BYTES - 1024,
             Rejected("群消息超过服务器允许的长度")
         );
-        if self.store.insert_online_message(
-            &message,
-            "online_group",
-            &group.id,
-            &identity.code,
-            "",
-            image,
-        )? {
-            self.publish_group(&identity.code, &message)?;
-        } else {
-            (message.username, message.content, message.created_at, message.image_size) = self.store.0.query_row(
-                "SELECT sender_username,content,created_at,COALESCE(online_image_size,0) FROM chat_messages
-                 WHERE kind='online_group' AND conversation_key=? AND sender_code=? AND message_id=?",
-                params![group.id, identity.code, request.message_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )?;
-            self.deliver(id, message);
+        match self
+            .store
+            .insert_online_message(super::transfer::OnlineMessage {
+                message: &message,
+                kind: "online_group",
+                key: &group.id,
+                author: &identity.code,
+                target: "",
+                image,
+                undelivered: super::transfer::Quota { limit: 0, bytes: 0 },
+            })? {
+            super::transfer::InsertOutcome::Inserted => {
+                self.publish_group(&identity.code, &message)?;
+                Ok(true)
+            }
+            super::transfer::InsertOutcome::Duplicate { .. } => {
+                (message.username, message.content, message.created_at, message.image_size) = self.store.0.query_row(
+                    "SELECT sender_username,content,created_at,COALESCE(online_image_size,0) FROM chat_messages
+                     WHERE kind='online_group' AND conversation_key=? AND sender_code=? AND message_id=?",
+                    params![group.id, identity.code, request.message_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?;
+                self.deliver(id, message);
+                Ok(false)
+            }
         }
-        Ok(())
     }
 
     fn groups_changed(&mut self, group: &str, mut members: Vec<String>) {

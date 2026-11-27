@@ -27,7 +27,7 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
-    Args, load_tls,
+    Args, accept_client, load_tls,
     store::{Identity, Rejected, Store, user_code},
 };
 
@@ -225,7 +225,9 @@ pub(crate) async fn run(args: Args) -> Result<()> {
     let slots = Arc::new(Semaphore::new(args.max_clients));
     eprintln!("listening on {local}");
     loop {
-        let (socket, address) = listener.accept().await?;
+        let Some((socket, address)) = accept_client(&listener).await? else {
+            continue;
+        };
         let Ok(slot) = slots.clone().try_acquire_owned() else {
             eprintln!(
                 "connection rejected: maximum of {} clients reached",
