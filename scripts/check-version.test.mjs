@@ -32,8 +32,9 @@ function fixture(t, installerVersion = '1.4.0') {
   return root;
 }
 
-test('桌面、服务端和安装器版本与工作区发布版本一致', () => {
-  assert.equal(checkVersions(), '1.4.0');
+test('桌面、服务端和安装器版本与工作区发布版本一致', (t) => {
+  // Use a fixture so the assertion does not need rewriting on every release bump.
+  assert.equal(checkVersions(fixture(t)), '1.4.0');
 });
 
 test('拒绝安装器版本与工作区版本不符的构建', (t) => {
