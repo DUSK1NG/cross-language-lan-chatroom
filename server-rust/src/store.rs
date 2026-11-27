@@ -164,6 +164,22 @@ pub struct Identity {
     pub code: String,
 }
 
+/// 手动回收磁盘：删掉历史消息后 SQLite 文件不会自己缩小，需要一次 VACUUM。
+pub fn vacuum(path: &Path) -> Result<(i64, i64, i64, i64)> {
+    let db = Connection::open(path).context("打开数据库")?;
+    db.busy_timeout(Duration::from_secs(5))?;
+    let pages = |db: &Connection| -> Result<(i64, i64)> {
+        let page_count: i64 = db.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+        let free: i64 = db.query_row("PRAGMA freelist_count", [], |row| row.get(0))?;
+        Ok((page_count, free))
+    };
+    let (before_pages, before_free) = pages(&db)?;
+    db.execute_batch("VACUUM").context("执行 VACUUM")?;
+    let (after_pages, after_free) = pages(&db)?;
+    let _ = db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+    Ok((before_pages, before_free, after_pages, after_free))
+}
+
 pub struct Store(pub Connection);
 
 fn dummy_bcrypt_hash() -> Result<&'static str> {

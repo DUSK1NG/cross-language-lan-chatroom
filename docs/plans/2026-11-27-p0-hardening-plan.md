@@ -138,3 +138,4 @@
 - 测试 fixture 的 `INSERT INTO accounts VALUES (?1,?1,?1,?1,'fixture','')` 没写列名，新增 `device_secret_hash` 后报 `table accounts has 7 columns but 6 values were supplied`；改为显式列名（`online.rs` 四处、`online/transfer.rs` 一处）。本机无法建库，这条只能由 CI 验证。
 - 登录成功退还来源额度的实现最初连注册也一起退，`--register-source-limit` 于是形同虚设（CI 断言第三个注册应被限流时失败）；现在只退登录额度，注册额度只增不减。
 - 冷却期内“正确密码也要被拒”的客户端断言随语义一起改掉：3 次错误密码后，第 4 次用正确密码必须 `login_ok` 且 1 秒内返回；错误密码仍然只回“用户名或密码不正确”，不再有区分账号状态的提示。
+- 删行不缩文件：新库启用 `auto_vacuum=INCREMENTAL`，维护批次末尾跑 `incremental_vacuum`；老库仍会保留已删除页，另加了 `--vacuum` 子命令（`store::vacuum`），由运维在低峰手动执行，执行前要留出与库同量级的空闲磁盘。

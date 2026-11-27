@@ -80,6 +80,8 @@ struct Args {
     db: PathBuf,
     #[arg(long)]
     migrate_storage: bool,
+    #[arg(long, conflicts_with = "migrate_storage")]
+    vacuum: bool,
     #[arg(long, requires = "migrate_storage")]
     dry_run: bool,
     #[arg(long, requires = "migrate_storage", conflicts_with = "dry_run")]
@@ -247,6 +249,18 @@ async fn main() -> Result<()> {
             "迁移附件需要 --mode online"
         );
         return online::migrate_storage(&args.db, args.dry_run, args.prune_legacy);
+    }
+    if args.vacuum {
+        ensure!(
+            args.online || args.mode == Some(Mode::Online),
+            "压缩数据库需要 --mode online"
+        );
+        let (before_pages, before_free, after_pages, after_free) =
+            store::vacuum(&args.db).context("压缩数据库")?;
+        println!(
+            "VACUUM 完成：{before_pages} 页（空闲 {before_free}）-> {after_pages} 页（空闲 {after_free}）"
+        );
+        return Ok(());
     }
     args.cert = args
         .cert

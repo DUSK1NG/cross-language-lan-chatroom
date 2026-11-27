@@ -145,6 +145,7 @@ cargo build --locked --release -p lan-chat-server
 - `--delivered-ttl-days`（30）：已送达私信保留天数，`0` 关闭。
 - `--image-budget-bytes`（2147483648）：图片存储全局预算。
 - `--preauth-fail-limit`（8）、`--preauth-fail-window-secs`（60）、`--preauth-ban-secs`（120）：TLS 握手/登录帧失败的来源封禁。
+- `--vacuum`：单独跑一次 VACUUM 回收已删除消息占用的磁盘（不启动服务，需要 `--mode online` 和 `--db`；执行前预留约等于库文件的空闲空间）。
 - 其余（`--max-preauth`、`--max-preauth-per-ip`、`--max-auth-concurrency`、`--account-fail-threshold` 等）见 [计划文档](docs/plans/2026-11-27-p0-hardening-plan.md) 第 6 节。
 
 - `--cert` / `--key` 必须是客户端所填域名或 IP 匹配的证书链与私钥。
