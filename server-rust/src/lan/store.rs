@@ -246,12 +246,13 @@ impl Store {
         Ok(Self(db))
     }
 
+    /// 查询或构造身份并返回账号当前的设备绑定哈希。
+    /// bcrypt 校验必须由调用方在 hub 锁外完成，避免一次登录阻塞整个房间。
     pub(super) fn lan_identity(
         &self,
         username: &str,
         display_code: &str,
-        device_secret: &str,
-    ) -> Result<Identity> {
+    ) -> Result<(Identity, String)> {
         ensure!(
             (1..=32).contains(&username.len()),
             Rejected("Invalid username")
@@ -280,25 +281,31 @@ impl Store {
                 normalized == old_username && code == old_code,
                 Rejected("Connection identity failed")
             );
-            verify_device_binding(&device_hash, device_secret)?;
-            return Ok(Identity {
-                username,
-                display_code,
-                code,
-            });
+            return Ok((
+                Identity {
+                    username,
+                    display_code,
+                    code,
+                },
+                device_hash,
+            ));
         }
-        Ok(Identity {
-            username: username.into(),
-            display_code: display_code.into(),
-            code,
-        })
+        Ok((
+            Identity {
+                username: username.into(),
+                display_code: display_code.into(),
+                code,
+            },
+            String::new(),
+        ))
     }
 
+    /// 账号已存在且未绑定时，把本次批准登录的设备绑定上去；返回账号当前是否已绑定设备。
     pub(super) fn approve_identity(
         &self,
         identity: &Identity,
         device_secret: &str,
-    ) -> Result<(Identity, bool)> {
+    ) -> Result<bool> {
         self.0.execute(
             "INSERT INTO accounts (username,normalized_username,user_code,normalized_code,password_hash,created_at)
              VALUES (?,?,?,?,'',?) ON CONFLICT DO NOTHING",
@@ -310,8 +317,6 @@ impl Store {
                 params![password_hash(device_secret)?, identity.code],
             )?;
         }
-        let identity =
-            self.lan_identity(&identity.username, &identity.display_code, device_secret)?;
         let bound = !self
             .0
             .query_row(
@@ -320,7 +325,7 @@ impl Store {
                 |row| row.get::<_, String>(0),
             )?
             .is_empty();
-        Ok((identity, bound))
+        Ok(bound)
     }
 
     /// 房主踢人或重置设备后，下一次登录重新绑定当前设备。
@@ -511,7 +516,7 @@ fn normalize_username(value: &str) -> String {
 }
 
 /// 已绑定账号必须提供一致的设备密钥；未绑定的旧账号允许登录但不会取走离线私信。
-fn verify_device_binding(device_hash: &str, device_secret: &str) -> Result<()> {
+pub(super) fn verify_device_binding(device_hash: &str, device_secret: &str) -> Result<()> {
     if device_hash.is_empty() {
         return Ok(());
     }

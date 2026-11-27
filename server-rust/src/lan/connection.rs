@@ -1,4 +1,4 @@
-use super::{APPROVAL_TIMEOUT, LOBBY, Peer, Server};
+use super::{APPROVAL_TIMEOUT, LOBBY, Peer, Server, store::verify_device_binding};
 use crate::{
     Budget, LOGIN_TIMEOUT, pong, read_timeout, reason, send, store::Rejected, wants_heartbeat,
 };
@@ -75,11 +75,7 @@ pub(super) async fn serve(
             .lock()
             .expect("LAN hub poisoned")
             .store
-            .lan_identity(
-                &request.username,
-                &request.user_code,
-                &request.device_secret,
-            )?;
+            .lan_identity(&request.username, &request.user_code)?;
         let capabilities = [ROOM_PASSWORD, HEARTBEAT, LAN_HISTORY_PAGES, LAN_ROOM_ROLES]
             .into_iter()
             .filter(|supported| {
@@ -91,8 +87,10 @@ pub(super) async fn serve(
             .map(str::to_owned)
             .collect::<Vec<_>>();
         let heartbeat = wants_heartbeat(&request);
+        let (identity, device_hash) = identity;
         Ok((
             identity,
+            device_hash,
             request.device_secret.clone(),
             admin,
             bootstrap,
@@ -101,20 +99,34 @@ pub(super) async fn serve(
         ))
     })
     .await?;
-    let (identity, device_secret, admin, bootstrap, capabilities, heartbeat) = match auth {
-        Ok(auth) => auth,
-        Err(error) => {
-            return send(
-                &mut stream,
-                &Message {
-                    kind: "login_error".into(),
-                    content: reason(&error, "Connection identity failed").into(),
-                    ..Message::default()
-                },
-            )
-            .await;
-        }
-    };
+    let (identity, device_hash, device_secret, admin, bootstrap, capabilities, heartbeat) =
+        match auth {
+            Ok(auth) => auth,
+            Err(error) => {
+                return send(
+                    &mut stream,
+                    &Message {
+                        kind: "login_error".into(),
+                        content: reason(&error, "Connection identity failed").into(),
+                        ..Message::default()
+                    },
+                )
+                .await;
+            }
+        };
+
+    // 设备绑定校验要算一次 bcrypt，放在 hub 锁外执行。
+    if let Err(error) = verify_device_binding(&device_hash, &device_secret) {
+        return send(
+            &mut stream,
+            &Message {
+                kind: "login_error".into(),
+                content: reason(&error, "Connection identity failed").into(),
+                ..Message::default()
+            },
+        )
+        .await;
+    }
 
     if !bootstrap {
         let (id, decision) = server
@@ -166,17 +178,18 @@ pub(super) async fn serve(
     }
 
     let approve = server.clone();
-    let (identity, device_bound) = match spawn_blocking(move || {
+    let approved = identity.clone();
+    let device_bound = match spawn_blocking(move || {
         approve
             .hub
             .lock()
             .expect("LAN hub poisoned")
             .store
-            .approve_identity(&identity, &device_secret)
+            .approve_identity(&approved, &device_secret)
     })
     .await?
     {
-        Ok((identity, device_bound)) => (identity, device_bound),
+        Ok(device_bound) => device_bound,
         Err(error) => {
             return send(
                 &mut stream,
