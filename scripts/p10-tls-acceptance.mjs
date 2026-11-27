@@ -14,9 +14,10 @@ let port;
 const checks = [];
 
 class Client {
-  constructor(name, code) {
+  constructor(name, code, deviceSecret = 'p10-device-' + code.toLowerCase() + '-0000') {
     this.name = name;
     this.code = code;
+    this.deviceSecret = deviceSecret;
     this.socket = null;
     this.buffer = Buffer.alloc(0);
     this.queue = [];
@@ -114,7 +115,7 @@ class Client {
 }
 
 async function login(client, owner) {
-  client.send({ type: 'login', username: client.name, user_code: client.code });
+  client.send({ type: 'login', username: client.name, user_code: client.code, device_secret: client.deviceSecret });
   if (owner) {
     const pending = await client.waitFor((message) => message.type === 'login_pending');
     await owner.waitFor((message) => message.type === 'connection_approval_request' && message.message_id === pending.message_id);
@@ -160,6 +161,15 @@ async function run() {
     bob = new Client('P10Bob', 'P10B001'); await bob.connect(); await login(bob, alice);
     await bob.waitFor((message) => message.type === 'offline_message' && message.content === 'P10离线私信');
     checks.push('Offline private delivery + reconnect: passed');
+
+    const stranger = new Client('P10Bob', 'P10B001', 'p10-other-device-9999');
+    try {
+      await stranger.connect();
+      stranger.send({ type: 'login', username: 'P10Bob', user_code: 'P10B001', device_secret: stranger.deviceSecret });
+      const refusal = await stranger.waitFor((message) => message.type === 'login_error');
+      if (!String(refusal.content || '').includes('bound to another device')) throw new Error('unexpected device rejection reason');
+      checks.push('Device binding rejects a second device: passed');
+    } finally { stranger.close(); }
 
     alice.send({ type: 'room_create', room: 'p10room', private: false });
     await expectContent(alice, 'system', 'Channel #p10room created');

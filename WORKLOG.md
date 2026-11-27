@@ -56,6 +56,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 
 ## 日志
 
+## 2026-11-27 19:05 · 让局域网验收客户端携带设备密钥，并补 vacuum 与限流收尾
+
+- **执行者**：DSH lead（主代理）。
+- **做了什么**：
+  1. server-rust/src/online/auth.rs：AuthReservation::finish 只退还登录额度，注册成功不再退还来源计数（否则 `--register-source-limit` 形同虚设）；server-rust/tests/online_hardening.rs 的冷却用例改为“错误密码照旧报错、正确密码必须立即通过”（冷却期先验密码的新语义）。
+  2. server-rust/src/store.rs 新增 `vacuum()`，server-rust/src/main.rs 新增 `--vacuum`（需 `--mode online` 与 `--db`，打印 VACUUM 前后的页数与空闲页），README 与计划文档补说明：新库靠 `auto_vacuum=INCREMENTAL` 自动收缩，老库只能手动 VACUUM。
+  3. scripts/p10-tls-acceptance.mjs：验收客户端登录时携带 `device_secret`（每个角色固定一个），并新增“同一用户代码换设备被拒”的用例——此前该脚本不带密钥，服务端按旧客户端处理、不投递离线私信，Windows 桌面 job 因此报 “P10Bob expected message not received”。
+- **验证**：`node scripts/p10-tls-acceptance.mjs target/debug/lan-chat-server.exe` 12/12 检查通过（本机需把 TEMP 指到工作区目录）；`cargo test -p lan-chat-server --bin lan-chat-server online::auth::tests` 5 passed；`cargo clippy --workspace --exclude lan-chat-desktop --all-targets --locked -- -D warnings` 通过。
+- **下一步**：等 master 的 CI 五个 job 全绿；之后按计划文档第 7.5 节推进剩余 P1（在线 IO 出锁、更新器防回滚、MLS 身份绑定、附件按人份额）。
+- **阻塞**：本机无法直接跑 Windows 桌面安装包与 Android 真机用例，这两项依赖 CI 与实机。
+
 ## 2026-11-27 18:42 · 修复 CI 暴露的 fixture 列数并移出锁内 bcrypt
 
 - **执行者**：lead（DeepSeek Harness）
