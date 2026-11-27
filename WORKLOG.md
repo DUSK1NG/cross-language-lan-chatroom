@@ -12,12 +12,12 @@
 5. 超过约 300 行时，把最早的条目移到 `docs/archive/worklog-YYYY.md`，本文件保留链接。
 6. 每次完成一项项目修改后，主代理把改动范围与验证结果交给 gpt-6-luna 子代理，由其在日志顶部记录，主代理核对；工作日志写入本身无需递归触发。
 
-## 接手摘要（更新：2026-11-23 19:18）
+## 接手摘要（更新：2026-11-27 12:40）
 
 - **项目**：Windows 聊天程序。局域网版 = 房主本机开房（TLS/TCP 8888 + UDP 38888 发现 + SQLite）；在线版 = 独立 Rust 服务器（账号、私信、离线消息、Android APK、FCM 推送）。桌面 = Tauri 2 + WebView2 + React；服务端、协议、桌面核心、Android JNI 传输均为 Rust。
-- **版本**：当前桌面源码版本为 `1.3.0`。v1.4.0 的实施与验收按 [最终执行版](docs/prompts/v1.4/README.md) 推进。
-- **Git**：Rust 工作区基线为 `fcb7b19`，与远端默认分支 `origin/master` 的 `3ebc740` 合入本地 `master`。`Claude-BugHunter/` 按本地第三方目录忽略，原有 autostash 保留。
-- **S0 当前状态**：Git 基线已建立。附件端到端用例同一源码下出现通过和超时，仍须定位并修复。全量 workspace 离线测试缺依赖缓存。H1 以 S0 验收为开工条件。
+- **版本**：源码版本 `1.4.1`（Cargo workspace / 前端 / Android 0.4.1）；最新发布 `v1.4.0`（2026-11-26），1.4.1 的群解散、撤回灰字提示已完成验收，尚未发版。
+- **Git**：本地 `master` 领先 `origin/master` 8 个提交（最新 `7fd93c4`），本轮追加 README / SECURITY.md / `docs/assets/` 后推送；`stage/1.4-candidate` 为候选分支。
+- **S0 当前状态**：`cargo test --workspace --locked` 除 Windows `lan_desktop` TLS 用例外全绿；该用例在 Ubuntu CI 覆盖，本机 schannel 报 `-2146893042`。前端 vitest 在本会话因沙箱禁止 node 子进程未能本机执行，以 CI 为准。
 
 ## 关键约束（改代码前必读）
 
@@ -54,6 +54,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
 - 机器时区 Asia/Taipei，日志时间用本地时间。
 
 ## 日志
+
+## 2026-11-27 12:40 · README 重写、安全策略与仓库元数据
+
+- **执行者**：lead（DeepSeek Harness）
+- **做了什么**：
+  1. 重写 `README.md`：两种版本对照、当前界面截图、功能清单、下载表（指向 `releases/latest`）、安全模型（明文可见范围 / 指纹核对 / 更新验签 / 数据落盘）、技术栈表、仓库结构、源码构建与测试、在线服务端部署参数、维护与版本策略、文档索引、许可说明。
+  2. 新增 `SECURITY.md`：支持范围、GitHub 私密漏洞报告入口、重点审计面、已知设计取舍（房主可读明文、UDP 广播不认证、无 Authenticode、更新器无最低版本）、90 天披露政策；已通过 API 开启仓库的 Private vulnerability reporting。
+  3. 新增 `docs/assets/chat-light.png`、`chat-dark.png`、`android-chat.png`，替换 README 中 2025 年 Qt 时代的 `screenshots/` 旧图（旧目录暂留）。
+  4. 更新仓库 description 与 topics。
+- **验证**：
+  - `cargo test --workspace --locked`：除 `server-rust/tests/lan_desktop.rs` 的 TLS 用例外全绿；本机报 `验证 TLS 服务器证书: 安全包中没有可用的凭证 (os error -2146893042)`，属本机 schannel 环境（该 job 在 Ubuntu CI 运行）。
+  - 前端 vitest：本机沙箱禁止 node 子进程（`spawn EPERM`），未执行，以 CI `frontend` job 为准。
+- **审计**：完成技术栈与「可持续运营」视角的安全审查，结论与修复优先级见本轮交付；公开仓库不含利用细节。
+- **下一步 / 阻塞**：按审计优先级处理未投递私信不清理（磁盘增长）、连接槽位耗尽、登录限流仅按 IP、局域网离线私信可被同码身份取走；修复后再发 1.4.1。
 
 ## 2026-11-26 21:45 · 群主解散群聊与桌面/Android 同步
 
@@ -180,21 +194,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-desktop.ps1
   - 安装器在本机自动化环境不可用（非构建缺陷）：静默运行 `LANChat-Setup-x64.exe` 在 `%LOCALAPPDATA%\Programs` 创建 `unins000.exe` 时报 `拒绝访问`（exit 5，需 `TMP/TEMP` 指向工作区才写得出日志）；`/DIR` 指到工作区可安装但写开始菜单快捷方式时报 `0x80070005` 后回滚；`release/local-desktop-20261126/LANChat-Setup-x64.exe` 对新建目录同样 `Error 5`；改用 WMI、计划任务（独立于 DSH 进程树）启动结果相同；Smart App Control、受控文件夹访问、Defender 事件与目录 ACL 均排除。故本机改用 ZIP 载荷覆盖升级。
 - 下一步：可手动双击 `.tools/installer/LANChat-Setup-x64.exe` / `LANChat-Online-Setup-x64.exe` 验证安装器是否只在自动化环境被拒；Android 新发布签名与旧调试签名 APK 不兼容，安装 1.4.0 APK 前须先卸载旧版。
 - 阻塞与需拍板：无。
-### 2026-11-26 13:45 — 发布桌面双版 1.4.0 正式版（更新签名密钥、公告、v1.4.0 标签与 CI）
-
-- 执行者：lead（DSH）。
-- 改动：
-  - 生成桌面在线版自动更新签名密钥对（Tauri minisign），公钥/私钥/口令保存在 `C:\Users\Q1573\.lan-chat-keys\`（`online-updater.key`、`.key.pub`、`.password` 等）；生成 Android 正式发布 keystore `android-release.jks`（PKCS12，alias `lanchat`，有效期 10950 天，SHA-256 指纹 `0B:6D:D7:A8:31:18:B4:9B:59:41:4F:BA:22:00:39:D7:88:69:8C:EB:6F:35:61:13:63:E3:61:E2:E2:A6:4C:18`）。
-  - GitHub 配置：仓库变量新增 `LANCHAT_ONLINE_UPDATER_PUBLIC_KEY`；`release` 环境机密新增 `LANCHAT_ONLINE_UPDATER_PRIVATE_KEY` / `_PASSWORD`、`LANCHAT_ANDROID_KEYSTORE_BASE64`、`LANCHAT_ANDROID_KEY_ALIAS`、`LANCHAT_ANDROID_STORE_PASSWORD`、`LANCHAT_ANDROID_KEY_PASSWORD`、`GOOGLE_SERVICES_JSON`。
-  - 发布公告：`docs/release-notes/v1.4.0.md` 重写为「新增 / 改进 / 修复」三段；`frontend/src/changelog/releaseNotes.ts` 的 `currentRelease` 更新为 1.4.0 正式版卡片；`docs/release-runbook.md` 新增「### 更新签名密钥管理」（生成命令、变量与机密映射、换钥须卸载重装）。
-  - 打标签 `v1.4.0`（指向 `68b65f4`）并推送，触发 Release workflow `45761851648`；两次批准 `environment: release` 审批门（构建 job 与 draft job 各一次）。
-- 验证：
-  - `node scripts/check-version.mjs` → 发布版本一致：1.4.0；`frontend` 的 `npm run typecheck` 通过、`npx vitest run src/changelog` 2/2 通过。
-  - CI 全部通过：validate、desktop (lan)、desktop (online)、android、draft 均 success。Draft release `v1.4.0` 产出 10 个资产：`LANChat-Desktop-Windows-x64.zip` 14,086,603、`LANChat-Online-Windows-x64.zip` 10,769,724、`LANChat-Setup-x64.exe` 12,618,862（`.sig` 428）、`LANChat-Online-Setup-x64.exe` 10,319,890（`.sig` 436）、`LANChat-Android-arm64.apk` 11,863,163、`latest-lan.json` 2,661、`latest-online.json` 2,679、`SHA256SUMS` 837。
-  - 两份 manifest 的 `version` 为 1.4.0、`signature` 解码含 `version:1.4.0` 且 `size` 与安装器一致；安装器 SHA256：LAN `e84496e418cf001f78224d261cdcfe120af625bde7373b22c7dd582314f24797`，Online `1b4b237e2d1d75e19281f6caf2004c677e73dbaaed219572837ba3afca88c3ef`。
-- 下一步：draft 需要人工发布并设为 latest（更新检查走 `releases/latest/download`），发布后安装版才能收到 1.4.0 更新；本机已装的 Online 是 11:40 构建、未嵌入新公钥，须先手工换成 1.4.0 安装包才能走后续自动更新；Android 新签名与旧调试签名 APK 不兼容，安装新版需先卸载。
-- 阻塞与需拍板：是否发布该 draft release、是否删除 2026-11-24 遗留的 draft release `lan-v1.4.0`。
-
+### 2026-11-26 13:45 — 发布桌面双版 1.4.0 正式版（更新签名密钥、公告、v1.4.0 标签与 CI）
+
+- 执行者：lead（DSH）。
+- 改动：
+  - 生成桌面在线版自动更新签名密钥对（Tauri minisign），公钥/私钥/口令保存在 `C:\Users\Q1573\.lan-chat-keys\`（`online-updater.key`、`.key.pub`、`.password` 等）；生成 Android 正式发布 keystore `android-release.jks`（PKCS12，alias `lanchat`，有效期 10950 天，SHA-256 指纹 `0B:6D:D7:A8:31:18:B4:9B:59:41:4F:BA:22:00:39:D7:88:69:8C:EB:6F:35:61:13:63:E3:61:E2:E2:A6:4C:18`）。
+  - GitHub 配置：仓库变量新增 `LANCHAT_ONLINE_UPDATER_PUBLIC_KEY`；`release` 环境机密新增 `LANCHAT_ONLINE_UPDATER_PRIVATE_KEY` / `_PASSWORD`、`LANCHAT_ANDROID_KEYSTORE_BASE64`、`LANCHAT_ANDROID_KEY_ALIAS`、`LANCHAT_ANDROID_STORE_PASSWORD`、`LANCHAT_ANDROID_KEY_PASSWORD`、`GOOGLE_SERVICES_JSON`。
+  - 发布公告：`docs/release-notes/v1.4.0.md` 重写为「新增 / 改进 / 修复」三段；`frontend/src/changelog/releaseNotes.ts` 的 `currentRelease` 更新为 1.4.0 正式版卡片；`docs/release-runbook.md` 新增「### 更新签名密钥管理」（生成命令、变量与机密映射、换钥须卸载重装）。
+  - 打标签 `v1.4.0`（指向 `68b65f4`）并推送，触发 Release workflow `45761851648`；两次批准 `environment: release` 审批门（构建 job 与 draft job 各一次）。
+- 验证：
+  - `node scripts/check-version.mjs` → 发布版本一致：1.4.0；`frontend` 的 `npm run typecheck` 通过、`npx vitest run src/changelog` 2/2 通过。
+  - CI 全部通过：validate、desktop (lan)、desktop (online)、android、draft 均 success。Draft release `v1.4.0` 产出 10 个资产：`LANChat-Desktop-Windows-x64.zip` 14,086,603、`LANChat-Online-Windows-x64.zip` 10,769,724、`LANChat-Setup-x64.exe` 12,618,862（`.sig` 428）、`LANChat-Online-Setup-x64.exe` 10,319,890（`.sig` 436）、`LANChat-Android-arm64.apk` 11,863,163、`latest-lan.json` 2,661、`latest-online.json` 2,679、`SHA256SUMS` 837。
+  - 两份 manifest 的 `version` 为 1.4.0、`signature` 解码含 `version:1.4.0` 且 `size` 与安装器一致；安装器 SHA256：LAN `e84496e418cf001f78224d261cdcfe120af625bde7373b22c7dd582314f24797`，Online `1b4b237e2d1d75e19281f6caf2004c677e73dbaaed219572837ba3afca88c3ef`。
+- 下一步：draft 需要人工发布并设为 latest（更新检查走 `releases/latest/download`），发布后安装版才能收到 1.4.0 更新；本机已装的 Online 是 11:40 构建、未嵌入新公钥，须先手工换成 1.4.0 安装包才能走后续自动更新；Android 新签名与旧调试签名 APK 不兼容，安装新版需先卸载。
+- 阻塞与需拍板：是否发布该 draft release、是否删除 2026-11-24 遗留的 draft release `lan-v1.4.0`。
+
 ### 2026-11-26 12:26 — 推送 master 与 stage/1.4-candidate
 
 - 执行者：lead（DSH）。
