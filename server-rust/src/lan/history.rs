@@ -21,7 +21,7 @@ pub(super) async fn worker(
                 "room"
             };
             let result = reader.lan_history(kind, &job.conversation, &job.request);
-            let mut hub = server.hub.lock().expect("LAN hub poisoned");
+            let mut hub = server.lock_hub();
             hub.history_result(job, result);
             reader
         })

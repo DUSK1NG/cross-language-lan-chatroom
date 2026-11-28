@@ -7,7 +7,7 @@ use lan_chat_protocol::{
     HEARTBEAT, LAN_HISTORY_PAGES, LAN_ROOM_ROLES, MAX_COMMAND_ID_BYTES, MAX_FRAME_BYTES, Message,
     ROOM_PASSWORD, read_lan_command, read_message,
 };
-use std::{future::pending, io, net::SocketAddr, sync::Arc};
+use std::{collections::HashSet, future::pending, io, net::SocketAddr, sync::Arc};
 use subtle::ConstantTimeEq;
 use tokio::{
     io::AsyncReadExt,
@@ -71,9 +71,7 @@ pub(super) async fn serve(
             );
         }
         let identity = init
-            .hub
-            .lock()
-            .expect("LAN hub poisoned")
+            .lock_hub()
             .store
             .lan_identity(&request.username, &request.user_code)?;
         let capabilities = [ROOM_PASSWORD, HEARTBEAT, LAN_HISTORY_PAGES, LAN_ROOM_ROLES]
@@ -129,11 +127,7 @@ pub(super) async fn serve(
     }
 
     if !bootstrap {
-        let (id, decision) = server
-            .hub
-            .lock()
-            .expect("LAN hub poisoned")
-            .request_approval(&identity);
+        let (id, decision) = server.lock_hub().request_approval(&identity);
         let mut incoming = [0];
         let outcome = async {
             send(
@@ -159,11 +153,7 @@ pub(super) async fn serve(
             }
         }
         .await;
-        server
-            .hub
-            .lock()
-            .expect("LAN hub poisoned")
-            .expire_approval(&id);
+        server.lock_hub().expire_approval(&id);
         if let Some(content) = outcome? {
             return send(
                 &mut stream,
@@ -181,9 +171,7 @@ pub(super) async fn serve(
     let approved = identity.clone();
     let device_bound = match spawn_blocking(move || {
         approve
-            .hub
-            .lock()
-            .expect("LAN hub poisoned")
+            .lock_hub()
             .store
             .approve_identity(&approved, &device_secret)
     })
@@ -210,7 +198,7 @@ pub(super) async fn serve(
     let heartbeat_reply = tx.downgrade();
     let register = server.clone();
     let initial = spawn_blocking(move || {
-        let mut hub = register.hub.lock().expect("LAN hub poisoned");
+        let mut hub = register.lock_hub();
         let welcomes = hub.store.pending_lan_welcomes(&identity.code)?;
         // 未绑定设备的旧客户端仍可登录，但不会取走按用户代码即可猜到的离线私信。
         let backlog = if device_bound {
@@ -244,6 +232,7 @@ pub(super) async fn serve(
                 muted,
                 attachment_session: Uuid::new_v4(),
                 room: LOBBY.into(),
+                capabilities: HashSet::new(),
             },
         );
         Ok::<_, anyhow::Error>(initial)
@@ -303,7 +292,7 @@ pub(super) async fn serve(
             };
             let state = server.clone();
             spawn_blocking(move || {
-                let mut hub = state.hub.lock().expect("LAN hub poisoned");
+                let mut hub = state.lock_hub();
                 let result = if allowed {
                     hub.command(id, &request)
                 } else {
@@ -330,10 +319,6 @@ pub(super) async fn serve(
         result = transmit => result,
         () = async { if closed.await.is_err() { pending().await } } => Ok(()),
     };
-    server
-        .hub
-        .lock()
-        .expect("LAN hub poisoned")
-        .remove(id, true);
+    server.lock_hub().remove(id, true);
     result
 }

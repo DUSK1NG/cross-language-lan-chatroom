@@ -78,6 +78,8 @@ struct Peer {
     room_roles: bool,
     muted: bool,
     attachment_session: Uuid,
+    #[allow(dead_code)]
+    capabilities: HashSet<String>,
     send: mpsc::Sender<Message>,
     close: oneshot::Sender<()>,
 }
@@ -109,6 +111,15 @@ struct Server {
     hub: Mutex<Hub>,
     admin_code: String,
     host_token: Option<String>,
+}
+
+impl Server {
+    pub(crate) fn lock_hub(&self) -> std::sync::MutexGuard<'_, Hub> {
+        self.hub.lock().unwrap_or_else(|poisoned| {
+            eprintln!("LAN hub mutex poisoned; recovering after panic");
+            poisoned.into_inner()
+        })
+    }
 }
 
 pub(crate) async fn run(args: Args) -> Result<()> {
@@ -190,12 +201,7 @@ pub(crate) async fn run(args: Args) -> Result<()> {
         tick.tick().await;
         loop {
             tick.tick().await;
-            let queue = cleanup
-                .hub
-                .lock()
-                .expect("LAN hub poisoned")
-                .attachments
-                .clone();
+            let queue = cleanup.lock_hub().attachments.clone();
             if queue.send(attachments::Work::Cleanup).await.is_err() {
                 eprintln!("局域网附件清理失败: 附件服务已停止");
                 return;

@@ -105,7 +105,9 @@ impl Hub {
                     &format!("You were {status} by the administrator"),
                 );
                 self.system(id, "", &format!("{name} is {status}"));
-                if self.clients[&id].room_roles && !request.command_id.is_empty() {
+                if self.clients.get(&id).is_some_and(|peer| peer.room_roles)
+                    && !request.command_id.is_empty()
+                {
                     self.deliver(
                         id,
                         Message {

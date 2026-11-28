@@ -33,7 +33,9 @@ impl Room {
 
 impl Hub {
     pub(super) fn rooms(&mut self, id: Uuid) {
-        let peer = &self.clients[&id];
+        let Some(peer) = self.clients.get(&id) else {
+            return;
+        };
         let mut details = self
             .rooms
             .iter()
@@ -240,7 +242,9 @@ impl Hub {
                     &format!("You were removed from #{}", request.room),
                 );
             }
-            self.rooms(target);
+            if self.clients.contains_key(&target) {
+                self.rooms(target);
+            }
         }
         if request.content == "set_password" {
             self.refresh_room_directories();
@@ -264,7 +268,9 @@ impl Hub {
     }
 
     fn evict_room_member(&mut self, id: Uuid) {
-        let peer = self.clients.get_mut(&id).expect("active room member");
+        let Some(peer) = self.clients.get_mut(&id) else {
+            return;
+        };
         peer.room = LOBBY.into();
         peer.attachment_session = Uuid::new_v4();
         if peer.room_roles {
@@ -315,4 +321,151 @@ fn validate_password(password: &str) -> Result<()> {
         Rejected("频道密码不能仅含空白，且最多 72 字节")
     );
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn test_peer(
+    username: &str,
+    display_code: &str,
+    code: &str,
+    room: &str,
+    send: tokio::sync::mpsc::Sender<Message>,
+    close: tokio::sync::oneshot::Sender<()>,
+    admin: bool,
+) -> Peer {
+    Peer {
+        identity: crate::store::Identity {
+            username: username.into(),
+            display_code: display_code.into(),
+            code: code.into(),
+        },
+        room: room.into(),
+        admin,
+        room_roles: true,
+        muted: false,
+        attachment_session: Uuid::new_v4(),
+        send,
+        close,
+        capabilities: HashSet::new(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_hub(root: &std::path::Path) -> Result<Hub> {
+    let store = crate::store::Store::open_lan(&root.join("chat.db"))?;
+    let (history, _jobs) = tokio::sync::mpsc::channel(64);
+    let (attachments, _attachment_jobs) = tokio::sync::mpsc::channel(64);
+    let mut rooms = store.lan_rooms()?;
+    rooms.insert(
+        LOBBY.into(),
+        Room {
+            owner: String::new(),
+            private: false,
+            allowed: HashMap::new(),
+            admins: HashSet::new(),
+            password_hash: None,
+            generation: Uuid::new_v4(),
+        },
+    );
+    Ok(Hub {
+        store,
+        attachments,
+        clients: HashMap::new(),
+        codes: HashMap::new(),
+        rooms,
+        pending: HashMap::new(),
+        last_message: 0,
+        history,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lan::Server;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn poisoned_hub_lock_recovers() {
+        let root = std::env::temp_dir().join(format!("lan-hub-lock-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let hub = test_hub(&root).unwrap();
+        let server = Arc::new(Server {
+            hub: Mutex::new(hub),
+            admin_code: String::new(),
+            host_token: None,
+        });
+
+        let poisoned = std::panic::catch_unwind(|| {
+            let _guard = server.hub.lock().unwrap();
+            panic!("intentional test poison");
+        });
+        assert!(poisoned.is_err());
+        assert!(server.lock_hub().clients.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn queue_full_remove_member_does_not_panic_or_poison_hub() {
+        let root = std::env::temp_dir().join(format!("lan-hub-remove-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut hub = test_hub(&root).unwrap();
+        let owner_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+        let (target_tx, _target_rx) = tokio::sync::mpsc::channel(256);
+        for _ in 0..256 {
+            target_tx.try_send(Message::default()).unwrap();
+        }
+        let (owner_tx, _owner_rx) = tokio::sync::mpsc::channel(256);
+        let (close_tx, _close_rx) = tokio::sync::oneshot::channel();
+        let (target_close_tx, _target_close_rx) = tokio::sync::oneshot::channel();
+        hub.clients.insert(
+            owner_id,
+            test_peer("Owner", "OWNER1", "owner", LOBBY, owner_tx, close_tx, true),
+        );
+        hub.clients.insert(
+            target_id,
+            test_peer(
+                "Target",
+                "TARGET1",
+                "target",
+                LOBBY,
+                target_tx,
+                target_close_tx,
+                false,
+            ),
+        );
+        hub.codes.insert("owner".into(), owner_id);
+        hub.codes.insert("target".into(), target_id);
+        hub.rooms.insert(
+            "room".into(),
+            Room {
+                owner: "owner".into(),
+                private: false,
+                allowed: HashMap::from([("owner".into(), true), ("target".into(), true)]),
+                admins: HashSet::new(),
+                password_hash: None,
+                generation: Uuid::new_v4(),
+            },
+        );
+        hub.clients.get_mut(&target_id).unwrap().room = "room".into();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            hub.room_action(
+                owner_id,
+                &Message {
+                    kind: "room_action".into(),
+                    room: "room".into(),
+                    target_user_code: "target".into(),
+                    content: "remove_member".into(),
+                    ..Message::default()
+                },
+            )
+        }));
+        let result = result.expect("room action panicked");
+        assert!(result.is_ok(), "room action failed: {result:?}");
+        assert!(!hub.clients.contains_key(&target_id));
+        assert!(hub.clients.contains_key(&owner_id));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

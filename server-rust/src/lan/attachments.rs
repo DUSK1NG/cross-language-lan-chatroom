@@ -62,7 +62,7 @@ struct Attachments {
 
 impl Job {
     fn authorize<'a>(&self, server: &'a Server) -> Result<MutexGuard<'a, Hub>> {
-        let hub = server.hub.lock().expect("LAN hub poisoned");
+        let hub = server.lock_hub();
         let denied = Rejected("Attachment access changed; retry from the current channel");
         let peer = hub.clients.get(&self.peer).ok_or(denied)?;
         ensure!(
@@ -131,7 +131,7 @@ pub(super) fn start(
                     Work::Request(job) => {
                         let result = service.process(&server, &job);
                         if let Err(error) = result {
-                            let mut hub = server.hub.lock().expect("LAN hub poisoned");
+                            let mut hub = server.lock_hub();
                             hub.error(
                                 job.peer,
                                 &job.request,
@@ -553,7 +553,7 @@ impl Attachments {
                     fs::remove_dir_all(directory)?;
                 }
             }
-            let mut hub = server.hub.lock().expect("LAN hub poisoned");
+            let mut hub = server.lock_hub();
             let tx = hub
                 .store
                 .0
@@ -735,6 +735,7 @@ mod tests {
                         attachment_session: Uuid::new_v4(),
                         send: sender.clone(),
                         close,
+                        capabilities: HashSet::new(),
                     },
                 );
                 codes.insert(code.into(), id);
