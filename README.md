@@ -65,7 +65,8 @@ Windows 聊天程序，提供两种使用方式：**局域网版**由房主在�
 - **谁能读到消息**：房主服务端和在线服务器能看到消息明文，这是设计使然。附件内容使用 AES-256-GCM 加密，清单通过 MLS 组分发；附件加密用于避免明文落盘和被同网段旁观者直接读取，**不构成对房主 / 服务器管理员的保密**。
 - **身份**：局域网版的身份是“用户名 + 用户代码”，不是密码；房主审批是唯一准入关口，应通过当面或电话核验。首次成功加入后账号会绑定到本机生成的设备密钥（用户数据目录的 `device-secret`），之后同一账号在另一台设备登录会被拒绝，房主“踢出”该成员即解除绑定；旧客户端不带设备密钥仍可进房，但不会收到离线私信。在线版口令使用 bcrypt（cost 10）存储。
 - **更新**：仅接受 HTTPS 清单与安装包，使用编译期内置的公钥验证 minisign 签名，并校验文件大小与资产名；未配置公钥的构建会拒绝更新。
-- **资源边界**：在线服务端对每个收件人的待投递消息设上限（默认 200 条 / 64 MiB、14 天过期），已送达私信默认保留 30 天，图片总量有全局预算（默认 2 GiB）。超限时发送方收到“稍后再试”，不会挤掉旧消息。
+- **资源边界**：在线服务端对每个收件人的待投递消息设上限（默认 200 条 / 64 MiB、14 天过期），已送达私信默认保留 30 天，图片总量有全局预算（默认 2 GiB）；整体存储另有总预算（默认 8 GiB）、单个发送者的群消息预算（默认 1 GiB）和磁盘最小剩余空间保护（默认 2 GiB）。超限时发送方收到“稍后再试”，不会挤掉旧消息。
+- **连接准入**：局域网版对未认证连接设独立于正式会话槽的预认证许可（默认全局 128、每来源 8，IPv6 按 /64 归并），TLS 握手与登录帧分别限时（默认 5 秒 / 8 秒）；房主批准后才占用正式会话槽，因此半开连接无法占满房间。
 - **数据**：证书私钥、数据库、聊天记录和附件只保存在本机用户数据目录（在线附件在数据库旁的 `.files`；数据库使用 WAL，同目录还会有 `-wal` / `-shm`，备份请一并复制）。不要把这些文件提交到 Git、同步盘或 Release。
 
 发现安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要直接开公开 issue。
@@ -144,6 +145,8 @@ cargo build --locked --release -p lan-chat-server
 - `--undelivered-per-target`（200）、`--undelivered-bytes-per-target`（67108864）、`--undelivered-ttl-days`（14）：每个收件人的待投递消息条数、字节数、过期天数，`0` 关闭对应限制。
 - `--delivered-ttl-days`（30）：已送达私信保留天数，`0` 关闭。
 - `--image-budget-bytes`（2147483648）：图片存储全局预算。
+- `--storage-budget-bytes`（8589934592）：在线存储总预算；`--group-sender-budget-bytes`（1073741824）：单个发送者的群消息字节预算；`--min-disk-free-bytes`（2147483648）：数据库所在磁盘的最小剩余空间，低于该值拒绝写入新文件，`0` 关闭检查。
+- `--lan-max-preauth`（128）、`--lan-max-preauth-per-ip`（8）、`--lan-tls-handshake-timeout-secs`（5）、`--lan-login-frame-timeout-secs`（8）：局域网版预认证连接的全局/每来源上限与超时。
 - `--preauth-fail-limit`（8）、`--preauth-fail-window-secs`（60）、`--preauth-ban-secs`（120）：TLS 握手/登录帧失败的来源封禁。
 - `--vacuum`：单独跑一次 VACUUM 回收已删除消息占用的磁盘（不启动服务，需要 `--mode online` 和 `--db`；执行前预留约等于库文件的空闲空间）。
 - 其余（`--max-preauth`、`--max-preauth-per-ip`、`--max-auth-concurrency`、`--account-fail-threshold` 等）见 [计划文档](docs/plans/2026-11-27-p0-hardening-plan.md) 第 6 节。
@@ -157,7 +160,7 @@ cargo build --locked --release -p lan-chat-server
 
 ## 维护与状态
 
-- 主线 `master` 为 1.4.x 开发分支，`stage/*` 用于候选版本；发布以 tag `v*` 触发 [Release 工作流](.github/workflows/release.yml)。
+- 最新发布为 `v1.4.0`；`master` 当前为 1.4.1 开发线，已合入服务端安全加固（LAN 预认证准入、成员移除与设备绑定修复、在线存储预算、文件 IO 出锁），尚未发版。设计与计划见 [docs/superpowers/](docs/superpowers/)。分支策略：只保留 `master`，候选版本使用临时分支，合并后删除；发布以 tag `v*` 触发 [Release 工作流](.github/workflows/release.yml)。
 - CI 覆盖 Rust 测试与 Clippy、前端 lint/测试/构建、Windows 桌面构建、Android 构建和源码启动器；`master` 必须保持绿色。
 - 依赖锁定在 `Cargo.lock` 与 `frontend/pnpm-lock.yaml`，升级请单独提交并跑完整测试。
 - 接手开发先读 [WORKLOG.md](WORKLOG.md) 与 [docs/CODEX_HANDOFF.md](docs/CODEX_HANDOFF.md)；收工前在 WORKLOG 顶部追加一条。
