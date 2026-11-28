@@ -233,7 +233,7 @@ impl Online {
         let budget = self.limits.image_budget_bytes;
         if budget > 0 {
             let used: i64 = self.store.0.query_row(
-                "SELECT COALESCE(SUM(COALESCE(online_image_size,0)),0) FROM chat_messages",
+                "SELECT COALESCE(SUM(COALESCE(online_image_size, length(CAST(online_image AS BLOB)), 0)),0) FROM chat_messages",
                 [],
                 |row| row.get(0),
             )?;
@@ -699,7 +699,7 @@ impl Store {
             return Ok(());
         }
         let (count, bytes): (i64, i64) = db.query_row(
-            "SELECT COUNT(*), COALESCE(SUM(length(content)+COALESCE(online_image_size,0)),0)
+            "SELECT COUNT(*), COALESCE(SUM(length(CAST(content AS BLOB))+COALESCE(online_image_size, length(CAST(online_image AS BLOB)), 0)),0)
              FROM chat_messages
              WHERE kind='private' AND target_code=?1 AND delivery_state='sent' AND recalled=0",
             params![target],
@@ -1149,6 +1149,96 @@ mod tests {
         assert_eq!(lan_idx_count, 0);
         drop(lan);
 
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn undelivered_quota_counts_utf8_and_legacy_inline_image_bytes() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("lan-chat-quota-bytes-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir)?;
+        let online = setup_accounts(&dir.join("chat.db"), OnlineLimits::default())?;
+        online.store.0.execute(
+            "INSERT INTO chat_messages
+                (message_id,kind,conversation_key,sender_username,sender_code,target_code,
+                 content,online_image,online_image_size,delivery_state,created_at,recalled)
+             VALUES (?1,'private','alice:bobby','Fixture','alice','bobby',
+                     'é🙂',?2,NULL,'sent','2026-11-28T00:00:00Z',0)",
+            params![Uuid::new_v4().to_string(), &b"12345"[..]],
+        )?;
+        assert!(
+            Store::check_undelivered_quota(
+                &online.store.0,
+                "bobby",
+                Quota {
+                    limit: 0,
+                    bytes: 11,
+                },
+            )
+            .is_err()
+        );
+        Store::check_undelivered_quota(
+            &online.store.0,
+            "bobby",
+            Quota {
+                limit: 0,
+                bytes: 12,
+            },
+        )?;
+        drop(online);
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn image_budget_counts_legacy_inline_image_bytes() -> Result<()> {
+        let dir =
+            std::env::temp_dir().join(format!("lan-chat-image-budget-bytes-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir)?;
+        let png = BASE64.decode(PNG_1X1_BASE64)?;
+        let mut online = setup_accounts(
+            &dir.join("chat.db"),
+            OnlineLimits {
+                image_budget_bytes: png.len() + 4,
+                ..OnlineLimits::default()
+            },
+        )?;
+        online.store.0.execute(
+            "INSERT INTO chat_messages
+                (message_id,kind,conversation_key,sender_username,sender_code,content,
+                 online_image,online_image_size,created_at)
+             VALUES (?1,'private','alice:bobby','Fixture','alice','',?2,NULL,'2026-11-28T00:00:00Z')",
+            params![Uuid::new_v4().to_string(), &b"12345"[..]],
+        )?;
+        let (alice_id, _receiver) = connect_peer(&mut online, "alice")?;
+        let alice = Identity {
+            code: "alice".into(),
+            username: "alice".into(),
+            display_code: "alice".into(),
+        };
+        let error = online
+            .handle_command(
+                alice_id,
+                &alice,
+                &Message {
+                    kind: "dm_image_chunk".into(),
+                    target_user_code: "bobby".into(),
+                    message_id: Uuid::new_v4().to_string(),
+                    image_size: png.len() as i64,
+                    chunk_index: Some(0),
+                    image_data: PNG_1X1_BASE64.into(),
+                    ..Message::default()
+                },
+            )
+            .expect_err("legacy inline bytes must consume the image budget");
+        assert!(error.to_string().contains("服务器图片存储空间已满"));
+        let count: i64 =
+            online
+                .store
+                .0
+                .query_row("SELECT COUNT(*) FROM chat_messages", [], |row| row.get(0))?;
+        assert_eq!(count, 1);
+        drop(online);
         fs::remove_dir_all(dir)?;
         Ok(())
     }

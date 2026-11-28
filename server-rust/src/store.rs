@@ -114,16 +114,23 @@ CREATE TABLE storage_usage (
     PRIMARY KEY (scope, sender_code)
 );";
 
+const STORAGE_CALIBRATION_STATE_TABLE: &str = "
+CREATE TABLE IF NOT EXISTS storage_calibration_state (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    last_id INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO storage_calibration_state(id,last_id) VALUES (1,0);";
+
 const STORAGE_TRIGGERS: &[(&str, &str)] = &[
     (
         "chat_messages_storage_insert",
         "CREATE TRIGGER chat_messages_storage_insert
          AFTER INSERT ON chat_messages BEGIN
              INSERT INTO storage_usage(scope, sender_code, used_bytes)
-             VALUES ('global', '', length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0))
+             VALUES ('global', '', length(CAST(NEW.content AS BLOB)) + COALESCE(NEW.online_image_size, length(CAST(NEW.online_image AS BLOB)), 0) + COALESCE(NEW.online_file_size,0))
              ON CONFLICT(scope, sender_code) DO UPDATE SET used_bytes = used_bytes + excluded.used_bytes;
              INSERT INTO storage_usage(scope, sender_code, used_bytes)
-             SELECT 'group_sender', NEW.sender_code, length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)
+             SELECT 'group_sender', NEW.sender_code, length(CAST(NEW.content AS BLOB)) + COALESCE(NEW.online_image_size, length(CAST(NEW.online_image AS BLOB)), 0) + COALESCE(NEW.online_file_size,0)
              WHERE NEW.kind='online_group'
              ON CONFLICT(scope, sender_code) DO UPDATE SET used_bytes = used_bytes + excluded.used_bytes;
              UPDATE chat_messages SET storage_counted=1 WHERE id=NEW.id;
@@ -132,15 +139,15 @@ const STORAGE_TRIGGERS: &[(&str, &str)] = &[
     (
         "chat_messages_storage_update",
         "CREATE TRIGGER chat_messages_storage_update
-         AFTER UPDATE OF content, online_image_size, online_file_size ON chat_messages
+         AFTER UPDATE OF content, online_image, online_image_size, online_file_size ON chat_messages
          WHEN OLD.storage_counted=1 BEGIN
              UPDATE storage_usage
-             SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0))
-                 + (length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)))
+             SET used_bytes = MAX(0, used_bytes - (length(CAST(OLD.content AS BLOB)) + COALESCE(OLD.online_image_size, length(CAST(OLD.online_image AS BLOB)), 0) + COALESCE(OLD.online_file_size,0))
+                 + (length(CAST(NEW.content AS BLOB)) + COALESCE(NEW.online_image_size, length(CAST(NEW.online_image AS BLOB)), 0) + COALESCE(NEW.online_file_size,0)))
              WHERE scope='global' AND sender_code='';
              UPDATE storage_usage
-             SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0))
-                 + (length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)))
+             SET used_bytes = MAX(0, used_bytes - (length(CAST(OLD.content AS BLOB)) + COALESCE(OLD.online_image_size, length(CAST(OLD.online_image AS BLOB)), 0) + COALESCE(OLD.online_file_size,0))
+                 + (length(CAST(NEW.content AS BLOB)) + COALESCE(NEW.online_image_size, length(CAST(NEW.online_image AS BLOB)), 0) + COALESCE(NEW.online_file_size,0)))
              WHERE scope='group_sender' AND sender_code=OLD.sender_code AND OLD.kind='online_group';
          END;",
     ),
@@ -149,10 +156,10 @@ const STORAGE_TRIGGERS: &[(&str, &str)] = &[
         "CREATE TRIGGER chat_messages_storage_delete
          AFTER DELETE ON chat_messages WHEN OLD.storage_counted=1 BEGIN
              UPDATE storage_usage
-             SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0)))
+             SET used_bytes = MAX(0, used_bytes - (length(CAST(OLD.content AS BLOB)) + COALESCE(OLD.online_image_size, length(CAST(OLD.online_image AS BLOB)), 0) + COALESCE(OLD.online_file_size,0)))
              WHERE scope='global' AND sender_code='';
              UPDATE storage_usage
-             SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0)))
+             SET used_bytes = MAX(0, used_bytes - (length(CAST(OLD.content AS BLOB)) + COALESCE(OLD.online_image_size, length(CAST(OLD.online_image AS BLOB)), 0) + COALESCE(OLD.online_file_size,0)))
              WHERE scope='group_sender' AND sender_code=OLD.sender_code AND OLD.kind='online_group';
          END;",
     ),
@@ -167,15 +174,11 @@ fn ensure_storage_schema(tx: &Connection) -> Result<()> {
     if !table_exists {
         tx.execute_batch(STORAGE_USAGE_TABLE)?;
     }
+    tx.execute_batch(STORAGE_CALIBRATION_STATE_TABLE)?;
+    // Replace stale definitions transactionally so existing databases gain byte accounting too.
     for (name, sql) in STORAGE_TRIGGERS {
-        let exists: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
-            [name],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            tx.execute_batch(sql)?;
-        }
+        tx.execute(&format!("DROP TRIGGER IF EXISTS {name}"), [])?;
+        tx.execute_batch(sql)?;
     }
     Ok(())
 }

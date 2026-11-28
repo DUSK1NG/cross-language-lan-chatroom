@@ -9,6 +9,15 @@ pub(crate) struct CalibrationStats {
     pub(crate) scanned: usize,
 }
 
+const CALIBRATION_SCAN_SQL: &str = "
+    SELECT m.id, m.kind, m.sender_code, COALESCE(f.size,m.online_file_size,0),
+            length(CAST(m.content AS BLOB)) + COALESCE(m.online_image_size, length(CAST(m.online_image AS BLOB)), 0) + COALESCE(f.size,m.online_file_size,0),
+            m.storage_counted
+     FROM chat_messages m
+     LEFT JOIN online_files f ON f.chat_id=m.id
+     WHERE m.id > ?1
+     ORDER BY m.id LIMIT ?2";
+
 pub(crate) fn check_budget(
     db: &Connection,
     sender: &str,
@@ -81,40 +90,48 @@ pub(crate) fn calibrate(db: &Connection, batch_size: i64) -> Result<CalibrationS
     ensure!(batch_size > 0, Rejected("校准批次大小须大于 0"));
     db.execute_batch("BEGIN IMMEDIATE")?;
     let result = (|| -> Result<CalibrationStats> {
-        let rows: Vec<(i64, String, String, i64, i64)> = {
-            let mut statement = db.prepare(
-                "SELECT m.id, m.kind, m.sender_code, COALESCE(f.size,m.online_file_size,0),
-                        length(m.content) + COALESCE(m.online_image_size,0) + COALESCE(f.size,m.online_file_size,0)
-                 FROM chat_messages m
-                 LEFT JOIN online_files f ON f.chat_id=m.id
-                 WHERE m.storage_counted=0
-                 ORDER BY m.id LIMIT ?1",
-            )?;
+        let last_id: i64 = db.query_row(
+            "SELECT last_id FROM storage_calibration_state WHERE id=1",
+            [],
+            |row| row.get(0),
+        )?;
+        let rows: Vec<(i64, String, String, i64, i64, i64)> = {
+            let mut statement = db.prepare(CALIBRATION_SCAN_SQL)?;
             statement
-                .query_map([batch_size], |row| {
+                .query_map([last_id, batch_size], |row| {
                     Ok((
                         row.get(0)?,
                         row.get(1)?,
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<_>>()?
         };
         let scanned = rows.len();
-        for (id, kind, sender, file_size, bytes) in rows {
-            db.execute(
-                "UPDATE chat_messages SET online_file_size=? WHERE id=? AND storage_counted=0",
-                params![file_size, id],
-            )?;
-            add_usage(db, "global", "", bytes)?;
-            if kind == "online_group" {
-                add_usage(db, "group_sender", &sender, bytes)?;
+        let last_examined = rows.last().map(|row| row.0);
+        for (id, kind, sender, file_size, bytes, storage_counted) in rows {
+            if storage_counted == 0 {
+                db.execute(
+                    "UPDATE chat_messages SET online_file_size=? WHERE id=? AND storage_counted=0",
+                    params![file_size, id],
+                )?;
+                add_usage(db, "global", "", bytes)?;
+                if kind == "online_group" {
+                    add_usage(db, "group_sender", &sender, bytes)?;
+                }
+                db.execute(
+                    "UPDATE chat_messages SET storage_counted=1 WHERE id=? AND storage_counted=0",
+                    [id],
+                )?;
             }
+        }
+        if let Some(last_id) = last_examined {
             db.execute(
-                "UPDATE chat_messages SET storage_counted=1 WHERE id=? AND storage_counted=0",
-                [id],
+                "UPDATE storage_calibration_state SET last_id=? WHERE id=1",
+                [last_id],
             )?;
         }
         Ok(CalibrationStats { scanned })
@@ -301,6 +318,80 @@ mod tests {
     }
 
     #[test]
+    fn unicode_bytes_are_counted_by_triggers_and_calibration() -> Result<()> {
+        let root = temp_root("storage-unicode")?;
+        let online = setup_accounts(&root, OnlineLimits::default())?;
+        let db = &online.store.0;
+        insert_raw_group_message(db, "alice", "é🙂")?;
+        assert_eq!(usage(db, "global", "")?, 6);
+        assert_eq!(usage(db, "group_sender", "alice")?, 6);
+
+        db.execute_batch("DROP TRIGGER chat_messages_storage_insert;")?;
+        insert_raw_group_message(db, "alice", "界🙂")?;
+        let stats = storage::calibrate(db, 1000)?;
+        assert_eq!(stats.scanned, 2);
+        assert_eq!(usage(db, "global", "")?, 13);
+        assert_eq!(usage(db, "group_sender", "alice")?, 13);
+
+        db.execute(
+            "UPDATE chat_messages SET content='界' WHERE content='é🙂'",
+            [],
+        )?;
+        assert_eq!(usage(db, "global", "")?, 10);
+        assert_eq!(usage(db, "group_sender", "alice")?, 10);
+        db.execute("DELETE FROM chat_messages WHERE content='界'", [])?;
+        assert_eq!(usage(db, "global", "")?, 7);
+        assert_eq!(usage(db, "group_sender", "alice")?, 7);
+        db.execute("DELETE FROM chat_messages", [])?;
+        assert_eq!(usage(db, "global", "")?, 0);
+        assert_eq!(usage(db, "group_sender", "alice")?, 0);
+        drop(online);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_inline_image_bytes_fall_back_to_blob_length() -> Result<()> {
+        let root = temp_root("storage-legacy-image")?;
+        let online = setup_accounts(&root, OnlineLimits::default())?;
+        let db = &online.store.0;
+        db.execute(
+            "INSERT INTO chat_messages
+                (message_id,kind,conversation_key,sender_username,sender_code,content,
+                 online_image,online_image_size,online_file_size,created_at)
+             VALUES (?1,'online_group','group-fixture','Fixture','alice','',
+                     ?2,NULL,2,'2026-11-28T00:00:00Z')",
+            params![Uuid::new_v4().to_string(), &b"12345"[..]],
+        )?;
+        assert_eq!(usage(db, "global", "")?, 7);
+        assert_eq!(usage(db, "group_sender", "alice")?, 7);
+
+        db.execute("UPDATE chat_messages SET online_image=?1", [&b"123"[..]])?;
+        assert_eq!(usage(db, "global", "")?, 5);
+        assert_eq!(usage(db, "group_sender", "alice")?, 5);
+
+        db.execute_batch("DROP TRIGGER chat_messages_storage_insert;")?;
+        db.execute(
+            "INSERT INTO chat_messages
+                (message_id,kind,conversation_key,sender_username,sender_code,content,
+                 online_image,online_image_size,created_at)
+             VALUES (?1,'online_group','group-fixture','Fixture','alice','',?2,NULL,'2026-11-28T00:00:00Z')",
+            params![Uuid::new_v4().to_string(), &b"123456"[..]],
+        )?;
+        let stats = storage::calibrate(db, 1000)?;
+        assert_eq!(stats.scanned, 2);
+        assert_eq!(usage(db, "global", "")?, 11);
+        assert_eq!(usage(db, "group_sender", "alice")?, 11);
+
+        db.execute("DELETE FROM chat_messages", [])?;
+        assert_eq!(usage(db, "global", "")?, 0);
+        assert_eq!(usage(db, "group_sender", "alice")?, 0);
+        drop(online);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn calibration_counts_an_existing_row_once_and_backfills_its_file_size() -> Result<()> {
         let root = temp_root("storage-calibrate")?;
         let path = root.join("chat.db");
@@ -377,6 +468,93 @@ mod tests {
         assert_eq!(counts, (2, 3));
         assert_eq!(usage(db, "global", "")?, 20);
         assert_eq!(usage(db, "group_sender", "alice")?, 20);
+        drop(online);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn calibration_keyset_cursor_counts_scans_and_repairs_second_pass_zero_bytes() -> Result<()> {
+        let root = temp_root("storage-calibration-cursor")?;
+        let path = root.join("chat.db");
+        let online = setup_accounts(&root, OnlineLimits::default())?;
+        let db = &online.store.0;
+        insert_raw_group_message(db, "alice", &"a".repeat(10))?;
+        insert_raw_group_message(db, "alice", &"b".repeat(10))?;
+        db.execute_batch("DROP TRIGGER chat_messages_storage_insert;")?;
+        insert_raw_group_message(db, "alice", "")?;
+
+        let first = storage::calibrate(db, 2)?;
+        assert_eq!(first.scanned, 2);
+        let ids: Vec<i64> = db
+            .prepare("SELECT id FROM chat_messages ORDER BY id")?
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let cursor: i64 = db.query_row(
+            "SELECT last_id FROM storage_calibration_state WHERE id=1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(cursor, ids[1]);
+        assert_eq!(usage(db, "global", "")?, 20);
+        drop(online);
+
+        let store = Store::open(&path)?;
+        let db = &store.0;
+        let second = storage::calibrate(db, 2)?;
+        assert_eq!(second.scanned, 1);
+        let counted: (i64, i64) = db.query_row(
+            "SELECT COUNT(*),SUM(storage_counted) FROM chat_messages",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(counted, (3, 3));
+        assert_eq!(usage(db, "global", "")?, 20);
+        assert_eq!(usage(db, "group_sender", "alice")?, 20);
+        let cursor: i64 = db.query_row(
+            "SELECT last_id FROM storage_calibration_state WHERE id=1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(cursor, ids[2]);
+        drop(store);
+
+        let reopened = Store::open(&path)?;
+        let third = storage::calibrate(&reopened.0, 2)?;
+        assert_eq!(third.scanned, 0);
+        let cursor: i64 = reopened.0.query_row(
+            "SELECT last_id FROM storage_calibration_state WHERE id=1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(cursor, ids[2]);
+        assert_eq!(usage(&reopened.0, "global", "")?, 20);
+        drop(reopened);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn calibration_query_plan_uses_a_primary_key_keyset_search() -> Result<()> {
+        let root = temp_root("storage-calibration-plan")?;
+        let online = setup_accounts(&root, OnlineLimits::default())?;
+        let db = &online.store.0;
+        let sql = super::CALIBRATION_SCAN_SQL
+            .replace("?1", "0")
+            .replace("?2", "100");
+        let plan: Vec<String> = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?
+            .query_map([], |row| row.get(3))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("SEARCH m USING INTEGER PRIMARY KEY (rowid>?)")),
+            "expected a primary-key keyset search, got: {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|detail| detail == "SCAN m"),
+            "calibration must not scan the counted prefix, got: {plan:?}"
+        );
         drop(online);
         fs::remove_dir_all(root)?;
         Ok(())
@@ -463,8 +641,8 @@ mod tests {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         assert_eq!(stored, (5, 1));
-        assert_eq!(usage(&online.store.0, "global", "")?, 15);
-        assert_eq!(usage(&online.store.0, "group_sender", "alice")?, 15);
+        assert_eq!(usage(&online.store.0, "global", "")?, 19);
+        assert_eq!(usage(&online.store.0, "group_sender", "alice")?, 19);
         drop(online);
         fs::remove_dir_all(root)?;
         Ok(())
@@ -490,6 +668,83 @@ mod tests {
         assert_eq!(usage(db, "global", "")?, 5);
         assert_eq!(usage(db, "group_sender", "alice")?, 7);
         drop(online);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn reopening_storage_schema_replaces_legacy_triggers_and_restores_calibration_state()
+    -> Result<()> {
+        let root = temp_root("storage-schema-upgrade")?;
+        let path = root.join("chat.db");
+        let online = setup_accounts(&root, OnlineLimits::default())?;
+        online.store.0.execute_batch(
+            "DROP TRIGGER chat_messages_storage_insert;
+             DROP TRIGGER chat_messages_storage_update;
+             DROP TRIGGER chat_messages_storage_delete;
+             DROP TABLE storage_calibration_state;
+             CREATE TRIGGER chat_messages_storage_insert
+             AFTER INSERT ON chat_messages BEGIN
+                 INSERT INTO storage_usage(scope, sender_code, used_bytes)
+                 VALUES ('global', '', length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0))
+                 ON CONFLICT(scope, sender_code) DO UPDATE SET used_bytes = used_bytes + excluded.used_bytes;
+                 INSERT INTO storage_usage(scope, sender_code, used_bytes)
+                 SELECT 'group_sender', NEW.sender_code, length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)
+                 WHERE NEW.kind='online_group'
+                 ON CONFLICT(scope, sender_code) DO UPDATE SET used_bytes = used_bytes + excluded.used_bytes;
+                 UPDATE chat_messages SET storage_counted=1 WHERE id=NEW.id;
+             END;
+             CREATE TRIGGER chat_messages_storage_update
+             AFTER UPDATE OF content, online_image_size, online_file_size ON chat_messages
+             WHEN OLD.storage_counted=1 BEGIN
+                 UPDATE storage_usage
+                 SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0))
+                     + (length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)))
+                 WHERE scope='global' AND sender_code='';
+                 UPDATE storage_usage
+                 SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0))
+                     + (length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)))
+                 WHERE scope='group_sender' AND sender_code=OLD.sender_code AND OLD.kind='online_group';
+             END;
+             CREATE TRIGGER chat_messages_storage_delete
+             AFTER DELETE ON chat_messages WHEN OLD.storage_counted=1 BEGIN
+                 UPDATE storage_usage SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0)))
+                 WHERE scope='global' AND sender_code='';
+                 UPDATE storage_usage SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0)))
+                 WHERE scope='group_sender' AND sender_code=OLD.sender_code AND OLD.kind='online_group';
+             END;",
+        )?;
+        drop(online);
+
+        let store = Store::open(&path)?;
+        let db = &store.0;
+        let cursor: i64 = db.query_row(
+            "SELECT last_id FROM storage_calibration_state WHERE id=1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(cursor, 0);
+        db.execute(
+            "INSERT INTO chat_messages
+                (message_id,kind,conversation_key,sender_username,sender_code,content,
+                 online_image,online_image_size,online_file_size,created_at)
+             VALUES (?1,'online_group','group-fixture','Fixture','alice','é🙂',
+                     ?2,NULL,2,'2026-11-28T00:00:00Z')",
+            params![Uuid::new_v4().to_string(), &b"12345"[..]],
+        )?;
+        assert_eq!(usage(db, "global", "")?, 13);
+        assert_eq!(usage(db, "group_sender", "alice")?, 13);
+
+        db.execute(
+            "UPDATE chat_messages SET content='界',online_image=?1",
+            [&b"123"[..]],
+        )?;
+        assert_eq!(usage(db, "global", "")?, 8);
+        assert_eq!(usage(db, "group_sender", "alice")?, 8);
+        db.execute("DELETE FROM chat_messages", [])?;
+        assert_eq!(usage(db, "global", "")?, 0);
+        assert_eq!(usage(db, "group_sender", "alice")?, 0);
+        drop(store);
         fs::remove_dir_all(root)?;
         Ok(())
     }
@@ -546,7 +801,7 @@ mod tests {
         assert_eq!(usage(&reopened.0, "global", "")?, 400);
         assert_eq!(usage(&reopened.0, "group_sender", "alice")?, 400);
         let stats = storage::calibrate(&reopened.0, 1000)?;
-        assert_eq!(stats.scanned, 1);
+        assert_eq!(stats.scanned, 2);
         assert_eq!(usage(&reopened.0, "global", "")?, 406);
         assert_eq!(usage(&reopened.0, "group_sender", "alice")?, 406);
         drop(reopened);
