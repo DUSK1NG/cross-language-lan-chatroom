@@ -118,7 +118,7 @@ pub(super) fn finalize(path: &Path, size: i64) -> Result<String> {
     checksum(path, size)
 }
 
-fn checksum(path: &Path, size: i64) -> Result<String> {
+pub(super) fn checksum(path: &Path, size: i64) -> Result<String> {
     let mut file = File::open(path).with_context(|| format!("读取在线附件 {}", path.display()))?;
     ensure!(
         size >= 0 && file.metadata()?.len() == size as u64,

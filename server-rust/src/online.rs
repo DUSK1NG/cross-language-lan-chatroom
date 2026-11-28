@@ -1,5 +1,6 @@
 pub(crate) mod auth;
 mod files;
+mod io;
 mod social;
 // Task 7 connects the budget and calibration entry points to command/maintenance paths.
 #[allow(dead_code)]
@@ -11,6 +12,7 @@ pub(crate) use auth::{
     INVALID_CREDENTIALS_MSG, is_invalid_credentials_error, validate_credentials,
 };
 pub(crate) use files::{migrate_schema, migrate_storage};
+pub(crate) use io::{DEFAULT_FILE_IO_CONCURRENCY, FileIoService};
 pub use transfer::cleanup_maintenance;
 
 use std::{collections::HashMap, path::Path};
@@ -96,6 +98,9 @@ pub struct Online {
     bot_key: Option<BotKey>,
     peers: HashMap<Uuid, Peer>,
     limits: OnlineLimits,
+    // Task 6 moves file commands to authorization/IO/publication phases.
+    #[allow(dead_code)]
+    pub(crate) io: FileIoService,
 }
 
 impl Online {
@@ -104,11 +109,29 @@ impl Online {
         Self::with_limits(store, push, bot_key, OnlineLimits::default())
     }
 
+    // Test fixtures use the default pool; production supplies it explicitly below.
+    #[allow(dead_code)]
     pub fn with_limits(
         store: Store,
         push: Option<Push>,
         bot_key: Option<BotKey>,
         limits: OnlineLimits,
+    ) -> Self {
+        Self::with_file_io(
+            store,
+            push,
+            bot_key,
+            limits,
+            FileIoService::new(DEFAULT_FILE_IO_CONCURRENCY),
+        )
+    }
+
+    pub(crate) fn with_file_io(
+        store: Store,
+        push: Option<Push>,
+        bot_key: Option<BotKey>,
+        limits: OnlineLimits,
+        io: FileIoService,
     ) -> Self {
         Self {
             store,
@@ -116,6 +139,7 @@ impl Online {
             bot_key,
             peers: HashMap::new(),
             limits,
+            io,
         }
     }
 

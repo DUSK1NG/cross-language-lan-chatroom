@@ -25,8 +25,8 @@ use lan_chat_protocol::{
     ONLINE_HISTORY_PAGES,
 };
 use online::{
-    AuthConfig, AuthControl, Online, OnlineLimits, auth::PreAuthPermit,
-    is_invalid_credentials_error,
+    AuthConfig, AuthControl, DEFAULT_FILE_IO_CONCURRENCY, FileIoService, Online, OnlineLimits,
+    auth::PreAuthPermit, is_invalid_credentials_error,
 };
 use store::{Rejected, Store};
 use tokio::{
@@ -341,8 +341,12 @@ async fn main() -> Result<()> {
         preauth_fail_window: Duration::from_secs(args.preauth_fail_window_secs),
         preauth_ban: Duration::from_secs(args.preauth_ban_secs),
     }));
-    let online = Arc::new(Mutex::new(Online::with_limits(
-        store, push, bot_key, limits,
+    let online = Arc::new(Mutex::new(Online::with_file_io(
+        store,
+        push,
+        bot_key,
+        limits,
+        FileIoService::new(DEFAULT_FILE_IO_CONCURRENCY),
     )));
     let database = Arc::new(args.db);
     let maintenance = online.clone();
