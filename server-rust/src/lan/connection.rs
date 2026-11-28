@@ -1,6 +1,10 @@
-use super::{APPROVAL_TIMEOUT, LOBBY, Peer, Server, store::verify_device_binding};
+use super::{
+    APPROVAL_TIMEOUT, LOBBY, Peer, Server, store::password_hash, store::verify_device_binding,
+};
 use crate::{
-    Budget, LOGIN_TIMEOUT, pong, read_timeout, reason, send, store::Rejected, wants_heartbeat,
+    Budget, LOGIN_TIMEOUT, pong, read_timeout, reason, send,
+    store::{Identity, Rejected},
+    wants_heartbeat,
 };
 use anyhow::{Context, Result, ensure};
 use lan_chat_protocol::{
@@ -18,6 +22,58 @@ use tokio::{
 };
 use tokio_rustls::TlsAcceptor;
 use uuid::Uuid;
+
+async fn bind_approved_device(
+    server: &Arc<Server>,
+    identity: &Identity,
+    device_secret: &str,
+) -> Result<bool> {
+    for _ in 0..4 {
+        let current = {
+            let hub = server.lock_hub();
+            hub.store.ensure_lan_account(identity)?;
+            hub.store.lan_device_hash(identity)?
+        };
+        if current.is_empty() {
+            if device_secret.is_empty() {
+                return Ok(false);
+            }
+            let secret = device_secret.to_owned();
+            let hash = tokio::task::spawn_blocking(move || password_hash(&secret)).await??;
+            let bound = {
+                let hub = server.lock_hub();
+                hub.store.bind_lan_device_if_empty(identity, &hash)?
+            };
+            if bound {
+                return Ok(true);
+            }
+            continue;
+        }
+        if device_secret.is_empty() {
+            anyhow::bail!(
+                "This account is bound to another device; ask the room owner to reset it"
+            );
+        }
+        let current_for_verify = current.clone();
+        let secret = device_secret.to_owned();
+        let matches = tokio::task::spawn_blocking(move || {
+            bcrypt::verify(&secret, &current_for_verify).unwrap_or(false)
+        })
+        .await?;
+        ensure!(
+            matches,
+            "This account is bound to another device; ask the room owner to reset it"
+        );
+        let unchanged = {
+            let hub = server.lock_hub();
+            hub.store.lan_device_hash(identity)? == current
+        };
+        if unchanged {
+            return Ok(true);
+        }
+    }
+    anyhow::bail!("Device binding changed concurrently; retry the connection")
+}
 
 pub(super) async fn serve(
     socket: TcpStream,
@@ -167,16 +223,7 @@ pub(super) async fn serve(
         }
     }
 
-    let approve = server.clone();
-    let approved = identity.clone();
-    let device_bound = match spawn_blocking(move || {
-        approve
-            .lock_hub()
-            .store
-            .approve_identity(&approved, &device_secret)
-    })
-    .await?
-    {
+    let device_bound = match bind_approved_device(&server, &identity, &device_secret).await {
         Ok(device_bound) => device_bound,
         Err(error) => {
             return send(

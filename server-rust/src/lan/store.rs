@@ -300,32 +300,29 @@ impl Store {
         ))
     }
 
-    /// 账号已存在且未绑定时，把本次批准登录的设备绑定上去；返回账号当前是否已绑定设备。
-    pub(super) fn approve_identity(
-        &self,
-        identity: &Identity,
-        device_secret: &str,
-    ) -> Result<bool> {
+    pub(super) fn ensure_lan_account(&self, identity: &Identity) -> Result<()> {
         self.0.execute(
             "INSERT INTO accounts (username,normalized_username,user_code,normalized_code,password_hash,created_at)
              VALUES (?,?,?,?,'',?) ON CONFLICT DO NOTHING",
             params![identity.username, normalize_username(&identity.username), identity.display_code, identity.code, now()],
         )?;
-        if !device_secret.is_empty() {
-            self.0.execute(
-                "UPDATE accounts SET device_secret_hash=? WHERE normalized_code=? AND device_secret_hash=''",
-                params![password_hash(device_secret)?, identity.code],
-            )?;
-        }
-        let bound = !self
-            .0
-            .query_row(
-                "SELECT device_secret_hash FROM accounts WHERE normalized_code=?",
-                params![identity.code],
-                |row| row.get::<_, String>(0),
-            )?
-            .is_empty();
-        Ok(bound)
+        Ok(())
+    }
+
+    pub(super) fn lan_device_hash(&self, identity: &Identity) -> Result<String> {
+        Ok(self.0.query_row(
+            "SELECT device_secret_hash FROM accounts WHERE normalized_code=?",
+            [&identity.code],
+            |row| row.get::<_, String>(0),
+        )?)
+    }
+
+    pub(super) fn bind_lan_device_if_empty(&self, identity: &Identity, hash: &str) -> Result<bool> {
+        let changed = self.0.execute(
+            "UPDATE accounts SET device_secret_hash=? WHERE normalized_code=? AND device_secret_hash=''",
+            params![hash, identity.code],
+        )?;
+        Ok(changed == 1)
     }
 
     /// 房主踢人或重置设备后，下一次登录重新绑定当前设备。
@@ -535,7 +532,38 @@ pub(super) fn password_hash(password: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+
+    #[test]
+    fn concurrent_empty_hash_binding_allows_one_device() {
+        let root = std::env::temp_dir().join(format!("lan-bind-race-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Store::open_lan(&root.join("chat.db")).unwrap();
+        let identity = Identity {
+            username: "Alice".into(),
+            display_code: "ALICE1".into(),
+            code: "alice".into(),
+        };
+        store.ensure_lan_account(&identity).unwrap();
+        let db_path = root.join("chat.db");
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let handles = ["device-a", "device-b"].map(|secret| {
+            let db_path = db_path.clone();
+            let identity = identity.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let store = Store::open_lan(&db_path).unwrap();
+                let hash = password_hash(secret).unwrap();
+                barrier.wait();
+                store.bind_lan_device_if_empty(&identity, &hash).unwrap()
+            })
+        });
+        let results = handles.map(|handle| handle.join().unwrap());
+        assert_eq!(results.iter().filter(|bound| **bound).count(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn lan_room_migration_and_writes_are_atomic() -> Result<()> {
@@ -604,17 +632,30 @@ mod tests {
         let store = Store::open_lan(&path)?;
         let (identity, hash) = store.lan_identity("Alice", "A001")?;
         assert!(hash.is_empty(), "a new account starts unbound");
-        assert!(store.approve_identity(&identity, "device-secret-one")?);
-        let (_, hash) = store.lan_identity("Alice", "A001")?;
-        verify_device_binding(&hash, "device-secret-one")?;
-        assert!(verify_device_binding(&hash, "device-secret-two").is_err());
-        assert!(verify_device_binding(&hash, "").is_err());
+        store.ensure_lan_account(&identity)?;
+        let first_hash = password_hash("device-secret-one")?;
+        assert!(store.bind_lan_device_if_empty(&identity, &first_hash)?);
+        assert!(bcrypt::verify(
+            "device-secret-one",
+            &store.lan_device_hash(&identity)?
+        )?);
+        let competing_hash = password_hash("device-secret-two")?;
+        assert!(!store.bind_lan_device_if_empty(&identity, &competing_hash)?);
+        assert!(bcrypt::verify(
+            "device-secret-one",
+            &store.lan_device_hash(&identity)?
+        )?);
         store.reset_lan_device(&identity.code)?;
-        let (_, hash) = store.lan_identity("Alice", "A001")?;
-        assert!(hash.is_empty(), "a kick clears the binding");
-        store.approve_identity(&identity, "device-secret-two")?;
-        let (_, hash) = store.lan_identity("Alice", "A001")?;
-        verify_device_binding(&hash, "device-secret-two")?;
+        assert!(
+            store.lan_device_hash(&identity)?.is_empty(),
+            "a kick clears the binding"
+        );
+        let second_hash = password_hash("device-secret-two")?;
+        assert!(store.bind_lan_device_if_empty(&identity, &second_hash)?);
+        assert!(bcrypt::verify(
+            "device-secret-two",
+            &store.lan_device_hash(&identity)?
+        )?);
         drop(store);
         std::fs::remove_file(path)?;
         Ok(())
