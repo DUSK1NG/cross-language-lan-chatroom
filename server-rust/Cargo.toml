@@ -13,6 +13,7 @@ base64 = "0.22"
 bcrypt = "0.17"
 chrono = { version = "0.4", default-features = false, features = ["now"] }
 clap = { version = "4.5", features = ["derive"] }
+fs2 = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 if-addrs = "=0.14.0"
 lan-chat-protocol.workspace = true

@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     online_image_ref TEXT,
     online_image_size INTEGER,
     online_image_sha256 TEXT,
+    online_file_size INTEGER NOT NULL DEFAULT 0,
+    storage_counted INTEGER NOT NULL DEFAULT 0,
     revision INTEGER NOT NULL DEFAULT 0,
     UNIQUE(sender_code, conversation_key, message_id)
 );
@@ -103,6 +105,80 @@ CREATE TABLE IF NOT EXISTS online_group_members (
 );
 CREATE INDEX IF NOT EXISTS idx_online_group_members_user ON online_group_members(user_code);
 ";
+
+const STORAGE_USAGE_TABLE: &str = "
+CREATE TABLE storage_usage (
+    scope TEXT NOT NULL,
+    sender_code TEXT NOT NULL DEFAULT '',
+    used_bytes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope, sender_code)
+);";
+
+const STORAGE_TRIGGERS: &[(&str, &str)] = &[
+    (
+        "chat_messages_storage_insert",
+        "CREATE TRIGGER chat_messages_storage_insert
+         AFTER INSERT ON chat_messages BEGIN
+             INSERT INTO storage_usage(scope, sender_code, used_bytes)
+             VALUES ('global', '', length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0))
+             ON CONFLICT(scope, sender_code) DO UPDATE SET used_bytes = used_bytes + excluded.used_bytes;
+             INSERT INTO storage_usage(scope, sender_code, used_bytes)
+             SELECT 'group_sender', NEW.sender_code, length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)
+             WHERE NEW.kind='online_group'
+             ON CONFLICT(scope, sender_code) DO UPDATE SET used_bytes = used_bytes + excluded.used_bytes;
+             UPDATE chat_messages SET storage_counted=1 WHERE id=NEW.id;
+         END;",
+    ),
+    (
+        "chat_messages_storage_update",
+        "CREATE TRIGGER chat_messages_storage_update
+         AFTER UPDATE OF content, online_image_size, online_file_size ON chat_messages
+         WHEN OLD.storage_counted=1 BEGIN
+             UPDATE storage_usage
+             SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0))
+                 + (length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)))
+             WHERE scope='global' AND sender_code='';
+             UPDATE storage_usage
+             SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0))
+                 + (length(NEW.content) + COALESCE(NEW.online_image_size,0) + COALESCE(NEW.online_file_size,0)))
+             WHERE scope='group_sender' AND sender_code=OLD.sender_code AND OLD.kind='online_group';
+         END;",
+    ),
+    (
+        "chat_messages_storage_delete",
+        "CREATE TRIGGER chat_messages_storage_delete
+         AFTER DELETE ON chat_messages WHEN OLD.storage_counted=1 BEGIN
+             UPDATE storage_usage
+             SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0)))
+             WHERE scope='global' AND sender_code='';
+             UPDATE storage_usage
+             SET used_bytes = MAX(0, used_bytes - (length(OLD.content) + COALESCE(OLD.online_image_size,0) + COALESCE(OLD.online_file_size,0)))
+             WHERE scope='group_sender' AND sender_code=OLD.sender_code AND OLD.kind='online_group';
+         END;",
+    ),
+];
+
+fn ensure_storage_schema(tx: &Connection) -> Result<()> {
+    let table_exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='storage_usage')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !table_exists {
+        tx.execute_batch(STORAGE_USAGE_TABLE)?;
+    }
+    for (name, sql) in STORAGE_TRIGGERS {
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
+            [name],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            tx.execute_batch(sql)?;
+        }
+    }
+    Ok(())
+}
 
 const DROP_CHAT_FTS: &str = "
 DROP TRIGGER IF EXISTS chat_messages_fts_insert;
@@ -304,6 +380,14 @@ impl Store {
                 "online_image_sha256",
                 "ALTER TABLE chat_messages ADD COLUMN online_image_sha256 TEXT",
             ),
+            (
+                "online_file_size",
+                "ALTER TABLE chat_messages ADD COLUMN online_file_size INTEGER NOT NULL DEFAULT 0",
+            ),
+            (
+                "storage_counted",
+                "ALTER TABLE chat_messages ADD COLUMN storage_counted INTEGER NOT NULL DEFAULT 0",
+            ),
         ] {
             if !columns.iter().any(|name| name == column) {
                 tx.execute(migration, [])?;
@@ -355,6 +439,7 @@ impl Store {
                  DROP TABLE chat_messages_legacy;",
             )?;
         }
+        ensure_storage_schema(&tx)?;
         migrate_search(&tx)?;
         if mode == "online" {
             crate::online::migrate_schema(&tx)?;

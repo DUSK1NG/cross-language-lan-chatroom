@@ -60,6 +60,9 @@ pub(super) struct OnlineMessage<'a> {
     pub(super) author: &'a str,
     pub(super) target: &'a str,
     pub(super) image: Option<&'a PublishedImage>,
+    // Task 7 uses this declared payload size for transactional budget checks.
+    #[allow(dead_code)]
+    pub(super) file_size: i64,
     pub(super) undelivered: Quota,
 }
 
@@ -919,9 +922,9 @@ impl Store {
         let created_at = now();
         let content = format!("[文件] {name}");
         let chat_id = tx.query_row(
-            "INSERT INTO chat_messages(message_id,kind,conversation_key,room,sender_username,sender_code,target_code,content,created_at)
-             VALUES (?,?,?,?,?,?,?,?,?) RETURNING id",
-            params![id, kind, key, room, identity.username, identity.code, recipient, content, created_at],
+            "INSERT INTO chat_messages(message_id,kind,conversation_key,room,sender_username,sender_code,target_code,content,created_at,online_file_size)
+             VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id",
+            params![id, kind, key, room, identity.username, identity.code, recipient, content, created_at, size],
             |row| row.get::<_, i64>(0),
         )?;
         tx.execute(
@@ -1163,6 +1166,9 @@ mod tests {
                 undelivered_ttl_days: 14,
                 delivered_ttl_days: 0,
                 image_budget_bytes: 0,
+                storage_budget_bytes: i64::MAX as u64,
+                group_sender_budget_bytes: i64::MAX as u64,
+                min_disk_free_bytes: 0,
                 max_sessions_per_account: 8,
             },
         )?;
@@ -1385,6 +1391,9 @@ mod tests {
                 undelivered_ttl_days: 14,
                 delivered_ttl_days: 30,
                 image_budget_bytes: 0,
+                storage_budget_bytes: i64::MAX as u64,
+                group_sender_budget_bytes: i64::MAX as u64,
+                min_disk_free_bytes: 0,
                 max_sessions_per_account: 8,
             },
         )?;

@@ -1,6 +1,9 @@
 pub(crate) mod auth;
 mod files;
 mod social;
+// Task 7 connects the budget and calibration entry points to command/maintenance paths.
+#[allow(dead_code)]
+pub(crate) mod storage;
 mod transfer;
 
 pub use auth::{AuthConfig, AuthControl};
@@ -47,6 +50,8 @@ fn hide_group_attachment(message: &mut Message) {
     message.logical_size = 0;
 }
 
+// The storage budget fields are consumed by the Task 7 integration.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct OnlineLimits {
     pub undelivered_per_target: usize,
@@ -54,6 +59,9 @@ pub struct OnlineLimits {
     pub undelivered_ttl_days: u32,
     pub delivered_ttl_days: u32,
     pub image_budget_bytes: usize,
+    pub storage_budget_bytes: u64,
+    pub group_sender_budget_bytes: u64,
+    pub min_disk_free_bytes: u64,
     pub max_sessions_per_account: usize,
 }
 
@@ -74,6 +82,9 @@ impl Default for OnlineLimits {
             undelivered_ttl_days: 14,
             delivered_ttl_days: 30,
             image_budget_bytes: 2 * 1024 * 1024 * 1024,
+            storage_budget_bytes: 8 * 1024 * 1024 * 1024,
+            group_sender_budget_bytes: 1024 * 1024 * 1024,
+            min_disk_free_bytes: 2 * 1024 * 1024 * 1024,
             max_sessions_per_account: 8,
         }
     }
@@ -340,6 +351,7 @@ impl Online {
             author: &identity.code,
             target: &target,
             image,
+            file_size: 0,
             undelivered: self.limits.undelivered_quota(),
         })? {
             transfer::InsertOutcome::Inserted => {

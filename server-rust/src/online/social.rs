@@ -231,6 +231,7 @@ impl Online {
                 author: &identity.code,
                 target: "",
                 image,
+                file_size: 0,
                 undelivered: super::transfer::Quota { limit: 0, bytes: 0 },
             })? {
             super::transfer::InsertOutcome::Inserted => {

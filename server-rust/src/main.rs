@@ -104,6 +104,12 @@ struct Args {
     delivered_ttl_days: u32,
     #[arg(long, default_value_t = 2 * 1024 * 1024 * 1024)]
     image_budget_bytes: usize,
+    #[arg(long, default_value_t = 8 * 1024 * 1024 * 1024)]
+    storage_budget_bytes: u64,
+    #[arg(long, default_value_t = 1024 * 1024 * 1024)]
+    group_sender_budget_bytes: u64,
+    #[arg(long, default_value_t = 2 * 1024 * 1024 * 1024)]
+    min_disk_free_bytes: u64,
     #[arg(long, default_value_t = 128)]
     max_preauth: usize,
     #[arg(long, default_value_t = 8)]
@@ -311,6 +317,9 @@ async fn main() -> Result<()> {
         undelivered_ttl_days: args.undelivered_ttl_days,
         delivered_ttl_days: args.delivered_ttl_days,
         image_budget_bytes: args.image_budget_bytes,
+        storage_budget_bytes: args.storage_budget_bytes,
+        group_sender_budget_bytes: args.group_sender_budget_bytes,
+        min_disk_free_bytes: args.min_disk_free_bytes,
         max_sessions_per_account: args.max_sessions_per_account,
     };
     let auth = Arc::new(AuthControl::new(AuthConfig {
