@@ -7,7 +7,7 @@ use rcgen::{
 };
 use rusqlite::{Connection, params};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
     process::{Child, Command},
     time::timeout,
@@ -42,6 +42,13 @@ fn create_localhost_cert(cert_path: &Path, key_path: &Path) -> Result<()> {
 }
 
 async fn start_lan_server(root: &Path) -> Result<(Child, SocketAddr, TlsConnector)> {
+    start_lan_server_with_args(root, &[]).await
+}
+
+async fn start_lan_server_with_args(
+    root: &Path,
+    extra_args: &[&str],
+) -> Result<(Child, SocketAddr, TlsConnector)> {
     fs::create_dir_all(root)?;
     let cert = root.join("server.crt");
     let key = root.join("server.key");
@@ -57,6 +64,7 @@ async fn start_lan_server(root: &Path) -> Result<(Child, SocketAddr, TlsConnecto
         .arg(&key)
         .arg("--admin-code")
         .arg(OWNER_CODE)
+        .args(extra_args)
         .stdin(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
@@ -114,6 +122,29 @@ async fn connect(
     )
     .await?;
     Ok(peer)
+}
+
+async fn expect_disconnected<R>(stream: &mut R, wait: Duration) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut byte = [0];
+    match timeout(wait, stream.read(&mut byte)).await {
+        Ok(Ok(0)) => Ok(()),
+        Ok(Err(error))
+            if matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::UnexpectedEof
+            ) =>
+        {
+            Ok(())
+        }
+        Ok(Ok(_)) => anyhow::bail!("expected preauth connection to close"),
+        Ok(Err(error)) => Err(error.into()),
+        Err(_) => anyhow::bail!("preauth connection was not closed promptly"),
+    }
 }
 
 async fn next_message(peer: &mut Peer) -> Result<Message> {
@@ -208,6 +239,193 @@ async fn concurrent_approvals_bind_only_one_device() -> Result<()> {
 
     drop((owner, device_a, device_b, db));
     child.kill().await?;
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn lan_preauth_exhaustion_preserves_existing_session_and_approval() -> Result<()> {
+    let root = std::env::temp_dir().join(format!("lan-p0-preauth-{}", Uuid::new_v4()));
+    let (mut child, address, connector) = start_lan_server_with_args(
+        &root,
+        &[
+            "--lan-max-preauth",
+            "2",
+            "--lan-max-preauth-per-ip",
+            "2",
+            "--lan-tls-handshake-timeout-secs",
+            "30",
+            "--max-clients",
+            "4",
+        ],
+    )
+    .await?;
+    let mut owner = connect(&connector, address, "Owner", OWNER_CODE, "").await?;
+    next_kind(&mut owner, "login_ok").await?;
+
+    let stalled_one = TcpStream::connect(address).await?;
+    let stalled_two = TcpStream::connect(address).await?;
+    let mut rejected = TcpStream::connect(address).await?;
+    expect_disconnected(&mut rejected, Duration::from_secs(1)).await?;
+
+    write_message(
+        &mut owner,
+        &Message {
+            kind: "users_request".into(),
+            ..Message::default()
+        },
+    )
+    .await?;
+    let users = next_kind(&mut owner, "users_response").await?;
+    assert!(users.users.iter().any(|user| user == "Owner#OWNER1@lobby"));
+
+    drop((stalled_one, stalled_two));
+    let mut restored = timeout(WAIT, async {
+        loop {
+            match connect(&connector, address, "Bob", "BOB1", "device-bob").await {
+                Ok(peer) => return Ok::<_, anyhow::Error>(peer),
+                Err(_) => tokio::time::sleep(Duration::from_millis(25)).await,
+            }
+        }
+    })
+    .await??;
+    let pending = next_kind(&mut restored, "login_pending").await?;
+    wait_for_approval(&mut owner, &pending.message_id).await?;
+    approve(&mut owner, &pending.message_id).await?;
+    next_kind(&mut restored, "login_ok").await?;
+
+    drop((owner, restored));
+    child.kill().await?;
+    child.wait().await?;
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn lan_formal_slot_is_acquired_after_approval_and_device_binding() -> Result<()> {
+    let root = std::env::temp_dir().join(format!("lan-p0-session-slot-{}", Uuid::new_v4()));
+    let (mut child, address, connector) = start_lan_server_with_args(
+        &root,
+        &[
+            "--lan-max-preauth",
+            "2",
+            "--lan-max-preauth-per-ip",
+            "2",
+            "--max-clients",
+            "1",
+        ],
+    )
+    .await?;
+    let mut owner = connect(&connector, address, "Owner", OWNER_CODE, "").await?;
+    next_kind(&mut owner, "login_ok").await?;
+
+    let mut guest = connect(&connector, address, "Alice", GUEST_CODE, "device-a").await?;
+    let pending = next_kind(&mut guest, "login_pending").await?;
+    wait_for_approval(&mut owner, &pending.message_id).await?;
+    approve(&mut owner, &pending.message_id).await?;
+    let full = next_message(&mut guest).await?;
+    assert_eq!(full.kind, "login_error");
+    assert_eq!(full.content, "服务器当前在线人数已满，请稍后再试");
+
+    let db = Connection::open(root.join("chat.db"))?;
+    db.busy_timeout(WAIT)?;
+    let device_hash: String = db.query_row(
+        "SELECT device_secret_hash FROM accounts WHERE normalized_code=?",
+        ["alice1"],
+        |row| row.get(0),
+    )?;
+    assert!(!device_hash.is_empty());
+
+    write_message(
+        &mut owner,
+        &Message {
+            kind: "users_request".into(),
+            ..Message::default()
+        },
+    )
+    .await?;
+    let users = next_kind(&mut owner, "users_response").await?;
+    assert!(users.users.iter().any(|user| user == "Owner#OWNER1@lobby"));
+
+    drop((owner, guest, db));
+    child.kill().await?;
+    child.wait().await?;
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn lan_preauth_timeouts_release_permits() -> Result<()> {
+    let root = std::env::temp_dir().join(format!("lan-p0-preauth-timeout-{}", Uuid::new_v4()));
+    let (mut child, address, connector) = start_lan_server_with_args(
+        &root,
+        &[
+            "--lan-max-preauth",
+            "1",
+            "--lan-max-preauth-per-ip",
+            "1",
+            "--lan-tls-handshake-timeout-secs",
+            "1",
+            "--lan-login-frame-timeout-secs",
+            "1",
+            "--max-clients",
+            "1",
+        ],
+    )
+    .await?;
+
+    let mut handshake_stall = TcpStream::connect(address).await?;
+    expect_disconnected(&mut handshake_stall, Duration::from_secs(3)).await?;
+
+    let socket = TcpStream::connect(address).await?;
+    let mut login_stall = connector
+        .connect(ServerName::try_from("localhost")?, socket)
+        .await?;
+    expect_disconnected(&mut login_stall, Duration::from_secs(3)).await?;
+
+    let mut owner = connect(&connector, address, "Owner", OWNER_CODE, "").await?;
+    next_kind(&mut owner, "login_ok").await?;
+
+    drop(owner);
+    child.kill().await?;
+    child.wait().await?;
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn lan_rejects_invalid_admission_configuration() -> Result<()> {
+    let root = std::env::temp_dir().join(format!("lan-p0-invalid-admission-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root)?;
+    let cert = root.join("server.crt");
+    let key = root.join("server.key");
+    create_localhost_cert(&cert, &key)?;
+
+    for flag in [
+        "--lan-max-preauth",
+        "--lan-max-preauth-per-ip",
+        "--lan-tls-handshake-timeout-secs",
+        "--lan-login-frame-timeout-secs",
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lan-chat-server"));
+        command
+            .args(["--mode", "lan", "--listen", "127.0.0.1:0"])
+            .arg("--db")
+            .arg(root.join("chat.db"))
+            .arg("--cert")
+            .arg(&cert)
+            .arg("--key")
+            .arg(&key)
+            .arg(flag)
+            .arg("0")
+            .kill_on_drop(true);
+        let output = timeout(WAIT, command.output()).await??;
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("unexpected argument"), "{stderr}");
+        assert!(stderr.contains("须"), "{stderr}");
+    }
+
     fs::remove_dir_all(root)?;
     Ok(())
 }

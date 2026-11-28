@@ -1,3 +1,4 @@
+mod admission;
 mod lan;
 mod online;
 mod push;
@@ -38,7 +39,6 @@ use tokio::{
 use tokio_rustls::{TlsAcceptor, rustls::ServerConfig};
 use uuid::Uuid;
 
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const ONLINE_BACKLOG_LIMIT: usize = 100;
@@ -202,6 +202,7 @@ async fn main() -> Result<()> {
         "max-clients 须在 1–{} 之间",
         Semaphore::MAX_PERMITS
     );
+    args.lan.validate()?;
     ensure!(
         args.undelivered_ttl_days <= 36500,
         "undelivered-ttl-days 须在 0–36500 之间"

@@ -382,8 +382,13 @@ pub(crate) fn test_hub(root: &std::path::Path) -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::admission::{AdmissionControl, AdmissionLimits};
     use crate::lan::Server;
-    use std::sync::{Arc, Mutex};
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+    use tokio::sync::Semaphore;
 
     #[test]
     fn poisoned_hub_lock_recovers() {
@@ -394,6 +399,14 @@ mod tests {
             hub: Mutex::new(hub),
             admin_code: String::new(),
             host_token: None,
+            admission: Arc::new(AdmissionControl::new(AdmissionLimits {
+                global: 1,
+                per_source: 1,
+                ipv6_prefix: 64,
+            })),
+            sessions: Arc::new(Semaphore::new(1)),
+            tls_handshake_timeout: Duration::from_secs(5),
+            login_frame_timeout: Duration::from_secs(8),
         });
 
         let poisoned = std::panic::catch_unwind(|| {

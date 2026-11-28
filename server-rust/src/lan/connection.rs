@@ -2,7 +2,9 @@ use super::{
     APPROVAL_TIMEOUT, LOBBY, Peer, Server, store::password_hash, store::verify_device_binding,
 };
 use crate::{
-    Budget, LOGIN_TIMEOUT, pong, read_timeout, reason, send,
+    Budget,
+    admission::AdmissionPermit,
+    pong, read_timeout, reason, send,
     store::{Identity, Rejected},
     wants_heartbeat,
 };
@@ -78,17 +80,17 @@ async fn bind_approved_device(
 pub(super) async fn serve(
     socket: TcpStream,
     address: SocketAddr,
+    preauth: AdmissionPermit,
     tls: TlsAcceptor,
     server: Arc<Server>,
 ) -> Result<()> {
     socket.set_nodelay(true)?;
-    let (mut stream, request) = timeout(LOGIN_TIMEOUT, async {
-        let mut stream = tls.accept(socket).await?;
-        let request = read_message(&mut stream).await?;
-        Ok::<_, io::Error>((stream, request))
-    })
-    .await
-    .context("TLS 握手或认证消息超时")??;
+    let mut stream = timeout(server.tls_handshake_timeout, tls.accept(socket))
+        .await
+        .context("TLS 握手超时")??;
+    let request = timeout(server.login_frame_timeout, read_message(&mut stream))
+        .await
+        .context("认证消息超时")??;
 
     let init = server.clone();
     let auth = spawn_blocking(move || {
@@ -237,6 +239,19 @@ pub(super) async fn serve(
             .await;
         }
     };
+    let Ok(_session_slot) = server.sessions.clone().try_acquire_owned() else {
+        return send(
+            &mut stream,
+            &Message {
+                kind: "login_error".into(),
+                content: "服务器当前在线人数已满，请稍后再试".into(),
+                ..Message::default()
+            },
+        )
+        .await;
+    };
+    drop(preauth);
+
     let id = Uuid::new_v4();
     let (tx, mut outgoing) = mpsc::channel(256);
     let (close, closed) = oneshot::channel();

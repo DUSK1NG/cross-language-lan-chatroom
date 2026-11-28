@@ -27,7 +27,9 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
-    Args, accept_client, load_tls,
+    Args, accept_client,
+    admission::{AdmissionControl, AdmissionLimits},
+    load_tls,
     store::{Identity, Rejected, Store, user_code},
 };
 
@@ -48,9 +50,34 @@ pub(crate) struct Options {
     admin_code: String,
     #[arg(long)]
     local_host_credentials_stdin: bool,
+    #[arg(long, default_value_t = 128)]
+    lan_max_preauth: usize,
+    #[arg(long, default_value_t = 8)]
+    lan_max_preauth_per_ip: usize,
+    #[arg(long, default_value_t = 5)]
+    lan_tls_handshake_timeout_secs: u64,
+    #[arg(long, default_value_t = 8)]
+    lan_login_frame_timeout_secs: u64,
 }
 
 impl Options {
+    pub(crate) fn validate(&self) -> Result<()> {
+        ensure!(
+            (1..=Semaphore::MAX_PERMITS).contains(&self.lan_max_preauth),
+            "lan-max-preauth 须在 1–{} 之间",
+            Semaphore::MAX_PERMITS
+        );
+        ensure!(
+            self.lan_max_preauth_per_ip >= 1,
+            "lan-max-preauth-per-ip 须 >= 1"
+        );
+        ensure!(
+            self.lan_tls_handshake_timeout_secs >= 1 && self.lan_login_frame_timeout_secs >= 1,
+            "LAN TLS 与登录帧超时须 >= 1 秒"
+        );
+        Ok(())
+    }
+
     pub(crate) fn enabled(&self) -> bool {
         self.auto_cert
             || self.initialize_local_host
@@ -111,6 +138,10 @@ struct Server {
     hub: Mutex<Hub>,
     admin_code: String,
     host_token: Option<String>,
+    admission: Arc<AdmissionControl>,
+    sessions: Arc<Semaphore>,
+    tls_handshake_timeout: Duration,
+    login_frame_timeout: Duration,
 }
 
 impl Server {
@@ -183,6 +214,14 @@ pub(crate) async fn run(args: Args) -> Result<()> {
     let server = Arc::new(Server {
         admin_code,
         host_token,
+        admission: Arc::new(AdmissionControl::new(AdmissionLimits {
+            global: args.lan.lan_max_preauth,
+            per_source: args.lan.lan_max_preauth_per_ip,
+            ipv6_prefix: args.ipv6_prefix,
+        })),
+        sessions: Arc::new(Semaphore::new(args.max_clients)),
+        tls_handshake_timeout: Duration::from_secs(args.lan.lan_tls_handshake_timeout_secs),
+        login_frame_timeout: Duration::from_secs(args.lan.lan_login_frame_timeout_secs),
         hub: Mutex::new(Hub {
             store,
             rooms,
@@ -228,24 +267,20 @@ pub(crate) async fn run(args: Args) -> Result<()> {
             }
         });
     }
-    let slots = Arc::new(Semaphore::new(args.max_clients));
     eprintln!("listening on {local}");
     loop {
         let Some((socket, address)) = accept_client(&listener).await? else {
             continue;
         };
-        let Ok(slot) = slots.clone().try_acquire_owned() else {
-            eprintln!(
-                "connection rejected: maximum of {} clients reached",
-                args.max_clients
-            );
+        let Some(preauth) = server.admission.try_acquire(address.ip()) else {
+            eprintln!("preauth rejected: global or per-source preauth limit reached");
+            drop(socket);
             continue;
         };
         let tls = tls.clone();
         let server = server.clone();
         tokio::spawn(async move {
-            let _slot = slot;
-            if let Err(error) = connection::serve(socket, address, tls, server).await {
+            if let Err(error) = connection::serve(socket, address, preauth, tls, server).await {
                 eprintln!("connection {address}: {error:#}");
             }
         });

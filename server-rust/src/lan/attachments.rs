@@ -690,6 +690,7 @@ pub(super) fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::admission::{AdmissionControl, AdmissionLimits};
     use crate::lan::{LOBBY, Peer, Room};
     use crate::store::Identity;
     use std::{
@@ -697,7 +698,7 @@ mod tests {
         sync::Mutex,
         time::{Duration, Instant},
     };
-    use tokio::sync::oneshot;
+    use tokio::sync::{Semaphore, oneshot};
 
     struct Fixture {
         server: Arc<Server>,
@@ -754,6 +755,14 @@ mod tests {
             let server = Arc::new(Server {
                 admin_code: "owner".into(),
                 host_token: None,
+                admission: Arc::new(AdmissionControl::new(AdmissionLimits {
+                    global: 1,
+                    per_source: 1,
+                    ipv6_prefix: 64,
+                })),
+                sessions: Arc::new(Semaphore::new(1)),
+                tls_handshake_timeout: Duration::from_secs(5),
+                login_frame_timeout: Duration::from_secs(8),
                 hub: Mutex::new(Hub {
                     store,
                     attachments,

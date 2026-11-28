@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::{IpAddr, Ipv6Addr},
+    net::IpAddr,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -12,7 +12,10 @@ use tokio::{
     time::timeout,
 };
 
-use crate::store::{Rejected, user_code};
+use crate::{
+    admission::normalize_source,
+    store::{Rejected, user_code},
+};
 
 pub(crate) const INVALID_CREDENTIALS_MSG: &str = "用户名或密码不正确";
 
@@ -123,27 +126,6 @@ pub(crate) fn is_invalid_credentials_error(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<Rejected>()
         .is_some_and(|rejected| rejected.0 == INVALID_CREDENTIALS_MSG)
-}
-
-/// 将 IPv4-mapped IPv6 归一为 IPv4，并按指定前缀聚合 IPv6 地址（默认 /64）。
-pub fn normalize_source(ip: IpAddr, ipv6_prefix: u8) -> IpAddr {
-    match ip {
-        IpAddr::V4(v4) => IpAddr::V4(v4),
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return IpAddr::V4(v4);
-            }
-            let bits = u128::from(v6);
-            let masked = if ipv6_prefix == 0 {
-                0
-            } else if ipv6_prefix >= 128 {
-                bits
-            } else {
-                bits & (!0u128 << (128 - u32::from(ipv6_prefix)))
-            };
-            IpAddr::V6(Ipv6Addr::from(masked))
-        }
-    }
 }
 
 pub struct PreAuthPermit {
